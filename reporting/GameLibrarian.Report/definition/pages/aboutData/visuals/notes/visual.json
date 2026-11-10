@@ -1,0 +1,271 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "name": "notes",
+  "position": {
+    "x": 16,
+    "y": 84,
+    "z": 2000,
+    "height": 624,
+    "width": 760,
+    "tabOrder": 2000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "What this report is",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "An analytical companion to the Game Librarian website. It summarizes the curated catalog (the games listed in curated/games.csv) and its verified award results. It is not a ranking of all Steam games.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Player reception",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Review counts are Steam's review summary for each game: Steam purchasers, all languages. Review-weighted positive rate pools every review, so games with many reviews dominate. Average game positive rate gives every game the same weight.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Four-year ranking",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Only games released in the four years up to the export day are ranked (Ranking window, at the right). The window moves forward each time export-report runs. Verified AAA games come first, then verified AA games, then Indie and Unclassified games together; within each tier, more positive Steam reviews rank higher. So an AAA game ranks above an AA game, and an AA game above an Indie or Unclassified game, even with fewer positive reviews. Ties go to the title A–Z, then the Steam app ID. Games in the window without a usable positive review count are Unranked; older games, unreleased games and games without an exact release date have no rank.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "This is a discovery order, not a judgment of quality: counting positive reviews favors popular games and games released earlier in the window, which have had more time to collect reviews. Awards are not part of the rank. The website calculates the same ranking, with the window ending today.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Awards and labels",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Only verified rows are included: The Game Awards' Game of the Year and independent-game category, 2014–2025. AAA / AA / Indie labels need game-specific evidence; Unclassified means no verified label. Both depend on the project's hand-curated data, so the tiers and award coverage are only as complete as that data.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Refreshing",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Run python -m game_librarian sync, then python -m game_librarian export-report, then select Refresh in Power BI Desktop. A copy published to the Power BI service changes only when it is refreshed or republished there; running the sync does not update it.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Not included",
+                    "textStyle": {
+                      "fontSize": "12pt",
+                      "color": "#FFFFFF",
+                      "fontWeight": "bold"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Prices, player counts and trends over time: the project stores only the latest values, so no history exists to chart.",
+                    "textStyle": {
+                      "fontSize": "10pt",
+                      "color": "#C3C2B7"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

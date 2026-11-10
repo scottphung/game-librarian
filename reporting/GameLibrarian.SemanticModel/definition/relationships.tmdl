@@ -1,0 +1,14 @@
+relationship GameTags_Games
+	crossFilteringBehavior: bothDirections
+	fromColumn: GameTags.AppID
+	toColumn: Games.AppID
+
+relationship GameTags_Tags
+	fromColumn: GameTags.Tag
+	toColumn: Tags.Tag
+
+relationship Awards_Games
+	crossFilteringBehavior: bothDirections
+	fromColumn: Awards.'Catalog AppID'
+	toColumn: Games.AppID
+

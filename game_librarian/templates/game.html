@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "_details.html" import game_details %}
+{% block title %}{% if game %}{{ game.name }} | {% endif %}Game Librarian{% endblock %}
+
+{% block body %}
+<main class="page game-page" id="main">
+  <p><a class="text-link" href="{{ back_url }}">← Back to results</a></p>
+  {% if game %}
+    <article class="game-sheet">{{ game_details(game, "game-heading") }}</article>
+  {% else %}
+    <div class="notice">
+      <h1>Game not found</h1>
+      <p>This game is not in the catalog. It may have been removed from <code>curated/games.csv</code>, or Steam data has not been synced for it yet.</p>
+    </div>
+  {% endif %}
+</main>
+{% endblock %}

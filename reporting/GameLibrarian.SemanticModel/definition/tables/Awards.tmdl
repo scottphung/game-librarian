@@ -1,0 +1,161 @@
+/// One row per verified award result (winner or nominee) from the curated awards file, including results that match no Steam app, so coverage can be measured.
+table Awards
+
+	/// Verified award results in the current selection.
+	measure 'Award entries' = COUNTROWS ( Awards )
+		formatString: #,0
+		displayFolder: Awards
+
+	/// Award results that are wins.
+	measure 'Winning entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Result] = "Winner" ) )
+		formatString: #,0
+		displayFolder: Awards
+
+	/// Award results that are nominations which did not win.
+	measure 'Nominee entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Result] = "Nominee" ) )
+		formatString: #,0
+		displayFolder: Awards
+
+	/// Award results that match a game in the curated catalog (including awards that went to an original release of the edition Steam sells).
+	measure 'Entries in catalog' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "In catalog" ) )
+		formatString: #,0
+		displayFolder: Coverage
+
+	/// Award results mapped to a Steam app that is not in the curated catalog.
+	measure 'Entries on Steam outside catalog' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "On Steam, not in catalog" ) )
+		formatString: #,0
+		displayFolder: Coverage
+
+	/// Award results with no Steam app: the game is not on Steam, or the curator deliberately left it unmapped (see Mapping Note).
+	measure 'Entries not mapped to Steam' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "Not mapped to Steam" ) )
+		formatString: #,0
+		displayFolder: Coverage
+
+	/// Award results that went to an original release while Steam sells a remaster, bundle or expanded edition.
+	measure 'Original-release entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Steam Mapping] = "edition" ) )
+		formatString: #,0
+		displayFolder: Coverage
+
+	/// Distinct catalog games with at least one award result in the selection.
+	measure 'Awarded catalog games' = DISTINCTCOUNTNOBLANK ( Awards[Catalog AppID] )
+		formatString: #,0
+		displayFolder: Coverage
+
+	/// Share of the selected award results that match a catalog game.
+	measure 'Catalog coverage of entries' = DIVIDE ( [Entries in catalog], [Award entries] )
+		formatString: 0%
+		displayFolder: Coverage
+
+	column 'Award ID'
+		dataType: int64
+		isHidden
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: award_id
+
+	column Organization
+		dataType: string
+		summarizeBy: none
+		sourceColumn: organization
+
+	/// The ceremony year.
+	column Year
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: year
+
+	/// The category name as the cited sources give it (2020-2022 sources call the independent-game category "Best Indie Game").
+	column Category
+		dataType: string
+		summarizeBy: none
+		sourceColumn: category
+
+	/// Winner or Nominee. A nominee that won is listed only as Winner.
+	column Result
+		dataType: string
+		summarizeBy: none
+		sourceColumn: result
+
+	column 'Is Winner'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		summarizeBy: none
+		sourceColumn: is_winner
+
+	/// The game as named by the award, which can differ from the Steam edition.
+	column 'Award Title'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: award_title
+
+	/// The current Steam name of the matching catalog game, if any.
+	column 'Catalog Game'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: catalog_game
+
+	column 'Steam AppID'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: steam_appid
+
+	column 'Catalog AppID'
+		dataType: int64
+		isHidden
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: catalog_appid
+
+	/// same: the Steam app is the awarded game; edition: Steam sells a remaster, bundle or expanded edition; none: no Steam app.
+	column 'Steam Mapping'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: steam_mapping
+
+	column 'Award Applies To'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: award_applies_to
+
+	column 'Catalog Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: catalog_status
+
+	column 'Mapping Note'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: mapping_note
+
+	column 'Source URL'
+		dataType: string
+		dataCategory: WebUrl
+		summarizeBy: none
+		sourceColumn: source_url
+
+	column 'Checked On'
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+		sourceColumn: checked_on
+
+	partition Awards = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents(DataFolder & "awards.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+				    Typed = Table.TransformColumnTypes(Promoted, {
+				        {"award_id", Int64.Type}, {"organization", type text}, {"year", Int64.Type}, {"category", type text},
+				        {"result", type text}, {"is_winner", type logical}, {"award_title", type text}, {"catalog_game", type text},
+				        {"steam_appid", Int64.Type}, {"catalog_appid", Int64.Type}, {"steam_mapping", type text},
+				        {"award_applies_to", type text}, {"catalog_status", type text}, {"mapping_note", type text},
+				        {"source_url", type text}, {"checked_on", type date}
+				    }, "en-US")
+				in
+				    Typed
+
+	annotation PBI_ResultType = Table
+

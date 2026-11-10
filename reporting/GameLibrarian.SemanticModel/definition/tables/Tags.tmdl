@@ -1,0 +1,27 @@
+/// Steam community tags, including genre tags such as RPG or Roguelike. Use Tag in slicers to filter games.
+table Tags
+
+	column Tag
+		dataType: string
+		summarizeBy: none
+		sourceColumn: tag
+
+	/// Catalog games that have this tag (at export time, ignoring report filters).
+	column 'Games With Tag'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: games
+
+	partition Tags = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents(DataFolder & "tags.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+				    Typed = Table.TransformColumnTypes(Promoted, {{"tag", type text}, {"games", Int64.Type}}, "en-US")
+				in
+				    Typed
+
+	annotation PBI_ResultType = Table
+

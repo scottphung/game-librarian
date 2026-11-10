@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated catalog (SQLite). Curated CSV files live in curated/ and ARE committed.
+data/
+
+# Secrets (STEAM_API_KEY belongs in your environment, never in the repository)
+.env

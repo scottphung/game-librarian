@@ -1,0 +1,124 @@
+/// One row describing the loaded export: when it ran, which sync it reflects, and the four-year ranking window.
+table 'Export Info'
+
+	/// When the report data was exported and which Steam sync it comes from.
+	measure 'Data as of' =
+			VAR exported = MAX ( 'Export Info'[Exported At (UTC)] )
+			VAR synced = MAX ( 'Export Info'[Last Sync Started (UTC)] )
+			RETURN
+			    IF (
+			        ISBLANK ( exported ),
+			        "No export loaded yet",
+			        "Data exported " & FORMAT ( exported, "d mmm yyyy hh:nn" ) & " UTC from the Steam sync of "
+			            & IF ( ISBLANK ( synced ), "(none recorded)", FORMAT ( synced, "d mmm yyyy" ) )
+			    )
+		displayFolder: Export
+
+	/// The release dates covered by the four-year ranking in the loaded export: the four years up to the export day. The window moves forward only when export-report runs again.
+	measure 'Ranking window' =
+			VAR firstDay = MAX ( 'Export Info'[Ranking Window Start] )
+			VAR lastDay = MAX ( 'Export Info'[Ranking Window End] )
+			RETURN
+			    IF (
+			        ISBLANK ( firstDay ),
+			        "No export loaded yet",
+			        "Released " & FORMAT ( firstDay, "d mmm yyyy" ) & " – " & FORMAT ( lastDay, "d mmm yyyy" )
+			    )
+		displayFolder: Ranking
+
+	column 'Exported At (UTC)'
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		summarizeBy: none
+		sourceColumn: exported_at_utc
+
+	column 'Last Sync Started (UTC)'
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		summarizeBy: none
+		sourceColumn: last_sync_started_at_utc
+
+	column 'Last Sync Finished (UTC)'
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		summarizeBy: none
+		sourceColumn: last_sync_finished_at_utc
+
+	column 'Last Sync Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: last_sync_status
+
+	column 'Games Exported'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: games
+
+	column 'Games With Reviews Exported'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: games_with_review_data
+
+	/// First release date in the four-year ranking window (included): four years before the export day.
+	column 'Ranking Window Start'
+		dataType: dateTime
+		formatString: d mmm yyyy
+		summarizeBy: none
+		sourceColumn: ranking_window_start
+
+	/// Last release date in the four-year ranking window (included): the export day, on the computer that ran the export.
+	column 'Ranking Window End'
+		dataType: dateTime
+		formatString: d mmm yyyy
+		summarizeBy: none
+		sourceColumn: ranking_window_end
+
+	column 'Games In Window Exported'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: games_in_ranking_window
+
+	column 'Ranked Games Exported'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: ranked_games
+
+	column 'Verified Award Rows'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: verified_award_rows
+
+	column 'Excluded Unverified Award Rows'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: excluded_unverified_award_rows
+
+	column 'Data Note'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: data_note
+
+	partition 'Export Info' = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents(DataFolder & "export_info.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+				    Typed = Table.TransformColumnTypes(Promoted, {
+				        {"exported_at_utc", type datetime}, {"last_sync_started_at_utc", type datetime},
+				        {"last_sync_finished_at_utc", type datetime}, {"last_sync_status", type text}, {"games", Int64.Type},
+				        {"games_with_review_data", Int64.Type}, {"ranking_window_start", type date},
+				        {"ranking_window_end", type date}, {"games_in_ranking_window", Int64.Type}, {"ranked_games", Int64.Type},
+				        {"verified_award_rows", Int64.Type}, {"excluded_unverified_award_rows", Int64.Type}, {"data_note", type text}
+				    }, "en-US")
+				in
+				    Typed
+
+	annotation PBI_ResultType = Table
+

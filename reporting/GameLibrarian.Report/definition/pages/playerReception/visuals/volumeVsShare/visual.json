@@ -1,0 +1,137 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "name": "volumeVsShare",
+  "position": {
+    "x": 264,
+    "y": 116,
+    "z": 10000,
+    "height": 300,
+    "width": 600,
+    "tabOrder": 10000
+  },
+  "visual": {
+    "visualType": "scatterChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Game"
+                }
+              },
+              "queryRef": "Games.Game",
+              "nativeQueryRef": "Game"
+            }
+          ]
+        },
+        "X": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Steam reviews"
+                }
+              },
+              "queryRef": "Games.Steam reviews",
+              "nativeQueryRef": "Total reviews",
+              "displayName": "Total reviews"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Review-weighted positive rate"
+                }
+              },
+              "queryRef": "Games.Review-weighted positive rate",
+              "nativeQueryRef": "Positive share",
+              "displayName": "Positive share"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Best four-year rank"
+                }
+              },
+              "queryRef": "Games.Best four-year rank",
+              "nativeQueryRef": "Four-year rank",
+              "displayName": "Four-year rank"
+            }
+          ]
+        }
+      }
+    },
+    "drillFilterOtherVisuals": true,
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Review volume vs positive share'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "subTitle": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Each dot is a game; most have under 1M reviews. Hover a dot for its name and four-year rank.'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

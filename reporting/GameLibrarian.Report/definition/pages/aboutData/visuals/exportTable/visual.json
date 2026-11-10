@@ -1,0 +1,154 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "name": "exportTable",
+  "position": {
+    "x": 792,
+    "y": 84,
+    "z": 3000,
+    "height": 96,
+    "width": 472,
+    "tabOrder": 3000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Exported At (UTC)"
+                }
+              },
+              "queryRef": "Export Info.Exported At (UTC)",
+              "nativeQueryRef": "Exported (UTC)",
+              "displayName": "Exported (UTC)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Last Sync Started (UTC)"
+                }
+              },
+              "queryRef": "Export Info.Last Sync Started (UTC)",
+              "nativeQueryRef": "Sync started (UTC)",
+              "displayName": "Sync started (UTC)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Last Sync Status"
+                }
+              },
+              "queryRef": "Export Info.Last Sync Status",
+              "nativeQueryRef": "Sync status",
+              "displayName": "Sync status"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Games Exported"
+                }
+              },
+              "queryRef": "Export Info.Games Exported",
+              "nativeQueryRef": "Games",
+              "displayName": "Games"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Ranked Games Exported"
+                }
+              },
+              "queryRef": "Export Info.Ranked Games Exported",
+              "nativeQueryRef": "Ranked",
+              "displayName": "Ranked"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Export Info"
+                    }
+                  },
+                  "Property": "Verified Award Rows"
+                }
+              },
+              "queryRef": "Export Info.Verified Award Rows",
+              "nativeQueryRef": "Award rows",
+              "displayName": "Award rows"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Export Info"
+                  }
+                },
+                "Property": "Exported At (UTC)"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": false
+      }
+    },
+    "drillFilterOtherVisuals": true,
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Loaded export'"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{# One catalog card. Every value is escaped by Jinja autoescaping. The Details link covers the whole
+   card (see .card-details::after), so a click anywhere opens the details; View on Steam sits above it.
+   `view` is "top" or "all": in All games a number is labeled as a four-year rank, because older games have none. #}
+
+{% macro award_text(award) -%}
+  {{ award.organization }} {{ award.year }} · {{ award.category }} · <strong>{{ award.result }}</strong>
+  {%- if award.for_original_release %} · <em>for the original release</em>{% endif %}
+{%- endmacro %}
+
+{% macro game_card(game, view) -%}
+{% set r = game.reviews %}
+<article class="card" id="game-{{ game.appid }}" aria-labelledby="card-title-{{ game.appid }}">
+  <div class="card-art">
+    {% if game.image_url %}
+      <img src="{{ game.image_url }}" alt="" width="600" height="900" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+    {% else %}
+      <span class="art-missing">No image from Steam</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    <p class="card-rank">
+      {% if game.rank and view == "all" %}#{{ game.rank }} <span class="rank-scope">in the four-year ranking</span>
+      {% elif game.rank %}<span class="visually-hidden">Four-year rank </span>#{{ game.rank }}
+      {% elif game.in_window %}<span class="unranked" title="{{ game.rank_note }}">Unranked</span>
+      {% else %}<span class="unranked" title="{{ game.rank_note }}">Not in the four-year ranking</span>{% endif %}
+    </p>
+    <h3 class="card-title" id="card-title-{{ game.appid }}">{{ game.name }}</h3>
+    <ul class="label-list" aria-label="Production label">
+      {% for label in game.labels %}<li class="label">{{ label }}</li>{% else %}<li class="label is-unclassified">Unclassified</li>{% endfor %}
+    </ul>
+    <p class="card-release">
+      {%- if not game.release %}No release date on Steam
+      {%- elif game.upcoming %}Release: {{ game.release }}
+      {%- else %}Released {{ game.release }}{% endif -%}
+    </p>
+    {% if game.tags %}
+    <ul class="tag-chips" aria-label="Steam tags">
+      {% for tag in game.tags %}<li>{{ tag }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% if game.summary %}<p class="card-summary">{{ game.summary }}</p>{% endif %}
+    <p class="card-reviews">
+      {% if r.usable %}<strong>{{ r.positive_count|number }}</strong> positive · {{ r.percent }}% of {{ r.total|number }} Steam {{ "review" if r.total == 1 else "reviews" }}
+      {% elif r.fetched and r.total == 0 %}No Steam reviews yet
+      {% else %}Steam review data unavailable{% endif %}
+    </p>
+    {% if game.awards %}
+    <ul class="award-list" aria-label="Verified awards">
+      {% for award in game.awards %}
+      <li class="award{% if award.is_winner %} is-winner{% endif %}">{{ award_text(award) }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <div class="card-actions">
+      <a class="button button-secondary card-details" href="{{ game.details_url }}" data-details="{{ game.appid }}">Details<span class="visually-hidden"> about {{ game.name }}</span></a>
+      <a class="button button-primary card-steam" href="{{ game.store_url }}" target="_blank" rel="noopener">View on Steam<span class="visually-hidden"> (opens in a new tab)</span></a>
+    </div>
+  </div>
+</article>
+{%- endmacro %}

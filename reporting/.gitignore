@@ -1,0 +1,6 @@
+# CSV tables written by `python -m game_librarian export-report` (regenerate them; never commit Steam data).
+data/
+
+# Power BI Desktop's local data cache and per-user settings.
+**/.pbi/localSettings.json
+**/.pbi/cache.abf

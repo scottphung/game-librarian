@@ -1,0 +1,7 @@
+# Direct dependencies, pinned and tested together on Python 3.12.4 (2026-11-09).
+fastapi==0.162.2   # web framework (brings Starlette and Pydantic)
+uvicorn==0.54.0    # ASGI server for `python -m game_librarian serve`
+Jinja2==3.1.6      # server-rendered HTML templates
+httpx==0.28.1      # Steam HTTP client, and FastAPI's test client
+python-dotenv==1.2.2  # load project .env settings
+pytest==9.2.0      # tests

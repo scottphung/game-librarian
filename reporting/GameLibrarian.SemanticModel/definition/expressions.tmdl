@@ -1,0 +1,5 @@
+/// Folder with the CSV files written by `python -m game_librarian export-report` (keep the trailing backslash). The export command sets this path for the computer it runs on.
+expression DataFolder = "C:\Users\hieup\game-lib-proj\project\reporting\data\" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+
+	annotation PBI_ResultType = Text
+

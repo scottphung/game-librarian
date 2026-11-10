@@ -1,0 +1,35 @@
+/// Bridge between games and their Steam community tags: one row per game and tag. It carries no review numbers.
+table GameTags
+
+	column AppID
+		dataType: int64
+		isHidden
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: appid
+
+	column Tag
+		dataType: string
+		isHidden
+		summarizeBy: none
+		sourceColumn: tag
+
+	/// 1 = the tag Steam users voted for most on this game.
+	column 'Tag Position'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: tag_position
+
+	partition GameTags = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents(DataFolder & "game_tags.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+				    Typed = Table.TransformColumnTypes(Promoted, {{"appid", Int64.Type}, {"tag", type text}, {"tag_position", Int64.Type}}, "en-US")
+				in
+				    Typed
+
+	annotation PBI_ResultType = Table
+

@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% from "_card.html" import game_card %}
+
+{% block body %}
+<div class="page">
+  <section class="hero" aria-labelledby="discover-title">
+    <h1 id="discover-title">Discover.</h1>
+    <p class="hero-sub">Find games worth exploring through Steam player reception, curated awards and verified production labels.</p>
+  </section>
+
+  <div class="catalog">
+    <aside class="sidebar" aria-label="Search and filters">
+      <button class="filters-toggle" type="button" aria-expanded="true" aria-controls="sidebar-body">
+        Search &amp; filters{% if active_filters %} · {{ active_filters|length }} active{% endif %}
+      </button>
+      <div class="sidebar-body" id="sidebar-body">
+      <form class="filters" id="filters" method="get" action="/" role="search">
+        {% if query.view == "all" %}<input type="hidden" name="view" value="all">{% endif %}
+        <div class="field">
+          <label class="field-label" for="q">Search by game name</label>
+          <div class="search-row">
+            <input id="q" name="q" type="search" value="{{ query.q }}" placeholder="e.g. Hades" maxlength="100" autocomplete="off">
+            <button class="button button-primary" type="submit">Search</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="sort">Sort by</label>
+          <select id="sort" name="sort" data-autosubmit>
+            {% for option in sort_options %}
+            <option value="{{ option.key }}"{% if option.key == query.order %} selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <fieldset class="field">
+          <legend class="field-label">Production label</legend>
+          <div class="option-list">
+            {% for option in label_options %}
+            <label class="option{% if option.selected %} is-selected{% endif %}">
+              <input type="checkbox" name="label" value="{{ option.name }}"{% if option.selected %} checked{% endif %} data-autosubmit>
+              <span class="option-name">{{ option.name }}</span>
+              <span class="option-count">{{ option.games }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="hint">Labels appear only with verified evidence. Unclassified means no verified label, not “not indie”.</p>
+        </fieldset>
+
+        <fieldset class="field">
+          <legend class="field-label">Awards</legend>
+          <label class="visually-hidden" for="award">Award category</label>
+          <select id="award" name="award" data-autosubmit>
+            <option value=""{% if not query.award %} selected{% endif %}>All games</option>
+            {% for option in award_options %}
+            <option value="{{ option.value }}"{% if option.value == query.award %} selected{% endif %}>{{ option.label }} ({{ option.games }})</option>
+            {% endfor %}
+          </select>
+          <label class="option{% if query.winners %} is-selected{% endif %}">
+            <input type="checkbox" name="winners" value="1"{% if query.winners %} checked{% endif %} data-autosubmit>
+            <span class="option-name">Winners only</span>
+          </label>
+          <p class="hint">Verified results from The Game Awards, 2014–2025: Game of the Year and the independent-game category.</p>
+        </fieldset>
+
+        <fieldset class="field field-tags">
+          <legend class="field-label">Genres &amp; tags</legend>
+          <p class="hint">Steam community tags. A game must have every selected tag; numbers count games in the current results.</p>
+          {% if tag_options %}
+          <div class="option-list tag-list">
+            {% for option in tag_options %}
+            <label class="option{% if option.selected %} is-selected{% endif %}">
+              <input type="checkbox" name="tag" value="{{ option.tag }}"{% if option.selected %} checked{% endif %} data-autosubmit>
+              <span class="option-name">{{ option.tag }}</span>
+              <span class="option-count">{{ option.games }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="hint">No tags in the current results.</p>
+          {% endif %}
+        </fieldset>
+
+        <div class="filter-actions">
+          <button class="button button-primary" type="submit">Apply filters</button>
+          <a class="text-link" href="{{ clear_url }}">Clear filters</a>
+        </div>
+      </form>
+
+      <section class="catalog-status" aria-labelledby="status-title">
+        <h2 id="status-title" class="field-label">Catalog</h2>
+        <p>
+          {{ counts.ready|number }} {{ "game" if counts.ready == 1 else "games" }} with Steam data
+          {%- if counts.curated > counts.ready %}; {{ counts.curated - counts.ready }} curated {{ "game has" if counts.curated - counts.ready == 1 else "games have" }} none yet{% endif %}.
+        </p>
+        {% if counts.discovered %}
+        <p>{{ counts.discovered|number }} Steam apps are indexed by catalog discovery. Only the curated games are shown.</p>
+        {% endif %}
+        {% if sync.last %}
+          <p>Last sync {{ sync.last.started_at|datetime }}: <strong class="status-{{ sync.last.status }}">{{ sync.last.status }}</strong>.</p>
+          {% if sync.last.status in ("failed", "partial") and sync.last_problem %}
+            <p class="status-problem">{{ sync.last_problem }}</p>
+          {% endif %}
+          {% if sync.last.status == "failed" %}
+            <p>{% if sync.last_saved %}Showing data saved by the sync of {{ sync.last_saved.started_at|datetime }}.{% else %}Showing the data saved before the failure, if any.{% endif %}</p>
+          {% endif %}
+        {% else %}
+          <p>No sync has run yet.</p>
+        {% endif %}
+        {% if curated_problem_count %}
+          <p class="status-problem">{{ curated_problem_count }} curated {{ "row has a problem" if curated_problem_count == 1 else "rows have problems" }} and {{ "is" if curated_problem_count == 1 else "are" }} ignored. Run <code>python -m game_librarian check-curated</code>.</p>
+        {% endif %}
+      </section>
+      </div>
+    </aside>
+
+    <main class="results" id="main">
+      <nav class="view-switch" aria-label="Catalog view">
+        {% for link in view_links %}
+        <a class="view-link" href="{{ link.url }}"{% if link.current %} aria-current="page"{% endif %}>{{ link.label }} <span class="view-count">{{ link.games|number }}<span class="visually-hidden"> {{ "game" if link.games == 1 else "games" }}</span></span></a>
+        {% endfor %}
+      </nav>
+      <header class="results-header">
+        <div class="results-title">
+          <h2>{{ view.heading }}</h2>
+          <details class="info-tip">
+            <summary aria-label="How the ranking works"><span aria-hidden="true">i</span></summary>
+            <div class="info-panel">
+              <h3>How the ranking works</h3>
+              <p><strong>Which games.</strong> Only games released in the last four years: from {{ window.start|day }} to today, {{ window.end|day }}. The window moves forward every day. Older games, games not released yet and games without an exact release date on Steam are not ranked; you find them under All games.</p>
+              <p><strong>Order.</strong> Verified AAA games come first, then verified AA games, then Indie and Unclassified games together. Within each tier, the game with more positive Steam reviews ranks higher. So an AAA game can rank above an AA game, and an AA game above an Indie or Unclassified game, even when it has fewer positive reviews.</p>
+              <p><strong>Ties</strong> (same tier, same number of positive reviews) go to the title A–Z, then the Steam app ID. <strong>Unranked</strong> games were released in the window but have no usable positive review count (not fetched yet, no reviews, or inconsistent counts). They are listed after the ranked games.</p>
+              <p><strong>What a rank means.</strong> It is a discovery order, not a judgment of quality. Counting positive reviews favors popular games, and games released earlier in the window, because they have had more time to collect reviews.</p>
+              <p>Production labels and awards come from this project’s hand-curated data: most games have no verified label (Unclassified), and the awards cover two categories of The Game Awards. Awards are not part of the rank. Searching and filtering never change a game’s rank.</p>
+            </div>
+          </details>
+        </div>
+        {% if query.view == "all" %}
+        <p class="results-scope">Every game in the catalog, including older and unreleased games. A number (#) is a game’s place in the four-year ranking of games released {{ window.start|day }} – {{ window.end|day }}; other games have no number.</p>
+        {% else %}
+        <p class="results-scope">Games released <strong>{{ window.start|day }} – {{ window.end|day }}</strong>: the last four years, up to today. Older and unreleased games, and games without an exact release date, are in <a class="text-link" href="{{ all_games_url }}">All games</a>.</p>
+        {% endif %}
+        {% if counts.ready and total %}
+        <p class="results-meta">
+          Showing {{ first_shown }}–{{ last_shown }} of {{ total|number }} {{ "game" if total == 1 else "games" }}
+          {%- if query.has_filters %} matching your filters{% endif %}
+          {%- if query.view == "all" %} · {{ ranked_total|number }} of {{ catalog_total|number }} catalog games are in the four-year ranking.
+          {%- if query.order == "rank" %} Ranked games come first; the others follow A–Z.{% endif %}
+          {%- else %} · {{ ranked_total|number }} of {{ window_total|number }} games in the window are ranked.{% endif %}
+        </p>
+        {% if query.has_filters and outside_matches %}
+        <p class="results-meta"><a class="text-link" href="{{ all_games_url }}">{{ outside_matches|number }} more matching {{ "game is" if outside_matches == 1 else "games are" }} outside the four-year ranking</a>.</p>
+        {% endif %}
+        {% endif %}
+        {% if active_filters %}
+        <ul class="active-filters" aria-label="Active filters">
+          {% for chip in active_filters %}
+          <li><a class="chip" href="{{ chip.url }}">{{ chip.label }} <span aria-hidden="true">×</span><span class="visually-hidden"> (remove this filter)</span></a></li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </header>
+
+      {% if counts.ready == 0 %}
+        <div class="notice">
+          <h3>The library is empty</h3>
+          <p>No game data has been saved yet. Fetch the curated games from Steam with:</p>
+          <pre><code>python -m game_librarian sync</code></pre>
+          {% if sync.last and sync.last.status == "failed" and sync.last_problem %}
+            <p>The last sync failed: {{ sync.last_problem }}</p>
+          {% endif %}
+        </div>
+      {% elif total == 0 and not query.has_filters %}
+        <div class="notice">
+          <h3>No games in the four-year window</h3>
+          <p>No catalog game has an exact Steam release date between {{ window.start|day }} and {{ window.end|day }}. <a class="text-link" href="{{ all_games_url }}">Show all games</a>.</p>
+        </div>
+      {% elif total == 0 %}
+        <div class="notice">
+          <h3>No matching games</h3>
+          <p>No games match{% if query.q %} “{{ query.q }}”{% endif %} with the selected filters{% if query.view == "top" %} in the four-year ranking{% endif %}.</p>
+          {% if outside_matches %}
+          <p><a class="text-link" href="{{ all_games_url }}">Show {{ outside_matches|number }} matching {{ "game" if outside_matches == 1 else "games" }} in All games</a>. {{ "It is" if outside_matches == 1 else "They are" }} outside the four-year ranking.</p>
+          {% endif %}
+          <p><a class="text-link" href="{{ clear_url }}">Clear filters</a>, or remove one of the filters above.</p>
+        </div>
+      {% else %}
+        <ul class="card-grid" role="list">
+          {% for game in games %}<li>{{ game_card(game, query.view) }}</li>{% endfor %}
+        </ul>
+
+        {% if total_pages > 1 %}
+        <nav class="pagination" aria-label="Result pages">
+          {% if prev_url %}<a class="page-step" href="{{ prev_url }}" rel="prev">← Previous</a>
+          {% else %}<span class="page-step is-disabled" aria-disabled="true">← Previous</span>{% endif %}
+          <ol class="page-numbers">
+            {% for link in page_links %}
+              {% if link.gap %}<li class="page-gap" aria-hidden="true">…</li>
+              {% elif link.current %}<li><span class="page-current" aria-current="page"><span class="visually-hidden">Page </span>{{ link.number }}</span></li>
+              {% else %}<li><a href="{{ link.url }}"><span class="visually-hidden">Page </span>{{ link.number }}</a></li>{% endif %}
+            {% endfor %}
+          </ol>
+          {% if next_url %}<a class="page-step" href="{{ next_url }}" rel="next">Next →</a>
+          {% else %}<span class="page-step is-disabled" aria-disabled="true">Next →</span>{% endif %}
+        </nav>
+        {% endif %}
+      {% endif %}
+    </main>
+  </div>
+</div>
+
+<dialog class="game-dialog" id="game-dialog" aria-labelledby="dialog-heading">
+  <button class="dialog-close" type="button" data-close-dialog autofocus>
+    <span aria-hidden="true">×</span><span class="visually-hidden">Close details</span>
+  </button>
+  <div class="dialog-content" data-dialog-content></div>
+</dialog>
+{% endblock %}

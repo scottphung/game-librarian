@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | Game Librarian{% endblock %}
+
+{% block body %}
+<main class="page dashboard" id="main">
+  <header class="dashboard-header">
+    <h1>Dashboard</h1>
+    <p class="hero-sub">The analytical companion to the catalog: player reception and award coverage across the curated games, built in Power BI.</p>
+  </header>
+
+  {% if dashboard.state == "not_connected" %}
+  <section class="notice setup" aria-labelledby="setup-title">
+    <h2 id="setup-title">The Power BI report is not connected yet</h2>
+    <p>No report address is configured, so there is nothing to show here. The report itself is part of this project and works on your computer with Power BI Desktop:</p>
+    <ol>
+      <li>Refresh the data: <code>python -m game_librarian sync</code>, then <code>python -m game_librarian export-report</code>.</li>
+      <li>Open <code>reporting/GameLibrarian.pbip</code> in Power BI Desktop (Windows) and select <strong>Refresh</strong>.</li>
+      <li>To show the report on this page, publish it to a Power BI workspace, copy its secure embed link
+        (<strong>File → Embed report → Website or portal</strong>), add
+        <code>GAME_LIBRARIAN_DASHBOARD_URL=&lt;that link&gt;</code> to <code>.env</code>, and restart the website.</li>
+    </ol>
+    <p>Step-by-step instructions, including sign-in, permissions and refreshing in the Power BI service, are in <code>README.md</code> under “Power BI dashboard”.</p>
+  </section>
+
+  {% elif dashboard.state in ("secure_embed", "public_embed") %}
+  {% if dashboard.state == "secure_embed" %}
+  <p class="notice-line">Viewers sign in to Power BI inside the frame. Power BI shows the report only to accounts that have access to it; this website stores no credentials.</p>
+  {% else %}
+  <p class="notice-line is-warning"><strong>Public link.</strong> This is a Power BI “Publish to web” link: anyone who has it can view the report and its data without signing in.</p>
+  {% endif %}
+  <div class="report-frame">
+    <iframe title="Game Librarian Power BI report" src="{{ dashboard.url }}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+  </div>
+  <p><a class="button button-secondary" href="{{ dashboard.url }}" target="_blank" rel="noopener noreferrer">Open the report in a new tab<span class="visually-hidden"> (opens in a new tab)</span></a></p>
+
+  {% else %}
+  <section class="notice" aria-labelledby="open-title">
+    <h2 id="open-title">Open the report in Power BI</h2>
+    <p>The report opens on the Power BI website. Sign in with an account that has access to its workspace, app or share link.</p>
+    <p><a class="button button-primary button-large" href="{{ dashboard.url }}" target="_blank" rel="noopener noreferrer">Open the Power BI report<span class="visually-hidden"> (opens in a new tab)</span></a></p>
+  </section>
+  {% endif %}
+
+  <section class="dashboard-notes" aria-labelledby="pages-title">
+    <h2 id="pages-title">What the report shows</h2>
+    <ul>
+      <li><strong>Player Reception:</strong> games with review data, total reviews, the review-weighted positive rate and the simple average of game percentages, compared by review volume, production label and tag, plus the same four-year ranking as this website.</li>
+      <li><strong>Awards Explorer:</strong> verified winners and nominees of The Game Awards by year, category and game, showing which entries match a catalog game (including awards that went to an original release of the edition Steam sells), which are on Steam but outside the catalog, and which have no Steam app.</li>
+      <li><strong>About the data:</strong> definitions, the ranking rules, the ranking window of the loaded export and the limits of the curated coverage.</li>
+    </ul>
+    <p class="muted">The report uses only data this project collects. It has no price, player-count or historical trend data: the catalog stores only the latest values from each sync.</p>
+  </section>
+</main>
+{% endblock %}

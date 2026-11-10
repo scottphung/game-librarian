@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "GameLibrarian"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "08468aca-49b5-492b-8720-0804c3bd8bb9"
+  }
+}

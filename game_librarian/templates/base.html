@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}Game Librarian{% endblock %}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="wordmark" href="/">GAME LIBRARIAN</a>
+    <nav class="site-nav" aria-label="Site">
+      <a class="nav-link" href="/dashboard"{% if active == "dashboard" %} aria-current="page"{% endif %}>Dashboard</a>
+    </nav>
+  </header>
+
+  {% block body %}{% endblock %}
+
+  <footer class="site-footer">
+    <p>
+      <strong>Sources.</strong> Store details, descriptions, images, trailer clips and tags come from the Steam store;
+      review totals and excerpts come from the Steam Web API. They are shown as provided ("as is"), without any warranty
+      of accuracy or completeness, and can be out of date. Descriptions, images and trailers belong to their publishers.
+      Review excerpts were written by Steam users and may be shortened here.
+    </p>
+    <p>Award results and AAA / AA / Indie labels are curated by hand, and each links to its source.</p>
+    <p>
+      Game Librarian is a personal project. It is not affiliated with, endorsed by or sponsored by Valve.
+      Steam and the Steam logo are trademarks and/or registered trademarks of Valve Corporation in the U.S. and/or other countries.
+    </p>
+  </footer>
+</body>
+</html>

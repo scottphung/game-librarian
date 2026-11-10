@@ -1,0 +1,4 @@
+{# HTML fragment loaded into the details dialog on the catalog page. #}
+{% from "_details.html" import game_details %}
+{% if game %}{{ game_details(game, "dialog-heading") }}
+{% else %}<div class="details-missing"><h2 id="dialog-heading" tabindex="-1">Game not found</h2><p>This game is not in the catalog.</p></div>{% endif %}

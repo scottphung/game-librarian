@@ -1,0 +1,277 @@
+/// One row per curated game shown on the website, with its latest stored Steam review summary. Review counts live only in this table, so tags and awards (in their own tables) can never count a game twice.
+table Games
+
+	/// Number of games in the current selection.
+	measure 'Game count' = COUNTROWS ( Games )
+		formatString: #,0
+		displayFolder: Catalog
+
+	/// Games with a usable Steam review summary (at least one review and consistent counts).
+	measure 'Games with review data' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Has Review Data] = TRUE () ) )
+		formatString: #,0
+		displayFolder: Reception
+
+	/// Sum of Steam reviews (all languages, Steam purchasers) across the selected games. Each game counts once.
+	measure 'Steam reviews' = SUM ( Games[Total Reviews] )
+		formatString: #,0
+		displayFolder: Reception
+
+	/// Sum of positive Steam reviews across the selected games.
+	measure 'Positive Steam reviews' = SUM ( Games[Positive Reviews] )
+		formatString: #,0
+		displayFolder: Reception
+
+	/// Sum of negative Steam reviews across the selected games.
+	measure 'Negative Steam reviews' = SUM ( Games[Negative Reviews] )
+		formatString: #,0
+		displayFolder: Reception
+
+	/// All positive reviews divided by all reviews of the selected games. Games with many reviews weigh more: one game with a million reviews outweighs a hundred small ones.
+	measure 'Review-weighted positive rate' = DIVIDE ( [Positive Steam reviews], [Steam reviews] )
+		formatString: 0.0%
+		displayFolder: Reception
+
+	/// The simple average of each selected game's positive share. Every game counts equally, whatever its number of reviews.
+	measure 'Average game positive rate' = AVERAGE ( Games[Positive Share] )
+		formatString: 0.0%
+		displayFolder: Reception
+
+	/// The middle value of the selected games' positive shares.
+	measure 'Median game positive rate' = MEDIAN ( Games[Positive Share] )
+		formatString: 0.0%
+		displayFolder: Reception
+
+	/// Games released in the four-year window of the loaded export (the four years up to the export day), whether ranked or not.
+	measure 'Games in four-year window' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[In Four-Year Window] = TRUE () ) )
+		formatString: #,0
+		displayFolder: Ranking
+
+	/// Games with a four-year rank: released in the four-year window and with a usable positive Steam review count.
+	measure 'Ranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Ranked" ) )
+		formatString: #,0
+		displayFolder: Ranking
+
+	/// Games released in the four-year window without a usable positive review count. They have no four-year rank.
+	measure 'Unranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Unranked" ) )
+		formatString: #,0
+		displayFolder: Ranking
+
+	/// Best (lowest) four-year rank in the selection. Blank when no selected game is in the four-year ranking.
+	measure 'Best four-year rank' = MIN ( Games[Four-Year Rank] )
+		formatString: #,0
+		displayFolder: Ranking
+
+	/// Games with at least one verified AAA, AA or Indie label.
+	measure 'Games with a verified label' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Production Label] <> "Unclassified" ) )
+		formatString: #,0
+		displayFolder: Catalog
+
+	column AppID
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: appid
+
+	column Game
+		dataType: string
+		summarizeBy: none
+		sourceColumn: title
+
+	column 'Steam URL'
+		dataType: string
+		dataCategory: WebUrl
+		summarizeBy: none
+		sourceColumn: steam_url
+
+	column Developers
+		dataType: string
+		summarizeBy: none
+		sourceColumn: developers
+
+	column Publishers
+		dataType: string
+		summarizeBy: none
+		sourceColumn: publishers
+
+	/// Steam's genres, separated by semicolons. Use the Tags table to filter by tag or genre.
+	column Genres
+		dataType: string
+		summarizeBy: none
+		sourceColumn: genres
+
+	/// The release date exactly as the Steam store writes it.
+	column 'Release Date (Steam text)'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: release_date
+
+	/// The exact release date, when Steam's text names one day. Blank for text such as "Q4 2026" or "Coming soon": a date is never guessed.
+	column 'Release Date'
+		dataType: dateTime
+		formatString: d mmm yyyy
+		summarizeBy: none
+		sourceColumn: release_date_exact
+
+	column 'Release Year'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: release_year
+
+	/// Verified curated labels: AAA, AA, Indie, or a combination such as "AA + Indie". Unclassified means no verified label, not "not indie".
+	column 'Production Label'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: production_label
+
+	/// The ranking tier from the verified labels: 1 = AAA, 2 = AA, 3 = Indie and Unclassified. A game with two labels takes the higher tier.
+	column 'Ranking Tier'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: ranking_tier
+
+	/// AAA, AA, or Indie and Unclassified: the tier that orders the four-year ranking before positive reviews.
+	column 'Ranking Tier Name'
+		dataType: string
+		summarizeBy: none
+		sortByColumn: 'Ranking Tier'
+		sourceColumn: ranking_tier_name
+
+	/// Best verified award result mapped to this game: Winner, Nominee or No listed award.
+	column 'Award Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: award_status
+
+	/// Verified award results (wins and nominations) mapped to this game.
+	column 'Listed Awards'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: award_entries
+
+	column 'Awards Won'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: award_wins
+
+	column 'Has Review Data'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		summarizeBy: none
+		sourceColumn: has_review_data
+
+	column 'Positive Reviews'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: positive_reviews
+
+	column 'Negative Reviews'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: negative_reviews
+
+	/// Steam reviews from all languages, by Steam purchasers, as in the store's review summary.
+	column 'Total Reviews'
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: total_reviews
+
+	/// Positive reviews divided by total reviews, for one game.
+	column 'Positive Share'
+		dataType: double
+		formatString: 0.0%
+		summarizeBy: none
+		sourceColumn: positive_share
+
+	/// The whole-number percentage Steam shows (rounded down).
+	column 'Steam % Positive'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: steam_percent_positive
+
+	column 'Steam Review Label'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: review_score_desc
+
+	column 'Positive Band'
+		dataType: string
+		summarizeBy: none
+		sortByColumn: 'Positive Band Order'
+		sourceColumn: positive_band
+
+	column 'Positive Band Order'
+		dataType: int64
+		isHidden
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: positive_band_order
+
+	/// TRUE when the game was released in the four-year window of the loaded export, with an exact release date.
+	column 'In Four-Year Window'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		summarizeBy: none
+		sourceColumn: in_four_year_window
+
+	/// Place in the four-year ranking, as on the website (1 = first): tier (AAA, then AA, then Indie and Unclassified), then more positive Steam reviews, then title A-Z, then app ID. Blank outside the window and for Unranked games.
+	column 'Four-Year Rank'
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: four_year_rank
+
+	/// Ranked, Unranked (in the window without a usable positive review count) or Not in the four-year ranking.
+	column 'Rank Status'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: rank_status
+
+	/// Why the game has no four-year rank; blank for ranked games.
+	column 'Rank Note'
+		dataType: string
+		summarizeBy: none
+		sourceColumn: rank_note
+
+	column 'Reviews Updated (UTC)'
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		summarizeBy: none
+		sourceColumn: reviews_updated_at
+
+	column 'Details Updated (UTC)'
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn
+		summarizeBy: none
+		sourceColumn: details_updated_at
+
+	partition Games = m
+		mode: import
+		source =
+				let
+				    Source = Csv.Document(File.Contents(DataFolder & "games.csv"), [Delimiter = ",", Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+				    Typed = Table.TransformColumnTypes(Promoted, {
+				        {"appid", Int64.Type}, {"title", type text}, {"steam_url", type text}, {"developers", type text},
+				        {"publishers", type text}, {"genres", type text}, {"release_date", type text}, {"release_date_exact", type date},
+				        {"release_year", Int64.Type}, {"production_label", type text}, {"ranking_tier", Int64.Type},
+				        {"ranking_tier_name", type text}, {"award_status", type text}, {"award_entries", Int64.Type},
+				        {"award_wins", Int64.Type}, {"has_review_data", type logical}, {"positive_reviews", Int64.Type},
+				        {"negative_reviews", Int64.Type}, {"total_reviews", Int64.Type}, {"positive_share", type number},
+				        {"steam_percent_positive", Int64.Type}, {"review_score_desc", type text}, {"positive_band", type text},
+				        {"positive_band_order", Int64.Type}, {"in_four_year_window", type logical}, {"four_year_rank", Int64.Type},
+				        {"rank_status", type text}, {"rank_note", type text}, {"reviews_updated_at", type datetime},
+				        {"details_updated_at", type datetime}
+				    }, "en-US")
+				in
+				    Typed
+
+	annotation PBI_ResultType = Table
+

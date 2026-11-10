@@ -1,0 +1,174 @@
+{# Game details, shared by the in-page dialog (panel.html) and the full page (game.html).
+   Every value is escaped by Jinja autoescaping; Steam text is rendered as plain text. #}
+
+{% macro render_block(block) -%}
+  {%- if block.kind == "heading" -%}<h4>{{ block.text }}</h4>
+  {%- elif block.kind == "list" -%}<ul>{% for item in block["items"] %}<li>{{ item }}</li>{% endfor %}</ul>
+  {%- else -%}<p>{{ block.text }}</p>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro render_excerpt(excerpt) -%}
+  <li class="excerpt">
+    <p>{{ excerpt.text }}</p>
+    <p class="excerpt-meta">
+      {% if excerpt.playtime_minutes is not none %}{{ excerpt.playtime_minutes|hours }} played when reviewed · {% endif -%}
+      {{ excerpt.votes_up|number }} found it helpful
+      {%- if excerpt.created_at %} · {{ excerpt.created_at|date }}{% endif %}
+      {%- if excerpt.shortened %} · shortened{% endif %}
+    </p>
+  </li>
+{%- endmacro %}
+
+{% macro render_media(media, name) -%}
+  {% if media.kind == "clip" %}
+    <figure class="media-figure">
+      <div class="media-frame">
+        <video data-clip muted loop playsinline controls preload="none"{% if media.poster %} poster="{{ media.poster }}"{% endif %}
+               aria-label="Looping trailer clip for {{ name }}">
+          {% if media.webm %}<source src="{{ media.webm }}" type="video/webm">{% endif %}
+          {% if media.mp4 %}<source src="{{ media.mp4 }}" type="video/mp4">{% endif %}
+        </video>
+        <button class="media-toggle" type="button" data-clip-toggle hidden>Pause clip</button>
+      </div>
+      <figcaption>
+        Looping clip from the Steam store trailer{% if media.title %} “{{ media.title }}”{% endif %}.
+        Trailers are made by the publisher and may not show actual gameplay.
+        <span class="clip-fallback" data-clip-fallback hidden>The clip could not be loaded, so a still image is shown.</span>
+      </figcaption>
+    </figure>
+  {% elif media.kind == "image" %}
+    <figure class="media-figure">
+      <div class="media-frame"><img src="{{ media.url }}" alt="Store image for {{ name }}" loading="lazy" referrerpolicy="no-referrer"></div>
+      <figcaption>{{ media.caption }} No trailer clip is available for this game.</figcaption>
+    </figure>
+  {% else %}
+    <p class="muted small">Steam provides no image or trailer clip for this game.</p>
+  {% endif %}
+{%- endmacro %}
+
+{% macro game_details(game, heading_id) -%}
+{% set r = game.reviews %}
+<div class="details" data-appid="{{ game.appid }}">
+  <div class="details-main">
+    <p class="details-rank">
+      {% if game.rank %}Four-year rank <strong>#{{ game.rank }}</strong> · {{ game.tier_name }} tier
+      {% elif game.in_window %}<strong>Unranked</strong> · {{ game.rank_note }}
+      {% else %}<strong>Not in the four-year ranking</strong> · {{ game.rank_note }}{% endif %}
+    </p>
+    <h2 class="details-title" id="{{ heading_id }}" tabindex="-1">{{ game.name }}</h2>
+
+    <ul class="label-list" aria-label="Production label">
+      {% for label in game.labels %}
+      <li><a class="label" href="{{ label.url }}" target="_blank" rel="noopener" title="{{ label.summary }} (source checked {{ label.checked_on }})">{{ label.name }}<span class="visually-hidden">: {{ label.summary }}</span></a></li>
+      {% else %}
+      <li class="label is-unclassified" title="No verified AAA, AA or Indie evidence has been curated for this game.">Unclassified</li>
+      {% endfor %}
+    </ul>
+
+    {% if game.tags %}
+    <ul class="tag-chips is-links" aria-label="Steam tags">
+      {% for tag in game.tags %}<li><a href="{{ tag.url }}" title="Show games tagged {{ tag.name }}">{{ tag.name }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <dl class="facts">
+      {% if game.is_dlc %}<div><dt>Type</dt><dd>Expansion (DLC)</dd></div>{% endif %}
+      {% if game.developers %}<div><dt>Developer</dt><dd>{{ game.developers|join(", ") }}</dd></div>{% endif %}
+      {% if game.publishers and game.publishers != game.developers %}<div><dt>Publisher</dt><dd>{{ game.publishers|join(", ") }}</dd></div>{% endif %}
+      <div><dt>{{ "Release" if game.upcoming else "Released" }}</dt><dd>{{ game.release_date or "Not listed on Steam" }}{% if game.coming_soon and game.release_date|lower != "coming soon" %} (coming soon){% endif %}</dd></div>
+      {% if game.genres %}<div><dt>Genres</dt><dd>{{ game.genres|join(", ") }}</dd></div>{% endif %}
+      {% if game.modes %}<div><dt>Modes</dt><dd>{{ game.modes|join(" · ") }}</dd></div>{% endif %}
+      {% if game.platforms %}<div><dt>Platforms</dt><dd>{{ game.platforms|join(" · ") }}</dd></div>{% endif %}
+    </dl>
+
+    {% if game.description %}<p class="details-description">{{ game.description }}</p>
+    {% else %}<p class="muted">Steam provides no description text for this game.</p>{% endif %}
+
+    {% if game.awards %}
+    <section class="details-section" aria-labelledby="{{ heading_id }}-awards">
+      <h3 id="{{ heading_id }}-awards">Verified awards</h3>
+      <ul class="award-rows">
+        {% for award in game.awards %}
+        <li class="award-row{% if award.is_winner %} is-winner{% endif %}">
+          <span class="award-result">{{ award.result }}</span>
+          <span class="award-name">{{ award.organization }} {{ award.year }} · {{ award.category }}</span>
+          <a class="award-source" href="{{ award.source_url }}" target="_blank" rel="noopener">Source<span class="visually-hidden"> for this award result (checked {{ award.checked_on }})</span></a>
+          {% if award.for_original_release %}<span class="award-note"><strong>For the original release.</strong> {{ award.mapping_note }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <p class="details-cta">
+      <a class="button button-primary button-large" href="{{ game.store_url }}" target="_blank" rel="noopener">View on Steam<span class="visually-hidden"> (opens in a new tab)</span></a>
+    </p>
+
+    {% if game.details_status == "unavailable" %}
+      <p class="data-note">Steam no longer returns store details for this app (it may be delisted or region-locked). Showing details saved {{ game.details_updated_at|date }}.</p>
+    {% elif game.details_status == "error" %}
+      <p class="data-note" title="{{ game.details_error or '' }}">The last refresh of these store details failed on {{ game.details_checked_at|date }}. Showing details saved {{ game.details_updated_at|date }}.</p>
+    {% endif %}
+
+    <section class="details-section" aria-labelledby="{{ heading_id }}-reviews">
+      <h3 id="{{ heading_id }}-reviews">Steam reviews</h3>
+      {% if r.status == "error" and r.fetched %}
+        <p class="data-note" title="{{ r.error or '' }}">The last review refresh failed on {{ r.checked_at|date }}. Showing reviews saved {{ r.updated_at|date }}.</p>
+      {% endif %}
+      {% if r.usable %}
+        <p class="review-line"><strong>{{ r.positive_count|number }} positive {{ "review" if r.positive_count == 1 else "reviews" }}</strong> · {{ r.percent }}% of {{ r.total|number }} Steam {{ "review" if r.total == 1 else "reviews" }}{% if r.score_desc %} · {{ r.score_desc }}{% endif %} <span class="muted">(all languages, Steam purchasers)</span></p>
+      {% elif r.fetched and r.total == 0 %}
+        <p class="muted">No Steam user reviews yet.</p>
+      {% elif r.status == "error" %}
+        <p class="muted" title="{{ r.error or '' }}">Steam reviews unavailable: the last fetch failed on {{ r.checked_at|date }}.</p>
+      {% else %}
+        <p class="muted">Steam reviews have not been fetched yet.</p>
+      {% endif %}
+
+      {% if r.positive or r.negative %}
+      <p class="sample-note">
+        Up to three of the most helpful English reviews on each side{% if r.window %} {{ r.window }}{% endif %}, as ranked by Steam
+        and written by Steam users. The equal split is a balanced sample, not the overall ratio.
+      </p>
+      <div class="excerpt-columns">
+        {% for side, excerpts in [("positive", r.positive), ("negative", r.negative)] %}
+        <section class="excerpt-side is-{{ side }}" aria-label="{{ side|capitalize }} review excerpts">
+          <h4>{{ side|capitalize }}</h4>
+          {% if excerpts %}
+          <ul class="excerpts">{% for excerpt in excerpts %}{{ render_excerpt(excerpt) }}{% endfor %}</ul>
+          {% if excerpts|length < 3 %}<p class="muted small">Only {{ excerpts|length }} {{ side }} English {{ "review was" if excerpts|length == 1 else "reviews were" }} available.</p>{% endif %}
+          {% else %}
+          <p class="muted small">No {{ side }} English reviews found.</p>
+          {% endif %}
+        </section>
+        {% endfor %}
+      </div>
+      {% elif r.usable %}
+        <p class="muted small">No English review excerpts available.</p>
+      {% endif %}
+      <p class="small"><a class="text-link" href="{{ game.reviews_url }}" target="_blank" rel="noopener">Read all reviews on Steam<span class="visually-hidden"> (opens in a new tab)</span></a></p>
+    </section>
+
+    {% if game.about_blocks %}
+    <details class="more">
+      <summary>Full description from the Steam store</summary>
+      <div class="about">{% for block in game.about_blocks %}{{ render_block(block) }}{% endfor %}</div>
+    </details>
+    {% endif %}
+
+    <p class="updated">
+      Store details updated <time datetime="{{ game.details_updated_at }}" title="{{ game.details_updated_at|datetime }}">{{ game.details_updated_at|date }}</time>
+      {%- if game.details_stale %} <span class="stale">(may be out of date)</span>{% endif %}.
+      Reviews updated {% if r.updated_at -%}
+        <time datetime="{{ r.updated_at }}" title="{{ r.updated_at|datetime }}">{{ r.updated_at|date }}</time>
+        {%- if r.stale %} <span class="stale">(may be out of date)</span>{% endif %}
+      {%- else %}never{% endif %}.
+    </p>
+  </div>
+
+  <aside class="details-media" aria-label="Preview">
+    {{ render_media(game.media, game.name) }}
+  </aside>
+</div>
+{%- endmacro %}
