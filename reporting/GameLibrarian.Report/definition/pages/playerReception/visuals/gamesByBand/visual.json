@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "gamesByBand",
   "position": {
     "x": 976,
@@ -28,6 +28,7 @@
               },
               "queryRef": "Games.Positive Band",
               "nativeQueryRef": "Steam positive share",
+              "active": true,
               "displayName": "Steam positive share"
             }
           ]
@@ -67,11 +68,9 @@
             },
             "direction": "Ascending"
           }
-        ],
-        "isDefaultSort": false
+        ]
       }
     },
-    "drillFilterOtherVisuals": true,
     "objects": {
       "labels": [
         {
@@ -128,6 +127,7 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   }
 }

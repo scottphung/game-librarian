@@ -1,60 +1,72 @@
 /// One row per verified award result (winner or nominee) from the curated awards file, including results that match no Steam app, so coverage can be measured.
 table Awards
+	lineageTag: 535ebcf9-b2f0-4792-a5a4-9930dd42aa79
 
 	/// Verified award results in the current selection.
 	measure 'Award entries' = COUNTROWS ( Awards )
 		formatString: #,0
 		displayFolder: Awards
+		lineageTag: f78829e5-bc58-42cb-8cec-ada834626839
 
 	/// Award results that are wins.
 	measure 'Winning entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Result] = "Winner" ) )
 		formatString: #,0
 		displayFolder: Awards
+		lineageTag: f3c1a009-5ccd-4b11-aed2-5bcccdb42a94
 
 	/// Award results that are nominations which did not win.
 	measure 'Nominee entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Result] = "Nominee" ) )
 		formatString: #,0
 		displayFolder: Awards
+		lineageTag: 85fd4d1a-a462-4ac7-9fa4-b323d82ddd00
 
 	/// Award results that match a game in the curated catalog (including awards that went to an original release of the edition Steam sells).
 	measure 'Entries in catalog' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "In catalog" ) )
 		formatString: #,0
 		displayFolder: Coverage
+		lineageTag: 149de8b0-44d1-4f4e-a954-36a669b2016e
 
 	/// Award results mapped to a Steam app that is not in the curated catalog.
 	measure 'Entries on Steam outside catalog' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "On Steam, not in catalog" ) )
 		formatString: #,0
 		displayFolder: Coverage
+		lineageTag: c82c0c8e-06ba-42b3-bb45-ff33cd87cb71
 
 	/// Award results with no Steam app: the game is not on Steam, or the curator deliberately left it unmapped (see Mapping Note).
 	measure 'Entries not mapped to Steam' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Catalog Status] = "Not mapped to Steam" ) )
 		formatString: #,0
 		displayFolder: Coverage
+		lineageTag: 2e6b586f-8b1c-4f9f-8674-0bdaa6d087e6
 
 	/// Award results that went to an original release while Steam sells a remaster, bundle or expanded edition.
 	measure 'Original-release entries' = CALCULATE ( COUNTROWS ( Awards ), KEEPFILTERS ( Awards[Steam Mapping] = "edition" ) )
 		formatString: #,0
 		displayFolder: Coverage
+		lineageTag: 9b41e5c5-a4f0-4ed0-85c9-c16003bf70f4
 
 	/// Distinct catalog games with at least one award result in the selection.
 	measure 'Awarded catalog games' = DISTINCTCOUNTNOBLANK ( Awards[Catalog AppID] )
 		formatString: #,0
 		displayFolder: Coverage
+		lineageTag: b894672e-4eae-42e2-8069-8304ff8d8e78
 
 	/// Share of the selected award results that match a catalog game.
 	measure 'Catalog coverage of entries' = DIVIDE ( [Entries in catalog], [Award entries] )
 		formatString: 0%
 		displayFolder: Coverage
+		lineageTag: 7b59d8b2-df5b-4311-aad6-12b0725db325
 
 	column 'Award ID'
 		dataType: int64
 		isHidden
 		formatString: 0
+		lineageTag: 4dbfd09a-6db1-4bbb-a0fd-ed71984094f2
 		summarizeBy: none
 		sourceColumn: award_id
 
 	column Organization
 		dataType: string
+		lineageTag: b449b77a-6aeb-4db3-a8d3-91f7ea055dc7
 		summarizeBy: none
 		sourceColumn: organization
 
@@ -62,42 +74,49 @@ table Awards
 	column Year
 		dataType: int64
 		formatString: 0
+		lineageTag: eda0d17d-3772-4efe-87eb-d8fa39a730b1
 		summarizeBy: none
 		sourceColumn: year
 
 	/// The category name as the cited sources give it (2020-2022 sources call the independent-game category "Best Indie Game").
 	column Category
 		dataType: string
+		lineageTag: d836b9f0-9736-4880-afee-27ac5d003f87
 		summarizeBy: none
 		sourceColumn: category
 
 	/// Winner or Nominee. A nominee that won is listed only as Winner.
 	column Result
 		dataType: string
+		lineageTag: 8c7d6703-5fcd-4784-8052-75fb9736106b
 		summarizeBy: none
 		sourceColumn: result
 
 	column 'Is Winner'
 		dataType: boolean
 		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: c4b98749-e081-43dd-8fe9-cdbc4e688aae
 		summarizeBy: none
 		sourceColumn: is_winner
 
 	/// The game as named by the award, which can differ from the Steam edition.
 	column 'Award Title'
 		dataType: string
+		lineageTag: d9214484-235d-4997-9d97-312480a4f211
 		summarizeBy: none
 		sourceColumn: award_title
 
 	/// The current Steam name of the matching catalog game, if any.
 	column 'Catalog Game'
 		dataType: string
+		lineageTag: e123badc-7291-4a20-b606-73261a58ea97
 		summarizeBy: none
 		sourceColumn: catalog_game
 
 	column 'Steam AppID'
 		dataType: int64
 		formatString: 0
+		lineageTag: ee78d70f-1d46-4d93-a50f-bc27e3d7199e
 		summarizeBy: none
 		sourceColumn: steam_appid
 
@@ -105,32 +124,38 @@ table Awards
 		dataType: int64
 		isHidden
 		formatString: 0
+		lineageTag: 1d511808-4e6e-4562-9e9b-ecb24698260d
 		summarizeBy: none
 		sourceColumn: catalog_appid
 
 	/// same: the Steam app is the awarded game; edition: Steam sells a remaster, bundle or expanded edition; none: no Steam app.
 	column 'Steam Mapping'
 		dataType: string
+		lineageTag: e0cc9e25-5e8e-4b9b-a01a-0c5fdaf7d951
 		summarizeBy: none
 		sourceColumn: steam_mapping
 
 	column 'Award Applies To'
 		dataType: string
+		lineageTag: 8eff6230-54d1-4759-a3b1-f90212f0d491
 		summarizeBy: none
 		sourceColumn: award_applies_to
 
 	column 'Catalog Status'
 		dataType: string
+		lineageTag: b81c982a-3d17-4998-a128-faa7372f12f6
 		summarizeBy: none
 		sourceColumn: catalog_status
 
 	column 'Mapping Note'
 		dataType: string
+		lineageTag: 28f287ef-2a1b-4498-8bd2-0da74b619f67
 		summarizeBy: none
 		sourceColumn: mapping_note
 
 	column 'Source URL'
 		dataType: string
+		lineageTag: 880196d7-0e8d-4392-a83b-0c6156792457
 		dataCategory: WebUrl
 		summarizeBy: none
 		sourceColumn: source_url
@@ -138,8 +163,11 @@ table Awards
 	column 'Checked On'
 		dataType: dateTime
 		formatString: yyyy-mm-dd
+		lineageTag: 0821a257-2ee0-467f-9e6d-19a80d38af9c
 		summarizeBy: none
 		sourceColumn: checked_on
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	partition Awards = m
 		mode: import

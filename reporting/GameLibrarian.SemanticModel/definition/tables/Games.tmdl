@@ -1,107 +1,128 @@
 /// One row per curated game shown on the website, with its latest stored Steam review summary. Review counts live only in this table, so tags and awards (in their own tables) can never count a game twice.
 table Games
+	lineageTag: 91e6b716-6021-4fd5-9139-51d4a03dab3f
 
 	/// Number of games in the current selection.
 	measure 'Game count' = COUNTROWS ( Games )
 		formatString: #,0
 		displayFolder: Catalog
+		lineageTag: 3f92d505-831a-4456-8b5d-ca7dedbeee39
 
 	/// Games with a usable Steam review summary (at least one review and consistent counts).
 	measure 'Games with review data' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Has Review Data] = TRUE () ) )
 		formatString: #,0
 		displayFolder: Reception
+		lineageTag: 389b69e2-f652-4ecf-a851-cb931b4b7799
 
 	/// Sum of Steam reviews (all languages, Steam purchasers) across the selected games. Each game counts once.
 	measure 'Steam reviews' = SUM ( Games[Total Reviews] )
 		formatString: #,0
 		displayFolder: Reception
+		lineageTag: 14019be2-9243-4c30-9534-700a37c9fad1
 
 	/// Sum of positive Steam reviews across the selected games.
 	measure 'Positive Steam reviews' = SUM ( Games[Positive Reviews] )
 		formatString: #,0
 		displayFolder: Reception
+		lineageTag: 814082ca-bf73-4211-87fc-6139b6a2e82a
 
 	/// Sum of negative Steam reviews across the selected games.
 	measure 'Negative Steam reviews' = SUM ( Games[Negative Reviews] )
 		formatString: #,0
 		displayFolder: Reception
+		lineageTag: e14d2414-af1a-4f88-ac29-0814f4dd7605
 
 	/// All positive reviews divided by all reviews of the selected games. Games with many reviews weigh more: one game with a million reviews outweighs a hundred small ones.
 	measure 'Review-weighted positive rate' = DIVIDE ( [Positive Steam reviews], [Steam reviews] )
 		formatString: 0.0%
 		displayFolder: Reception
+		lineageTag: 997974a2-f6e5-4847-8a2e-2c2b23b1fbdd
 
 	/// The simple average of each selected game's positive share. Every game counts equally, whatever its number of reviews.
 	measure 'Average game positive rate' = AVERAGE ( Games[Positive Share] )
 		formatString: 0.0%
 		displayFolder: Reception
+		lineageTag: e28c1f8b-5dbd-4caa-9bb6-5ef13d8ff5e5
 
 	/// The middle value of the selected games' positive shares.
 	measure 'Median game positive rate' = MEDIAN ( Games[Positive Share] )
 		formatString: 0.0%
 		displayFolder: Reception
+		lineageTag: 142e3baf-174d-4018-993e-193f2b6def47
 
 	/// Games released in the four-year window of the loaded export (the four years up to the export day), whether ranked or not.
 	measure 'Games in four-year window' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[In Four-Year Window] = TRUE () ) )
 		formatString: #,0
 		displayFolder: Ranking
+		lineageTag: c802f930-e9cd-446c-9904-4b748d3f3261
 
 	/// Games with a four-year rank: released in the four-year window and with a usable positive Steam review count.
 	measure 'Ranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Ranked" ) )
 		formatString: #,0
 		displayFolder: Ranking
+		lineageTag: 051e1f96-d1b4-4172-b094-008e2868f14e
 
 	/// Games released in the four-year window without a usable positive review count. They have no four-year rank.
 	measure 'Unranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Unranked" ) )
 		formatString: #,0
 		displayFolder: Ranking
+		lineageTag: 33a5a7e0-1b09-496a-a63a-89af4f38151e
 
 	/// Best (lowest) four-year rank in the selection. Blank when no selected game is in the four-year ranking.
 	measure 'Best four-year rank' = MIN ( Games[Four-Year Rank] )
 		formatString: #,0
 		displayFolder: Ranking
+		lineageTag: de22d0cf-7490-412c-8ba0-5c10c804d3d6
 
 	/// Games with at least one verified AAA, AA or Indie label.
 	measure 'Games with a verified label' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Production Label] <> "Unclassified" ) )
 		formatString: #,0
 		displayFolder: Catalog
+		lineageTag: b0549f28-464c-4331-bccb-c23a9419517a
 
 	column AppID
 		dataType: int64
 		formatString: 0
+		lineageTag: 0ffbf2bc-f567-405f-b54a-40b8d4f8b950
 		summarizeBy: none
 		sourceColumn: appid
 
 	column Game
 		dataType: string
+		lineageTag: f483f241-9204-4a82-8b7a-f2184a0b402a
 		summarizeBy: none
 		sourceColumn: title
 
 	column 'Steam URL'
 		dataType: string
+		lineageTag: f5c4f996-60b7-450c-8e6c-6618dd04d097
 		dataCategory: WebUrl
 		summarizeBy: none
 		sourceColumn: steam_url
 
 	column Developers
 		dataType: string
+		lineageTag: f451f737-55b5-45e8-8e36-bcf5354a8e5b
 		summarizeBy: none
 		sourceColumn: developers
 
 	column Publishers
 		dataType: string
+		lineageTag: 64164b28-867a-4aa4-a0bd-3cbff798f272
 		summarizeBy: none
 		sourceColumn: publishers
 
 	/// Steam's genres, separated by semicolons. Use the Tags table to filter by tag or genre.
 	column Genres
 		dataType: string
+		lineageTag: 0c72f4dd-b6a7-4612-8e5c-e8650de9c56a
 		summarizeBy: none
 		sourceColumn: genres
 
 	/// The release date exactly as the Steam store writes it.
 	column 'Release Date (Steam text)'
 		dataType: string
+		lineageTag: 7cbafa76-01b7-489f-bddd-008bd6f14cea
 		summarizeBy: none
 		sourceColumn: release_date
 
@@ -109,18 +130,23 @@ table Games
 	column 'Release Date'
 		dataType: dateTime
 		formatString: d mmm yyyy
+		lineageTag: c8732ea2-3d81-4ce0-9a9d-404bb2333318
 		summarizeBy: none
 		sourceColumn: release_date_exact
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Release Year'
 		dataType: int64
 		formatString: 0
+		lineageTag: fa6115b7-95fd-4d5e-8953-db7748e247f1
 		summarizeBy: none
 		sourceColumn: release_year
 
 	/// Verified curated labels: AAA, AA, Indie, or a combination such as "AA + Indie". Unclassified means no verified label, not "not indie".
 	column 'Production Label'
 		dataType: string
+		lineageTag: 342032fe-f1ad-472e-850c-2aae90714294
 		summarizeBy: none
 		sourceColumn: production_label
 
@@ -128,19 +154,22 @@ table Games
 	column 'Ranking Tier'
 		dataType: int64
 		formatString: 0
+		lineageTag: 7760c047-4d87-42ef-98bd-adaee6c9d6ca
 		summarizeBy: none
 		sourceColumn: ranking_tier
 
 	/// AAA, AA, or Indie and Unclassified: the tier that orders the four-year ranking before positive reviews.
 	column 'Ranking Tier Name'
 		dataType: string
+		lineageTag: 5d5158af-ac7c-423b-b9a4-fdf9a1291270
 		summarizeBy: none
-		sortByColumn: 'Ranking Tier'
 		sourceColumn: ranking_tier_name
+		sortByColumn: 'Ranking Tier'
 
 	/// Best verified award result mapped to this game: Winner, Nominee or No listed award.
 	column 'Award Status'
 		dataType: string
+		lineageTag: e8ea0f62-c3b7-4878-9855-1b60ad46e1f0
 		summarizeBy: none
 		sourceColumn: award_status
 
@@ -148,30 +177,35 @@ table Games
 	column 'Listed Awards'
 		dataType: int64
 		formatString: 0
+		lineageTag: df147693-b075-420a-9e2f-aff48fb35528
 		summarizeBy: none
 		sourceColumn: award_entries
 
 	column 'Awards Won'
 		dataType: int64
 		formatString: 0
+		lineageTag: b391d85f-e0cf-401e-a5ef-a3f96b1631c7
 		summarizeBy: none
 		sourceColumn: award_wins
 
 	column 'Has Review Data'
 		dataType: boolean
 		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: b13639d0-f460-43f0-9e62-2dbe703db189
 		summarizeBy: none
 		sourceColumn: has_review_data
 
 	column 'Positive Reviews'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 794de1c4-d1c9-487a-9c3f-8e9264450a48
 		summarizeBy: none
 		sourceColumn: positive_reviews
 
 	column 'Negative Reviews'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 3cdf4366-49b1-49b3-a9dc-dd94b2af2c7a
 		summarizeBy: none
 		sourceColumn: negative_reviews
 
@@ -179,6 +213,7 @@ table Games
 	column 'Total Reviews'
 		dataType: int64
 		formatString: #,0
+		lineageTag: ac4d7009-98d6-474f-b184-b9456893ebc6
 		summarizeBy: none
 		sourceColumn: total_reviews
 
@@ -186,6 +221,7 @@ table Games
 	column 'Positive Share'
 		dataType: double
 		formatString: 0.0%
+		lineageTag: 4ae4f38b-842f-42e7-820f-79dd4bf8f1a5
 		summarizeBy: none
 		sourceColumn: positive_share
 
@@ -193,24 +229,28 @@ table Games
 	column 'Steam % Positive'
 		dataType: int64
 		formatString: 0
+		lineageTag: 1e6485a0-95bb-4e20-9770-b686b8b8fbce
 		summarizeBy: none
 		sourceColumn: steam_percent_positive
 
 	column 'Steam Review Label'
 		dataType: string
+		lineageTag: 3a336c23-7a8b-4c71-9777-80f6d4998844
 		summarizeBy: none
 		sourceColumn: review_score_desc
 
 	column 'Positive Band'
 		dataType: string
+		lineageTag: 7f8277d1-440c-4b9e-bfca-620065978d28
 		summarizeBy: none
-		sortByColumn: 'Positive Band Order'
 		sourceColumn: positive_band
+		sortByColumn: 'Positive Band Order'
 
 	column 'Positive Band Order'
 		dataType: int64
 		isHidden
 		formatString: 0
+		lineageTag: de711925-c4f6-4148-b230-3f616c0fad49
 		summarizeBy: none
 		sourceColumn: positive_band_order
 
@@ -218,6 +258,7 @@ table Games
 	column 'In Four-Year Window'
 		dataType: boolean
 		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 833a0894-8275-48cf-923e-947953283ed6
 		summarizeBy: none
 		sourceColumn: in_four_year_window
 
@@ -225,30 +266,35 @@ table Games
 	column 'Four-Year Rank'
 		dataType: int64
 		formatString: 0
+		lineageTag: ddca8056-f91b-42b9-90db-d4e32cc3750d
 		summarizeBy: none
 		sourceColumn: four_year_rank
 
 	/// Ranked, Unranked (in the window without a usable positive review count) or Not in the four-year ranking.
 	column 'Rank Status'
 		dataType: string
+		lineageTag: 68ee50ed-123b-4fef-b619-9bbb69fdd0ee
 		summarizeBy: none
 		sourceColumn: rank_status
 
 	/// Why the game has no four-year rank; blank for ranked games.
 	column 'Rank Note'
 		dataType: string
+		lineageTag: cb2cff15-4078-471b-b548-899152ffb162
 		summarizeBy: none
 		sourceColumn: rank_note
 
 	column 'Reviews Updated (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 5fcac61f-0dac-44c5-9059-4689f2f91535
 		summarizeBy: none
 		sourceColumn: reviews_updated_at
 
 	column 'Details Updated (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 459d9433-77c0-40f0-a6e9-e9a155199a5b
 		summarizeBy: none
 		sourceColumn: details_updated_at
 

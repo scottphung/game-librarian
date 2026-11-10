@@ -3,14 +3,21 @@ model Model
 	defaultPowerBIDataSourceVersion: powerBI_V3
 	discourageImplicitMeasures
 	sourceQueryCulture: en-US
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
 
 annotation __PBI_TimeIntelligenceEnabled = 0
 
 annotation PBI_QueryOrder = ["DataFolder","Games","GameTags","Tags","Awards","Export Info"]
+
+annotation PBI_ProTooling = ["DevMode"]
 
 ref table Games
 ref table GameTags
 ref table Tags
 ref table Awards
 ref table 'Export Info'
+
+ref cultureInfo en-US
 

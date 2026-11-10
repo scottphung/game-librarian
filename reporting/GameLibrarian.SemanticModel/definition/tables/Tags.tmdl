@@ -1,8 +1,10 @@
 /// Steam community tags, including genre tags such as RPG or Roguelike. Use Tag in slicers to filter games.
 table Tags
+	lineageTag: df19b358-38df-4e02-988a-9fbcbf88b43f
 
 	column Tag
 		dataType: string
+		lineageTag: ec43d20a-adc4-44c2-89e6-b5f7081139f0
 		summarizeBy: none
 		sourceColumn: tag
 
@@ -10,6 +12,7 @@ table Tags
 	column 'Games With Tag'
 		dataType: int64
 		formatString: #,0
+		lineageTag: cf06ac04-a1d2-4f54-8206-1105e8d5991b
 		summarizeBy: none
 		sourceColumn: games
 

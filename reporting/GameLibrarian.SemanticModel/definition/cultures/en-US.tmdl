@@ -1,0 +1,848 @@
+cultureInfo en-US
+
+	linguisticMetadata =
+			{
+			  "Version": "2.0.0",
+			  "Language": "en-US",
+			  "Entities": {
+			    "games.award_status": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Award Status"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Award status": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.positive_band": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Positive Band"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Steam positive share": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.game_count": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Game count"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Games": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.average_game_positive_rate": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Average game positive rate"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Average game positive rate": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Average of games": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.games_with_review_data": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Games with review data"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Games with review data": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.steam_reviews": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Steam reviews"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Total Steam reviews": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Total reviews": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.reviewweighted_positive_rate": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Review-weighted positive rate"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Review-weighted positive rate": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Review-weighted": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Positive share": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.production_label": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Production Label"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Production label": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.fouryear_rank": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Four-Year Rank"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Rank": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.ranking_tier_name": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Ranking Tier Name"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Tier": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.positive_reviews": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Positive Reviews"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Positive reviews": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.steam__positive": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Steam % Positive"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "% positive": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.total_reviews": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Total Reviews"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Total reviews": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "games.best_fouryear_rank": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Games",
+			          "ConceptualProperty": "Best four-year rank"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Four-year rank": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "tags.tag": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Tags",
+			          "ConceptualProperty": "Tag"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Tag or genre": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.category": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Category"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Category": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.entries_in_catalog": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Entries in catalog"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "In catalog": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.entries_on_steam_outside_catalog": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Entries on Steam outside catalog"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "On Steam, not in catalog": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.entries_not_mapped_to_steam": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Entries not mapped to Steam"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Not mapped to Steam": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.winning_entries": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Winning entries"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Winners": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.nominee_entries": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Nominee entries"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Nominees": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Nominees (did not win)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.award_title": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Award Title"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Awarded title": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.award_applies_to": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Award Applies To"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Applies to": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.catalog_game": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Catalog Game"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Steam name in catalog": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.catalog_status": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Catalog Status"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Match": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        },
+			        {
+			          "Match to Steam": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.awarded_catalog_games": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Awarded catalog games"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Catalog games with awards": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.catalog_coverage_of_entries": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Catalog coverage of entries"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Entries matched to the catalog": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.award_entries": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Award entries"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Award entries": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.result": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Result"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Result": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "awards.year": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Awards",
+			          "ConceptualProperty": "Year"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Year": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.exported_at_utc": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Exported At (UTC)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Exported (UTC)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.last_sync_started_utc": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Last Sync Started (UTC)"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Sync started (UTC)": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.last_sync_status": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Last Sync Status"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Sync status": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.games_exported": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Games Exported"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Games": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.ranked_games_exported": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Ranked Games Exported"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Ranked": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.verified_award_rows": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Verified Award Rows"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Award rows": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    },
+			    "export_info.ranking_window": {
+			      "Definition": {
+			        "Binding": {
+			          "ConceptualEntity": "Export Info",
+			          "ConceptualProperty": "Ranking window"
+			        }
+			      },
+			      "State": "Generated",
+			      "Terms": [
+			        {
+			          "Ranking window": {
+			            "State": "Suggested",
+			            "Source": {
+			              "Type": "External",
+			              "Agent": "PowerBI.VisualColumnRename"
+			            },
+			            "Weight": 0.9
+			          }
+			        }
+			      ]
+			    }
+			  }
+			}
+		contentType: json
+

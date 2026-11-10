@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "rateByLabel",
   "position": {
     "x": 876,
@@ -28,6 +28,7 @@
               },
               "queryRef": "Games.Production Label",
               "nativeQueryRef": "Production label",
+              "active": true,
               "displayName": "Production label"
             }
           ]
@@ -82,11 +83,9 @@
             },
             "direction": "Ascending"
           }
-        ],
-        "isDefaultSort": false
+        ]
       }
     },
-    "drillFilterOtherVisuals": true,
     "objects": {
       "labels": [
         {
@@ -143,6 +142,53 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "4db5146f9c38468c5412",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Games"
+              }
+            },
+            "Property": "Production Label"
+          }
+        },
+        "type": "Categorical"
+      },
+      {
+        "name": "2645edf707034700a3ed",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Games"
+              }
+            },
+            "Property": "Review-weighted positive rate"
+          }
+        },
+        "type": "Advanced"
+      },
+      {
+        "name": "3446276b62604c925d40",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Games"
+              }
+            },
+            "Property": "Average game positive rate"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }

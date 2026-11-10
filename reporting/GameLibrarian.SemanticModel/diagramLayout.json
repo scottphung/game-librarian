@@ -1,0 +1,87 @@
+{
+  "version": "1.1.0",
+  "diagrams": [
+    {
+      "ordinal": 0,
+      "scrollPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "nodes": [
+        {
+          "location": {
+            "x": 50,
+            "y": 76.118845666852
+          },
+          "nodeIndex": "Awards",
+          "nodeLineageTag": "535ebcf9-b2f0-4792-a5a4-9930dd42aa79",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1136.6221629171368,
+            "y": 63.05942283342597
+          },
+          "nodeIndex": "Export Info",
+          "nodeLineageTag": "7ec20f65-62be-4bfd-bc98-e65dca2e2ee9",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 334.20225510460909,
+            "y": -0.11331242142259157
+          },
+          "nodeIndex": "Games",
+          "nodeLineageTag": "91e6b716-6021-4fd5-9139-51d4a03dab3f",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 618.41040181545588,
+            "y": -3.6213022308862719
+          },
+          "nodeIndex": "GameTags",
+          "nodeLineageTag": "83cd44e6-3e0b-4e64-9dcb-4db2241bc9ce",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 902.622162917137,
+            "y": -50
+          },
+          "nodeIndex": "Tags",
+          "nodeLineageTag": "df19b358-38df-4e02-988a-9fbcbf88b43f",
+          "size": {
+            "height": 128,
+            "width": 234
+          },
+          "zIndex": 0
+        }
+      ],
+      "name": "All tables",
+      "zoomValue": 100,
+      "pinKeyFieldsToTop": false,
+      "showExtraHeaderInfo": false,
+      "hideKeyFieldsWhenCollapsed": false,
+      "tablesLocked": false
+    }
+  ],
+  "selectedDiagram": "All tables",
+  "defaultDiagram": "All tables"
+}

@@ -1,5 +1,6 @@
 /// One row describing the loaded export: when it ran, which sync it reflects, and the four-year ranking window.
 table 'Export Info'
+	lineageTag: 7ec20f65-62be-4bfd-bc98-e65dca2e2ee9
 
 	/// When the report data was exported and which Steam sync it comes from.
 	measure 'Data as of' =
@@ -13,6 +14,7 @@ table 'Export Info'
 			            & IF ( ISBLANK ( synced ), "(none recorded)", FORMAT ( synced, "d mmm yyyy" ) )
 			    )
 		displayFolder: Export
+		lineageTag: 00dcb84b-5436-4bfa-b34f-97d57d2c7e5f
 
 	/// The release dates covered by the four-year ranking in the loaded export: the four years up to the export day. The window moves forward only when export-report runs again.
 	measure 'Ranking window' =
@@ -25,39 +27,46 @@ table 'Export Info'
 			        "Released " & FORMAT ( firstDay, "d mmm yyyy" ) & " – " & FORMAT ( lastDay, "d mmm yyyy" )
 			    )
 		displayFolder: Ranking
+		lineageTag: 3ba07111-ed60-4cc1-960e-8831d2b55537
 
 	column 'Exported At (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 4530bbc0-8f01-480c-8c10-a29ef9089271
 		summarizeBy: none
 		sourceColumn: exported_at_utc
 
 	column 'Last Sync Started (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 101e0fdd-e909-48aa-90c6-07e995e7b0dd
 		summarizeBy: none
 		sourceColumn: last_sync_started_at_utc
 
 	column 'Last Sync Finished (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
+		lineageTag: 4e4e3f6d-2351-4ff3-b1ee-ebca83067014
 		summarizeBy: none
 		sourceColumn: last_sync_finished_at_utc
 
 	column 'Last Sync Status'
 		dataType: string
+		lineageTag: 4b9f02dc-5b3a-43aa-863b-c8bf7c3edfa0
 		summarizeBy: none
 		sourceColumn: last_sync_status
 
 	column 'Games Exported'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 388377c0-08c6-41be-bed8-f37607dcdf2f
 		summarizeBy: none
 		sourceColumn: games
 
 	column 'Games With Reviews Exported'
 		dataType: int64
 		formatString: #,0
+		lineageTag: e2a1b561-a172-4f0a-9afa-0e8331935cc7
 		summarizeBy: none
 		sourceColumn: games_with_review_data
 
@@ -65,42 +74,53 @@ table 'Export Info'
 	column 'Ranking Window Start'
 		dataType: dateTime
 		formatString: d mmm yyyy
+		lineageTag: 09bba4f8-ea6e-4cee-a256-1d80e629cb81
 		summarizeBy: none
 		sourceColumn: ranking_window_start
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	/// Last release date in the four-year ranking window (included): the export day, on the computer that ran the export.
 	column 'Ranking Window End'
 		dataType: dateTime
 		formatString: d mmm yyyy
+		lineageTag: 8d5fe4e2-0427-4752-ab5f-95386ae69535
 		summarizeBy: none
 		sourceColumn: ranking_window_end
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column 'Games In Window Exported'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 209341b9-611e-406d-a06c-342d2b2e3632
 		summarizeBy: none
 		sourceColumn: games_in_ranking_window
 
 	column 'Ranked Games Exported'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 81f5ab13-86c6-4ee9-bc7f-7080877e9360
 		summarizeBy: none
 		sourceColumn: ranked_games
 
 	column 'Verified Award Rows'
 		dataType: int64
 		formatString: #,0
+		lineageTag: 8e6d8bd8-1c35-48c8-a302-adb2cbd8c6c5
 		summarizeBy: none
 		sourceColumn: verified_award_rows
 
 	column 'Excluded Unverified Award Rows'
 		dataType: int64
 		formatString: #,0
+		lineageTag: baaaa7ac-9d44-415f-80dc-54848a8d0496
 		summarizeBy: none
 		sourceColumn: excluded_unverified_award_rows
 
 	column 'Data Note'
 		dataType: string
+		lineageTag: b3fe2969-0d2d-442e-8333-5ad35636215a
 		summarizeBy: none
 		sourceColumn: data_note
 

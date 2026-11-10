@@ -1,16 +1,19 @@
 /// Bridge between games and their Steam community tags: one row per game and tag. It carries no review numbers.
 table GameTags
+	lineageTag: 83cd44e6-3e0b-4e64-9dcb-4db2241bc9ce
 
 	column AppID
 		dataType: int64
 		isHidden
 		formatString: 0
+		lineageTag: 0fb75220-656a-4483-b083-11bde74d0f79
 		summarizeBy: none
 		sourceColumn: appid
 
 	column Tag
 		dataType: string
 		isHidden
+		lineageTag: 1ce3c1cd-01da-4935-a505-62e720a599b0
 		summarizeBy: none
 		sourceColumn: tag
 
@@ -18,6 +21,7 @@ table GameTags
 	column 'Tag Position'
 		dataType: int64
 		formatString: 0
+		lineageTag: e7d651fb-6769-4ee7-8e3d-2ac02fcea246
 		summarizeBy: none
 		sourceColumn: tag_position
 

@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.5.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
   "name": "volumeVsShare",
   "position": {
     "x": 264,
@@ -27,7 +27,27 @@
                 }
               },
               "queryRef": "Games.Game",
-              "nativeQueryRef": "Game"
+              "nativeQueryRef": "Game",
+              "active": true
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Best four-year rank"
+                }
+              },
+              "queryRef": "Games.Best four-year rank",
+              "nativeQueryRef": "Four-year rank",
+              "displayName": "Four-year rank"
             }
           ]
         },
@@ -46,6 +66,7 @@
               },
               "queryRef": "Games.Steam reviews",
               "nativeQueryRef": "Total reviews",
+              "active": true,
               "displayName": "Total reviews"
             }
           ]
@@ -68,29 +89,9 @@
               "displayName": "Positive share"
             }
           ]
-        },
-        "Tooltips": {
-          "projections": [
-            {
-              "field": {
-                "Measure": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Games"
-                    }
-                  },
-                  "Property": "Best four-year rank"
-                }
-              },
-              "queryRef": "Games.Best four-year rank",
-              "nativeQueryRef": "Four-year rank",
-              "displayName": "Four-year rank"
-            }
-          ]
         }
       }
     },
-    "drillFilterOtherVisuals": true,
     "visualContainerObjects": {
       "title": [
         {
@@ -132,6 +133,7 @@
           }
         }
       ]
-    }
+    },
+    "drillFilterOtherVisuals": true
   }
 }
