@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -32,13 +32,22 @@ USER_AGENT = "GameLibrarian/0.1 (personal game discovery app)"
 
 @dataclass(frozen=True)
 class Settings:
-    """Runtime settings. Every value can be overridden with an environment variable."""
+    """Runtime settings. Every value can be overridden with an environment variable.
+
+    Secrets are left out of repr(), so printing or logging the settings never shows them.
+    """
 
     db_path: Path
     curated_dir: Path
-    steam_api_key: str | None
+    steam_api_key: str | None = field(repr=False)
     review_language: str
-    dashboard_url: str | None = None
+    # Optional IGDB access (a Twitch application's credentials); without them IGDB is simply not used.
+    igdb_client_id: str | None = field(default=None, repr=False)
+    igdb_client_secret: str | None = field(default=None, repr=False)
+
+    @property
+    def igdb_configured(self) -> bool:
+        return bool(self.igdb_client_id and self.igdb_client_secret)
 
 
 def load_settings() -> Settings:
@@ -49,5 +58,6 @@ def load_settings() -> Settings:
         curated_dir=Path(values.get("GAME_LIBRARIAN_CURATED_DIR", DEFAULT_CURATED_DIR)),
         steam_api_key=values.get("STEAM_API_KEY") or None,
         review_language=values.get("GAME_LIBRARIAN_REVIEW_LANGUAGE", "english"),
-        dashboard_url=values.get("GAME_LIBRARIAN_DASHBOARD_URL") or None,
+        igdb_client_id=values.get("IGDB_CLIENT_ID") or None,
+        igdb_client_secret=values.get("IGDB_CLIENT_SECRET") or None,
     )

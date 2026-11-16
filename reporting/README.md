@@ -1,7 +1,9 @@
 # Game Librarian Power BI report
 
 A Power BI Project (`GameLibrarian.pbip`) that analyzes the curated catalog: player reception and award coverage.
-It is an analytical companion to the website, not a second catalog.
+It is an analytical companion to the website, not a second catalog. It is optional: the website's **Dashboard**
+pages show the same pages as HTML, calculated from the same tables with the measure definitions below, without
+Power BI (see the main README, "Dashboard").
 
 | Item | Format | Notes |
 | --- | --- | --- |
@@ -33,8 +35,9 @@ sharing the project if that matters to you. The export contains no settings, key
    positive-share band. Slicers: tag or genre, production label, award
    status.
 2. **Awards Explorer.** Award entries, winners, nominees, catalog games with awards and the share of entries matched
-   to the catalog; entries by year (winners and nominees); how entries match Steam by category; a table of every
-   verified entry with what the award applies to. Slicers: year, category, result, match to Steam.
+   to the catalog; entries by year (winners and nominees); how entries match Steam by award; a table of every
+   verified entry with what the award applies to. Slicers: year (ceremony year), award (organization · category,
+   because several organizations use "Game of the Year"), result, match to Steam.
 3. **About the data.** Definitions, the ranking rules, the ranking window, coverage limits, refresh steps and the
    loaded export.
 
@@ -64,8 +67,8 @@ Relationships:
 | `Awards[Catalog AppID]` | `Games[AppID]` | both | award slicers filter games; entries with no catalog game have a blank key |
 
 Review counts exist only in `Games`. Tags and awards filter games through their own tables, so a game with several
-tags or awards is counted once. Verified in Power BI Desktop: filtering on "RPG or Indie" returns 108 games and
-21,018,364 reviews, not the 25,806,731 that adding the two tags' totals would give.
+tags or awards is counted once. Verified in Power BI Desktop on 2026-11-15 (238 games): filtering on "RPG or Indie"
+returns 149 games and 25,632,046 reviews, not the 30,565,152 that adding the two tags' totals would give.
 
 Because some award entries match no catalog game, Power BI adds a blank placeholder row to `Games`; the two slicers
 on `Games` columns carry an "is not blank" filter so the placeholder never appears as a choice.
@@ -83,6 +86,7 @@ Measures (each has a description in the model):
 | `Games in four-year window`, `Ranked games`, `Unranked games`, `Best four-year rank` | from the four-year ranking (see the main README) |
 | `Ranking window` | the release dates the loaded export ranks, such as "Released 9 Nov 2022 – 9 Nov 2026" |
 | `Games with a verified label` | production label other than Unclassified |
+| `Promoted games` | catalog games added through the candidate review workflow (`Games[Catalog Source]` = "Promoted candidate") |
 | `Award entries`, `Winning entries`, `Nominee entries` | verified award results; a winner is listed once, as Winner |
 | `Entries in catalog`, `Entries on Steam outside catalog`, `Entries not mapped to Steam` | where each result matches Steam |
 | `Original-release entries` | awards that went to an earlier version than the edition Steam sells |
@@ -100,14 +104,32 @@ license, or a workspace on Fabric/Premium capacity. Check your organization's li
    configure an on-premises data gateway (personal mode is enough) for the `reporting\data` folder, then refresh
    the semantic model on demand or on a schedule. Without a gateway, refresh in Desktop and publish again.
    Running `sync` or `export-report` never updates a published report on its own.
-3. **Secure embed (recommended).** Open the report in the service and select **File → Embed report → Website or
-   portal**. Copy the link (`https://app.powerbi.com/reportEmbed?...`) and add it to the project's `.env`:
-   `GAME_LIBRARIAN_DASHBOARD_URL=<link>`. Restart the website. The Dashboard page then shows the report in a frame;
-   each viewer signs in with their own account, and Power BI shows the report only to accounts that have access
-   (workspace role, app or share).
+3. **Share** the report from the service with the people who should see it (workspace role, app or share link).
+   Each viewer signs in with their own account. The website no longer embeds or links a published report: its
+   Dashboard pages are calculated by the website itself.
 4. **Publish to web (public, not recommended).** It creates a link that anyone can open without signing in, and the
-   data becomes public. Your organization may disable it. The website shows a warning when the configured link is
-   a Publish to web link (`https://app.powerbi.com/view?r=...`). Nothing in this project publishes anything.
+   data becomes public. Your organization may disable it. Nothing in this project publishes anything.
+
+## Changes in version 0.4 (2026-11-15)
+
+- New columns: `Games[Catalog Source]` (Hand-picked / Promoted candidate), `Games[Top Award Wins]`,
+  `Awards[Award]` (organization · category) and `Awards[Is Top Award]`; new measure `Promoted games`. The Awards
+  Explorer's category slicer, "entries by match" chart and entries table now use `Award`. Text boxes describe the
+  new award coverage (see the main README).
+- Checked offline: the TMDL folder deserializes with TOM (`TmdlSerializer`, from Power BI Desktop 2.159's `bin`
+  folder), `Model.Validate()` reports no errors, no measure and column names clash ignoring case, all 39 visual
+  field references exist in the model, all report JSON parses, and a test checks that the model reads exactly the
+  exported columns of `games.csv`, `awards.csv` and `export_info.csv`.
+- Checked in Power BI Desktop 2.159 on 2026-11-15, with an export of 238 games and 341 award rows:
+  - The project opened without errors, and all five tables refreshed in 3–4 seconds.
+  - 26 DAX results matched an independent Python calculation from the CSV files exactly, for example
+    `Promoted games` 78, `Awarded catalog games` 161 and the "RPG or Indie" filter. So did the entry counts for all
+    8 award names.
+  - The screenshots showed two text problems, now fixed. The Awards Explorer subtitle was cut off, and the
+    "Coverage limits" box still described one organization. The two top charts are now 320 px tall (the entries
+    table is 40 px shorter), so "How award entries match Steam" shows all 8 award names without scrolling. The
+    three longest names are shortened on the axis and appear in full in the slicer and the table.
+- A copy that is already published does not change until you refresh or republish it there.
 
 ## Verification (2026-11-10)
 

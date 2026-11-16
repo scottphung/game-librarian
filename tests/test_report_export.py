@@ -71,7 +71,7 @@ def exported(settings, fake_steam, clock, tmp_path):
         {"steam_appid": "10", "label": "Indie", "review_status": "verified", "evidence_url": "https://example.invalid/b",
          "evidence_summary": "Self-published."},
     ])
-    settings = replace(settings, steam_api_key=SECRET, dashboard_url="https://app.powerbi.com/reportEmbed?reportId=x")
+    settings = replace(settings, steam_api_key=SECRET)
     out_dir = tmp_path / "export"
     summary = export_report(settings, out_dir, now=datetime(2026, 11, 10, 3, 0, tzinfo=timezone.utc),
                             today=date(2026, 11, 9))
@@ -139,6 +139,34 @@ def test_awards_keep_verified_results_and_say_where_each_one_applies(exported):
     assert sorted(row["result"] for row in awards) == ["Nominee", "Nominee", "Winner", "Winner", "Winner"]
 
 
+def test_sources_and_awards_from_several_organizations_never_double_count_a_game(exported, settings, tmp_path):
+    write_csv(settings.curated_dir / "games.csv", [{"steam_appid": "10", "title": "Test Quest"},
+                                                   {"steam_appid": "20", "title": "Other Game"}])
+    write_csv(settings.curated_dir / "promoted_games.csv", [{
+        "steam_appid": "30", "title": "Quiet Game", "source": "discovery", "match_method": "steam_app",
+        "evidence": "Steam game.", "promoted_on": "2026-11-15"}])
+    write_csv(settings.curated_dir / "awards.csv", [
+        AWARD,  # The Game Awards 2023 Game of the Year: won
+        {**AWARD, "organization": "BAFTA Games Awards", "category": "Best Game", "year": "2024"},  # won
+        {**AWARD, "organization": "The Steam Awards", "category": "Labor of Love", "year": "2025"},  # won
+        {**AWARD, "organization": "Game Developers Choice Awards", "year": "2024", "result": "nominee"},
+    ])
+    out_dir = tmp_path / "again"
+    export_report(settings, out_dir, today=date(2026, 11, 9))
+    games = {row["appid"]: row for row in read(out_dir / "games.csv")}
+    assert len(read(out_dir / "games.csv")) == 3  # one row per game, however many awards
+    quest = games["10"]
+    assert (quest["award_entries"], quest["award_wins"], quest["top_award_wins"]) == ("4", "3", "2")
+    assert (quest["catalog_source"], games["30"]["catalog_source"]) == ("Hand-picked", "Promoted candidate")
+    assert sum(int(row["total_reviews"] or 0) for row in games.values()) == 1100  # unchanged by the extra awards
+    awards = read(out_dir / "awards.csv")
+    assert [row["award_name"] for row in awards] == [
+        "The Game Awards · Game of the Year", "BAFTA Games Awards · Best Game", "The Steam Awards · Labor of Love",
+        "Game Developers Choice Awards · Game of the Year"]
+    assert [row["is_top_award"] for row in awards] == ["true", "true", "false", "true"]
+    assert all(row["catalog_appid"] == "10" for row in awards)
+
+
 def test_export_info_describes_the_export_and_the_ranking_window(exported):
     summary, out_dir = exported
     info = read(out_dir / "export_info.csv")[0]
@@ -159,7 +187,8 @@ def _model_columns(table_file: str) -> tuple[set[str], set[str]]:
     return source_columns, typed_columns
 
 
-@pytest.mark.parametrize("table_file, columns", [("Games.tmdl", GAME_COLUMNS), ("Export Info.tmdl", EXPORT_INFO_COLUMNS)])
+@pytest.mark.parametrize("table_file, columns", [("Games.tmdl", GAME_COLUMNS), ("Awards.tmdl", AWARD_COLUMNS),
+                                                 ("Export Info.tmdl", EXPORT_INFO_COLUMNS)])
 def test_the_power_bi_model_reads_exactly_the_exported_columns(table_file, columns):
     source_columns, typed_columns = _model_columns(table_file)
     assert source_columns == set(columns)
@@ -170,7 +199,7 @@ def test_no_setting_or_secret_is_written_to_the_export(exported):
     _, out_dir = exported
     for path in out_dir.iterdir():
         text = path.read_text(encoding="utf-8")
-        assert SECRET not in text and "reportEmbed" not in text and "STEAM_API_KEY" not in text, path.name
+        assert SECRET not in text and "STEAM_API_KEY" not in text, path.name
 
 
 def test_point_report_at_sets_the_data_folder_parameter_once(tmp_path):

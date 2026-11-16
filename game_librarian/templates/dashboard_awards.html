@@ -1,0 +1,166 @@
+{% extends "dashboard.html" %}
+{% block page_title %}Awards{% endblock %}
+
+{% block dashboard %}
+{% set m = dash.measures %}
+<form class="dash-filters" method="get" action="/dashboard/awards" aria-label="Award filters">
+  <div class="dash-filter">
+    <label class="field-label" for="f-year">Year</label>
+    <select id="f-year" name="year" data-autosubmit>
+      <option value="">All years</option>
+      {% for year in dash.year_options %}
+      <option value="{{ year }}"{% if year|string == dash.filters.year %} selected{% endif %}>{{ year }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="dash-filter">
+    <label class="field-label" for="f-award">Award</label>
+    <select id="f-award" name="award" data-autosubmit>
+      <option value="">All awards</option>
+      {% for award in dash.award_options %}
+      <option value="{{ award }}"{% if award == dash.filters.award %} selected{% endif %}>{{ award }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="dash-filter">
+    <label class="field-label" for="f-result">Result</label>
+    <select id="f-result" name="result" data-autosubmit>
+      <option value="">Winners and nominees</option>
+      {% for result in dash.result_options %}
+      <option value="{{ result }}"{% if result == dash.filters.result %} selected{% endif %}>{{ result }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="dash-filter">
+    <label class="field-label" for="f-match">Match to Steam</label>
+    <select id="f-match" name="match" data-autosubmit>
+      <option value="">Any match</option>
+      {% for status in dash.match_options %}
+      <option value="{{ status }}"{% if status == dash.filters.match %} selected{% endif %}>{{ status }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="dash-filter-actions">
+    <button class="button button-primary" type="submit">Apply</button>
+    {% if dash.filtered %}<a class="text-link" href="/dashboard/awards">Clear filters</a>{% endif %}
+  </div>
+</form>
+<p class="dash-scope">{{ m.entries|number }} of {{ dash.all_entries|number }} verified award entries {{ "match the filters" if dash.filtered else "in total" }}. The year is the ceremony year, not the release year.</p>
+
+<dl class="kpis">
+  <div class="kpi"><dt>Award entries</dt><dd>{{ m.entries|number }}</dd></div>
+  <div class="kpi"><dt>Winners</dt><dd>{{ m.winners|number }}</dd></div>
+  <div class="kpi"><dt>Nominees (did not win)</dt><dd>{{ m.nominees|number }}</dd></div>
+  <div class="kpi"><dt>Catalog games with awards</dt><dd>{{ m.awarded_games|number }}</dd></div>
+  <div class="kpi"><dt>Entries matched to the catalog</dt><dd>{{ m.coverage|rate(0) }}</dd></div>
+</dl>
+
+<div class="dash-grid">
+  <figure class="chart-card">
+    <figcaption>
+      <h2 class="chart-title">Award entries by year</h2>
+      <p class="chart-sub">Winners and nominees per ceremony year.</p>
+    </figcaption>
+    {% if dash.by_year %}
+    <ul class="legend">
+      <li><span class="key is-series-1"></span>Winners</li>
+      <li><span class="key is-series-2"></span>Nominees</li>
+    </ul>
+    <div class="columns-plot" role="img" aria-label="Column chart of award entries per year; the numbers are in the table below.">
+      {% for tick in dash.by_year.ticks %}
+      <span class="grid-line is-y{% if loop.first %} is-base{% endif %}" style="bottom: {{ tick.position }}%"><span class="tick-label">{{ tick.value }}</span></span>
+      {% endfor %}
+      <ol class="columns">
+        {% for column in dash.by_year.columns %}
+        <li class="column" title="{{ column.year }}: {{ column.winners }} {{ 'winner' if column.winners == 1 else 'winners' }}, {{ column.nominees }} {{ 'nominee' if column.nominees == 1 else 'nominees' }}">
+          <span class="column-stack" style="height: {{ column.height }}%">
+            <span class="column-total">{{ column.total }}</span>
+            {% for part in column.parts %}<span class="seg is-series-{{ part.series }}{% if loop.first %} is-top{% endif %}" style="flex-grow: {{ part.count }}"></span>{% endfor %}
+          </span>
+          <span class="column-label">{{ column.year }}</span>
+        </li>
+        {% endfor %}
+      </ol>
+    </div>
+    <details class="table-view">
+      <summary>Show the numbers</summary>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th scope="col">Year</th><th scope="col" class="num">Winners</th><th scope="col" class="num">Nominees</th><th scope="col" class="num">Entries</th></tr></thead>
+          <tbody>
+            {% for column in dash.by_year.columns %}
+            <tr><td>{{ column.year }}</td><td class="num">{{ column.winners }}</td><td class="num">{{ column.nominees }}</td><td class="num">{{ column.total }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="chart-empty">No award entry matches the filters.</p>
+    {% endif %}
+  </figure>
+
+  <figure class="chart-card">
+    <figcaption>
+      <h2 class="chart-title">How award entries match Steam</h2>
+      <p class="chart-sub">“In catalog” includes awards to an original release of the edition Steam sells.</p>
+    </figcaption>
+    {% if dash.by_award %}
+    <ul class="legend">
+      {% for status in dash.match_options %}<li><span class="key is-series-{{ loop.index }}"></span>{{ status }}</li>{% endfor %}
+    </ul>
+    <dl class="bar-rows">
+      {% for row in dash.by_award %}
+      <div class="bar-row">
+        <dt>{{ row.award }}</dt>
+        <dd class="bar-line">
+          <span class="bar-track"><span class="hstack" style="width: {{ row.width }}%">{% for part in row.parts %}<span class="seg is-series-{{ part.series }}{% if loop.last %} is-end{% endif %}" style="flex-grow: {{ part.count }}" title="{{ part.status }}: {{ part.count }}"></span>{% endfor %}</span></span>
+          <span class="bar-value">{{ row.total }}</span>
+        </dd>
+      </div>
+      {% endfor %}
+    </dl>
+    <details class="table-view">
+      <summary>Show the numbers</summary>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th scope="col">Award</th>{% for status in dash.match_options %}<th scope="col" class="num">{{ status }}</th>{% endfor %}<th scope="col" class="num">Entries</th></tr></thead>
+          <tbody>
+            {% for row in dash.by_award %}
+            <tr><td>{{ row.award }}</td>{% for count in row.counts %}<td class="num">{{ count }}</td>{% endfor %}<td class="num">{{ row.total }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="chart-empty">No award entry matches the filters.</p>
+    {% endif %}
+  </figure>
+
+  <section class="chart-card is-wide" aria-labelledby="entries-title">
+    <h2 class="chart-title" id="entries-title">Verified award entries</h2>
+    <p class="chart-sub">Each row is one result, with the page it was checked against. Newest year first.</p>
+    {% if dash.entries %}
+    <div class="table-scroll is-tall">
+      <table class="data-table">
+        <thead><tr><th scope="col">Year</th><th scope="col">Award</th><th scope="col">Result</th><th scope="col">Awarded title</th><th scope="col">Applies to</th><th scope="col">Game in catalog</th><th scope="col">Match</th><th scope="col">Source</th></tr></thead>
+        <tbody>
+          {% for entry in dash.entries %}
+          <tr>
+            <td>{{ entry.year }}</td><td>{{ entry.award_name }}</td><td>{{ entry.result }}</td><td>{{ entry.award_title }}</td>
+            <td>{{ entry.award_applies_to }}</td>
+            <td>{% if entry.catalog_appid is not none %}<a class="text-link" href="/games/{{ entry.catalog_appid }}">{{ entry.catalog_game }}</a>{% endif %}</td>
+            <td>{{ entry.catalog_status }}</td>
+            <td><a class="text-link" href="{{ entry.source_url }}" target="_blank" rel="noopener noreferrer">Source<span class="visually-hidden"> for {{ entry.award_title }}, {{ entry.award_name }} {{ entry.year }} (opens in a new tab)</span></a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="chart-empty">No award entry matches the filters.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,9 +1,16 @@
-"""Load and validate the hand-edited CSV files in curated/.
+"""Load and validate the CSV files in curated/.
 
-These files are the source of truth for the curated game list, awards and
-production-scale/indie classifications. Nothing in the app writes to them: the
-sync command only reads games.csv, and the web app reads the award and
-classification files directly. That is how curated facts survive every sync.
+These files are the source of truth for the catalog's game list, awards and
+production-scale/indie classifications:
+
+  games.csv            hand-picked games, edited by hand
+  promoted_games.csv   games added through the candidate review workflow; only
+                       `python -m game_librarian candidates promote` appends to it
+  awards.csv           award results, edited by hand
+  classifications.csv  AAA / AA / Indie labels, edited by hand
+
+The sync command only reads the two game lists, and the web app reads the award
+and classification files directly, so no sync can overwrite curated facts.
 
 Invalid rows are skipped and reported (with file and line) instead of crashing.
 Only rows with review_status "verified" are ever displayed.
@@ -20,8 +27,12 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 GAMES_FILE = "games.csv"
+PROMOTED_FILE = "promoted_games.csv"
 AWARDS_FILE = "awards.csv"
 CLASSIFICATIONS_FILE = "classifications.csv"
+
+# Where a catalog game comes from: games.csv or promoted_games.csv.
+HAND_PICKED, PROMOTED = "hand-picked", "promoted"
 
 REVIEW_STATUSES = {"verified", "needs_review", "rejected"}
 AWARD_RESULTS = {"winner", "nominee"}
@@ -31,23 +42,35 @@ STEAM_MAPPINGS = {"same", "edition", "none"}
 LABELS = {"AAA", "AA", "Indie"}
 SCALE_LABELS = ("AAA", "AA")
 
-# Required columns. Optional ones (title, note, mapping_note, checked_on, checked_by) default to "".
+# Each organization's top award for the year's best game: the "Game of the Year winners" collection.
+TOP_AWARD_CATEGORIES = {
+    ("The Game Awards", "Game of the Year"),
+    ("BAFTA Games Awards", "Best Game"),
+    ("Game Developers Choice Awards", "Game of the Year"),
+    ("The Steam Awards", "Game of the Year"),
+}
+
+# Required columns. Optional ones (title, note, mapping_note, checked_on, checked_by, ...) default to "".
 GAME_COLUMNS = ["steam_appid"]
 AWARD_COLUMNS = [
     "organization", "year", "category", "result", "award_title", "steam_appid", "steam_mapping",
     "source_url", "review_status",
 ]
 CLASSIFICATION_COLUMNS = ["steam_appid", "label", "review_status", "evidence_url", "evidence_summary"]
-OPTIONAL_COLUMNS = ["title", "note", "mapping_note", "checked_on", "checked_by"]
+# promoted_games.csv also has source, match_method, evidence and promoted_on (written by `candidates promote`).
+PROMOTED_COLUMNS = ["steam_appid", "title", "source", "match_method", "evidence", "promoted_on"]
+OPTIONAL_COLUMNS = ["title", "note", "mapping_note", "checked_on", "checked_by",
+                    "source", "match_method", "evidence", "promoted_on"]
 
 
 @dataclass(frozen=True)
 class CuratedGame:
-    """One row of games.csv: a Steam app to keep enriched."""
+    """One catalog game: a Steam app to keep enriched, from games.csv or promoted_games.csv."""
 
     appid: int
     title: str
     note: str
+    catalog_source: str = HAND_PICKED  # HAND_PICKED or PROMOTED
 
 
 @dataclass(frozen=True)
@@ -65,6 +88,16 @@ class Award:
     source_url: str
     review_status: str
     checked_on: str
+
+    @property
+    def award_name(self) -> str:
+        """The organization and category, which together name an award: "BAFTA Games Awards · Best Game"."""
+        return f"{self.organization} · {self.category}"
+
+    @property
+    def is_top_award(self) -> bool:
+        """True for an organization's Game of the Year (or Best Game) category."""
+        return (self.organization, self.category) in TOP_AWARD_CATEGORIES
 
 
 @dataclass(frozen=True)
@@ -89,14 +122,19 @@ class CuratedData:
     problems: list[str] = field(default_factory=list)
     awards_by_appid: dict[int, list[Award]] = field(default_factory=dict)
     labels_by_appid: dict[int, dict[str, Classification]] = field(default_factory=dict)
+    sources_by_appid: dict[int, str] = field(default_factory=dict)
 
     def awards_for(self, appid: int) -> list[Award]:
-        """Verified awards mapped to this app: winners first, then the newest year."""
+        """Verified awards mapped to this app: top-award wins, other wins, then nominations; newest first."""
         return self.awards_by_appid.get(appid, [])
 
     def labels_for(self, appid: int) -> dict[str, Classification]:
         """Verified labels for this app, keyed by label ("AAA", "AA", "Indie")."""
         return self.labels_by_appid.get(appid, {})
+
+    def catalog_source(self, appid: int) -> str | None:
+        """HAND_PICKED or PROMOTED for a catalog game, None for an app that is not in the catalog."""
+        return self.sources_by_appid.get(appid)
 
 
 class _Problems:
@@ -109,13 +147,16 @@ class _Problems:
         self.messages.append(f"{file_name}:{line}: {message}")
 
 
-def _read_rows(path: Path, columns: list[str], problems: _Problems) -> list[tuple[int, dict[str, str]]]:
+def _read_rows(path: Path, columns: list[str], problems: _Problems, *,
+               required: bool = True) -> list[tuple[int, dict[str, str]]]:
     """Read a CSV file into (line number, row) pairs with stripped values.
 
     Every required and optional column is present in each row; missing optional ones are "".
+    A missing file is a problem unless `required` is False (promoted_games.csv starts out absent).
     """
     if not path.exists():
-        problems.add(path.name, 0, "file not found")
+        if required:
+            problems.add(path.name, 0, "file not found")
         return []
     with path.open(newline="", encoding="utf-8-sig") as handle:  # utf-8-sig accepts files saved by Excel
         reader = csv.DictReader(handle)
@@ -143,18 +184,30 @@ def _is_date(value: str) -> bool:
     return True
 
 
-def _load_games(path: Path, problems: _Problems) -> list[CuratedGame]:
-    games, seen = [], set()
-    for line, row in _read_rows(path, GAME_COLUMNS, problems):
+def _load_games(path: Path, problems: _Problems, *, catalog_source: str = HAND_PICKED,
+                known: set[int] | None = None) -> list[CuratedGame]:
+    """Read one game list. `known` holds app ids already listed by an earlier file; they are skipped."""
+    is_promoted = catalog_source == PROMOTED
+    games, seen = [], set(known or ())
+    for line, row in _read_rows(path, PROMOTED_COLUMNS if is_promoted else GAME_COLUMNS, problems,
+                                required=not is_promoted):
         if not row["steam_appid"].isdigit():
             problems.add(path.name, line, f"steam_appid must be a number, got {row['steam_appid']!r}")
             continue
         appid = int(row["steam_appid"])
+        if known and appid in known:
+            problems.add(path.name, line, f"steam_appid {appid} is already in {GAMES_FILE}; that row is used")
+            continue
         if appid in seen:
             problems.add(path.name, line, f"duplicate steam_appid {appid}")
             continue
+        if is_promoted and row["promoted_on"] and not _is_date(row["promoted_on"]):
+            problems.add(path.name, line, f"promoted_on must be a YYYY-MM-DD date, got {row['promoted_on']!r}")
+            continue
         seen.add(appid)
-        games.append(CuratedGame(appid=appid, title=row["title"] or f"Steam app {appid}", note=row["note"]))
+        note = row["evidence"] if is_promoted else row["note"]
+        games.append(CuratedGame(appid=appid, title=row["title"] or f"Steam app {appid}", note=note,
+                                 catalog_source=catalog_source))
     return games
 
 
@@ -244,7 +297,9 @@ def _index_awards(awards: list[Award]) -> dict[int, list[Award]]:
         if award.review_status == "verified" and award.appid is not None:
             by_appid.setdefault(award.appid, []).append(award)
     for appid_awards in by_appid.values():
-        appid_awards.sort(key=lambda a: (a.result != "winner", -a.year, a.category))
+        # Top-award (Game of the Year, Best Game) wins first, then other wins, then nominations; newest first.
+        appid_awards.sort(key=lambda a: (not (a.is_top_award and a.result == "winner"), a.result != "winner",
+                                         -a.year, a.organization, a.category))
     return by_appid
 
 
@@ -265,7 +320,10 @@ def _index_labels(classifications: list[Classification], problems: _Problems) ->
 def load_curated(curated_dir: Path) -> CuratedData:
     """Load all curated files. Problems are collected in `problems`; nothing is raised."""
     problems = _Problems()
-    games = _load_games(curated_dir / GAMES_FILE, problems)
+    hand_picked = _load_games(curated_dir / GAMES_FILE, problems)
+    promoted = _load_games(curated_dir / PROMOTED_FILE, problems, catalog_source=PROMOTED,
+                           known={game.appid for game in hand_picked})
+    games = hand_picked + promoted
     awards = _load_awards(curated_dir / AWARDS_FILE, problems)
     classifications = _load_classifications(curated_dir / CLASSIFICATIONS_FILE, problems)
     labels_by_appid = _index_labels(classifications, problems)  # may add conflict problems
@@ -276,6 +334,7 @@ def load_curated(curated_dir: Path) -> CuratedData:
         problems=problems.messages,
         awards_by_appid=_index_awards(awards),
         labels_by_appid=labels_by_appid,
+        sources_by_appid={game.appid: game.catalog_source for game in games},
     )
 
 
@@ -292,7 +351,7 @@ class CuratedCache:
 
     def _current_stamp(self) -> tuple:
         stamp = []
-        for name in (GAMES_FILE, AWARDS_FILE, CLASSIFICATIONS_FILE):
+        for name in (GAMES_FILE, PROMOTED_FILE, AWARDS_FILE, CLASSIFICATIONS_FILE):
             path = self._dir / name
             stamp.append(path.stat().st_mtime_ns if path.exists() else None)
         return tuple(stamp)

@@ -1,0 +1,48 @@
+{% extends "dashboard.html" %}
+{% block page_title %}About the data{% endblock %}
+
+{% block dashboard %}
+<div class="dash-grid">
+  <section class="chart-card" aria-labelledby="what-title">
+    <h2 class="chart-title" id="what-title">What this dashboard is</h2>
+    <p class="chart-sub">An HTML version of the Power BI report in <code>reporting/</code>, with the same measure definitions. It is calculated from the catalog on every page load, so no export is needed. It covers the {{ dash.games|number }} catalog games ({{ (dash.games - dash.promoted)|number }} hand-picked, {{ dash.promoted|number }} promoted from reviewed candidates), not all of Steam.</p>
+    <h3 class="chart-title">Player reception</h3>
+    <p class="chart-sub">Review counts are Steam's review summaries: Steam purchasers, all languages. The review-weighted positive rate pools every review, so games with many reviews dominate. The average game positive rate gives every game the same weight. A game counts once, however many tags or awards it has.</p>
+    <h3 class="chart-title">Four-year ranking</h3>
+    <p class="chart-sub">Only games released {{ dash.window.start|day }} – {{ dash.window.end|day }} are ranked. Verified AAA games come first, then AA, then Indie and Unclassified together; within a tier, more positive Steam reviews rank higher. Ranks come from the whole catalog, so filters never renumber them. This is a discovery order, not a judgment of quality.</p>
+    <h3 class="chart-title">Refreshing</h3>
+    <p class="chart-sub">Run <code>python -m game_librarian sync</code>, then reload the page. Nothing refreshes automatically unless you schedule the sync. The optional Power BI version needs <code>export-report</code> and Power BI Desktop (see <code>reporting/README.md</code>).</p>
+    <h3 class="chart-title">Not included</h3>
+    <p class="chart-sub">Prices, player counts and trends over time: the project stores only the latest values, so there is no history to chart.</p>
+  </section>
+
+  <section class="chart-card" aria-labelledby="loaded-title">
+    <h2 class="chart-title" id="loaded-title">Loaded data</h2>
+    <dl class="facts">
+      <div><dt>Catalog games</dt><dd>{{ dash.games|number }}</dd></div>
+      <div><dt>With review data</dt><dd>{{ dash.games_with_review_data|number }}</dd></div>
+      <div><dt>In the four-year window</dt><dd>{{ dash.in_window|number }}</dd></div>
+      <div><dt>Ranked</dt><dd>{{ dash.ranked|number }}</dd></div>
+      <div><dt>With a verified label</dt><dd>{{ dash.labelled|number }}</dd></div>
+      <div><dt>Verified award entries</dt><dd>{{ dash.award_entries|number }}</dd></div>
+      <div><dt>Award rows left out (not verified)</dt><dd>{{ dash.excluded_award_rows|number }}</dd></div>
+    </dl>
+    <h3 class="chart-title">Award coverage</h3>
+    <p class="chart-sub">Only verified results are counted. A winner is listed once, as Winner. The year is the ceremony year, not the release year.</p>
+    {% if dash.coverage %}
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead><tr><th scope="col">Award</th><th scope="col">Years</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Winners</th></tr></thead>
+        <tbody>
+          {% for row in dash.coverage %}
+          <tr><td>{{ row.award }}</td><td>{{ row.first_year }}{% if row.last_year != row.first_year %}–{{ row.last_year }}{% endif %}</td><td class="num">{{ row.entries }}</td><td class="num">{{ row.winners }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="chart-empty">No verified award entries yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

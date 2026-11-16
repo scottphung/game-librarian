@@ -17,6 +17,17 @@
   --negative: #ff8a80;
   --warn-bg: #251c05;
   --warn-text: #ffd98a;
+  /* Dashboard chart colors: the dark steps of the dataviz reference palette, validated on --surface.
+     Series 1-3 tell series apart; band 1-5 is an ordered one-hue ramp, lightest for the best band. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --band-1: #9ec5f4;
+  --band-2: #6da7ec;
+  --band-3: #3987e5;
+  --band-4: #256abf;
+  --band-5: #184f95;
+  --band-none: #898781;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
   --sidebar-width: 264px;
@@ -170,6 +181,7 @@ select { margin-bottom: 8px; }
 .option-name { flex: 1; }
 .option-count { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .hint { margin: 6px 0 8px; color: var(--muted); font-size: 0.76rem; }
+.sub-label { display: block; margin: 2px 0 4px; color: var(--text-2); font-size: 0.78rem; }
 .filter-actions { display: flex; align-items: center; gap: 14px; }
 .catalog-status { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
 .catalog-status p { margin: 0 0 6px; }
@@ -196,6 +208,28 @@ select { margin-bottom: 8px; }
 .view-link[aria-current="page"] { background: var(--text); border-color: var(--text); color: var(--bg); }
 .view-count { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .view-link[aria-current="page"] .view-count { color: #4a4a4a; }
+.collection-switch { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: -4px 0 16px; }
+.collections-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.collection-switch ul { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.collection-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+.collection-link:hover { border-color: var(--text); color: var(--text); }
+.collection-link[aria-current="page"] { border-color: var(--text); background: var(--surface-raised); color: var(--text); font-weight: 700; }
 .results-header { margin-bottom: 16px; }
 .results-title { display: flex; align-items: center; gap: 10px; position: relative; }
 .results-title h2 { margin: 0; font-size: 1.75rem; font-weight: 900; letter-spacing: -0.01em; }
@@ -346,6 +380,7 @@ a.label:hover { background: var(--text); color: var(--bg); }
 .award strong { color: var(--text); font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.68rem; }
 .award.is-winner { border-color: var(--gold); color: var(--text); }
 .award.is-winner strong { color: var(--gold); }
+.award-more { padding: 0 8px; color: var(--muted); font-size: 0.72rem; }
 .card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
 /* The Details link covers the whole card, so a click anywhere opens the details. */
 .card-details::after { content: ""; position: absolute; inset: 0; }
@@ -438,6 +473,14 @@ a.label:hover { background: var(--text); color: var(--bg); }
 .award-source { color: var(--text-2); font-size: 0.78rem; }
 .award-note { grid-column: 1 / -1; color: var(--text-2); font-size: 0.8rem; }
 .details-cta { margin: 0 0 20px; }
+.wishlist-note { margin: -12px 0 18px; }
+.related-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 8px; padding: 0; list-style: none; }
+.related-item { margin: 0; border: 1px solid var(--border-strong); background: var(--surface); }
+.related-link { display: block; color: var(--text); text-decoration: none; }
+.related-link:hover .related-name { color: var(--focus); }
+.related-link img { display: block; width: 100%; height: auto; aspect-ratio: 460 / 215; object-fit: cover; background: var(--surface-raised); }
+.related-name { display: block; padding: 6px 8px 0; font-size: 0.86rem; font-weight: 700; line-height: 1.3; }
+.related-why { margin: 2px 8px 8px; color: var(--muted); font-size: 0.74rem; line-height: 1.35; }
 .review-line { margin: 0 0 8px; font-size: 0.92rem; }
 .sample-note { margin: 0 0 10px; color: var(--muted); font-size: 0.78rem; }
 .excerpt-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -487,22 +530,177 @@ details.more > summary { color: var(--text); font-weight: 700; cursor: pointer; 
 .media-figure figcaption { margin-top: 8px; color: var(--muted); font-size: 0.78rem; }
 .clip-fallback { display: block; margin-top: 4px; }
 .game-page { padding-top: 20px; }
+.wishlist-about { max-width: 95ch; margin: 0 0 20px; }
+.wishlist-about ul { margin: 0; padding-left: 20px; color: var(--text-2); font-size: 0.9rem; }
+.wishlist-message { margin: 0 0 10px; font-weight: 700; }
+.wishlist-message:focus { outline: none; }
+.wishlist-list { display: flex; flex-direction: column; gap: 6px; max-width: 95ch; margin: 0 0 20px; padding: 0; list-style: none; }
+.wishlist-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
 .game-sheet { border: 1px solid var(--border); background: var(--surface); }
 
 /* ---------------------------------------------------------------- dashboard */
 
-.dashboard-header { padding: 32px 0 20px; }
-.dashboard .notice p, .dashboard .notice ol, .dashboard-notes p, .dashboard-notes ul, .notice-line { max-width: 95ch; }
+.dashboard-header { padding: 32px 0 16px; }
 .dashboard-header h1 { margin: 0; font-size: clamp(2.2rem, 5vw, 3.6rem); font-weight: 900; letter-spacing: -0.03em; }
-.setup ol { padding-left: 22px; }
-.setup li { margin-bottom: 8px; }
-.notice-line { margin: 0 0 12px; color: var(--text-2); }
-.notice-line.is-warning { padding: 8px 12px; border-left: 3px solid var(--focus); background: var(--warn-bg); color: var(--warn-text); }
-.report-frame { aspect-ratio: 16 / 10; margin-bottom: 12px; border: 1px solid var(--border); background: var(--surface); }
-.report-frame iframe { display: block; width: 100%; height: 100%; border: 0; }
-.dashboard-notes { margin-top: 28px; color: var(--text-2); }
-.dashboard-notes h2 { color: var(--text); font-size: 1.1rem; }
-.dashboard-notes li { margin-bottom: 6px; }
+.dash-meta { max-width: 110ch; margin: 0 0 16px; color: var(--muted); font-size: 0.85rem; }
+
+/* One row of filters above everything it scopes. */
+.dash-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin: 0 0 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.dash-filter { display: flex; flex: 1 1 200px; flex-direction: column; min-width: 0; max-width: 340px; }
+.dash-filter select { margin: 0; }
+.dash-filter-actions { display: flex; align-items: center; gap: 14px; }
+.dash-scope { margin: 0 0 16px; color: var(--text-2); font-size: 0.9rem; }
+
+/* Stat tiles: a label and its value (default proportional figures at display size). */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.kpi { min-width: 0; padding: 14px 16px; border: 1px solid var(--border); background: var(--surface); }
+.kpi dt { color: var(--text-2); font-size: 0.85rem; }
+.kpi dd { margin: 4px 0 0; font-size: 2rem; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.kpi dd.kpi-note { margin-top: 4px; color: var(--muted); font-size: 0.78rem; font-weight: 400; letter-spacing: 0; }
+
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.chart-card { min-width: 0; margin: 0; padding: 16px 18px 18px; border: 1px solid var(--border); background: var(--surface); }
+.chart-card.is-wide { grid-column: 1 / -1; }
+.chart-title { margin: 0; font-size: 1.05rem; font-weight: 800; }
+h3.chart-title { margin-top: 16px; font-size: 0.95rem; }
+.chart-sub { max-width: 95ch; margin: 4px 0 12px; color: var(--text-2); font-size: 0.84rem; }
+.chart-sub strong { color: var(--text); }
+.chart-empty { margin: 12px 0 0; color: var(--muted); font-size: 0.9rem; }
+
+/* A legend keys each series with a swatch of its mark; the text keeps the text colors. */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 12px; padding: 0; color: var(--text-2); font-size: 0.82rem; list-style: none; }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.key { display: inline-block; flex: none; width: 12px; height: 12px; border-radius: 2px; }
+.is-series-1 { background: var(--series-1); }
+.is-series-2 { background: var(--series-2); }
+.is-series-3 { background: var(--series-3); }
+.is-band-1 { background: var(--band-1); }
+.is-band-2 { background: var(--band-2); }
+.is-band-3 { background: var(--band-3); }
+.is-band-4 { background: var(--band-4); }
+.is-band-5 { background: var(--band-5); }
+.is-band-none { background: var(--band-none); }
+
+/* Horizontal bars: a name, thin bars from one baseline, and each bar's value beside it. */
+.bar-rows { display: grid; gap: 10px; margin: 0; }
+.bar-row { display: grid; grid-template-columns: minmax(7rem, 15rem) minmax(0, 1fr); gap: 4px 12px; align-items: center; }
+.bar-row dt { min-width: 0; color: var(--text-2); font-size: 0.84rem; overflow-wrap: anywhere; }
+.bar-row dd { min-width: 0; margin: 0; }
+.bar-lines { display: grid; gap: 4px; }
+.bar-line { display: grid; grid-template-columns: minmax(0, 1fr) 4.2rem; gap: 10px; align-items: center; }
+.bar-track { display: block; height: 12px; border-left: 1px solid var(--border-strong); }
+.bar, .hstack { display: flex; height: 100%; }
+.bar { border-radius: 0 4px 4px 0; }
+.hstack { gap: 2px; }
+.hstack .seg { flex-basis: 0; min-width: 2px; }
+.hstack .seg.is-end { border-radius: 0 4px 4px 0; }
+.bar-value { color: var(--text); font-size: 0.82rem; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+/* Plots positioned in percent: gridlines with their tick labels, then the marks. */
+.axis-title { margin: 0 0 8px; color: var(--muted); font-size: 0.75rem; }
+.axis-title.is-x { margin: 0; text-align: center; }
+.grid-line { position: absolute; background: var(--border); }
+.grid-line.is-base { background: var(--border-strong); }
+.grid-line.is-y { left: 0; right: 0; height: 1px; }
+.grid-line.is-x { top: 0; bottom: 0; width: 1px; }
+.tick-label {
+  position: absolute;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+.grid-line.is-y .tick-label { right: calc(100% + 8px); bottom: 0; transform: translateY(50%); }
+.grid-line.is-x .tick-label { top: calc(100% + 8px); left: 0; transform: translateX(-50%); }
+.scatter-plot { position: relative; height: 300px; margin: 0 12px 32px 44px; }
+.dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: 0 0 -4px -4px;
+  border-radius: 50%;
+  background: var(--series-1);
+  box-shadow: 0 0 0 2px var(--surface); /* the surface ring keeps overlapping dots apart */
+}
+.dot::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; } /* a 24px target around the 8px dot */
+.dot:hover { z-index: 1; background: var(--band-1); }
+.columns-plot { position: relative; height: 230px; margin: 24px 4px 32px 34px; }
+.columns { position: absolute; inset: 0; display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; margin: 0; padding: 0; list-style: none; }
+.column { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; }
+.column-stack { position: relative; display: flex; flex-direction: column; gap: 2px; width: min(24px, 64%); }
+.column-stack .seg { flex-basis: 0; min-height: 1px; }
+.column-stack .seg.is-top { border-radius: 4px 4px 0 0; }
+.column-total, .column-label {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+.column-total { bottom: calc(100% + 4px); color: var(--text-2); }
+.column-label { top: calc(100% + 8px); color: var(--muted); }
+.column:hover .seg, .hstack .seg:hover { filter: brightness(1.3); }
+
+/* Tables: the numbers behind each chart, and the long lists. */
+/* position: relative keeps visually hidden text in the cells inside the scroll box, so it cannot widen the page. */
+.table-scroll { position: relative; max-width: 100%; overflow: auto; border: 1px solid var(--border); }
+.table-scroll.is-tall { max-height: 460px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.data-table th, .data-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.data-table td { color: var(--text-2); }
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.data-table .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.data-table th.num { white-space: normal; } /* long headings wrap; the numbers below them do not */
+.data-table tbody tr:hover td { background: var(--surface-raised); }
+.table-view { margin-top: 14px; }
+.table-view > summary { color: var(--text-2); font-size: 0.84rem; font-weight: 700; cursor: pointer; }
+.table-view[open] > summary { margin-bottom: 8px; }
+.table-view .table-scroll { max-height: 320px; }
+
+@media (max-width: 1100px) {
+  .dash-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .dash-filter { max-width: none; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .kpi { padding: 12px; }
+  .kpi dd { font-size: 1.6rem; }
+  .bar-row { grid-template-columns: minmax(0, 1fr); } /* each name above its bars */
+  .scatter-plot { height: 240px; margin-left: 40px; }
+  .columns-plot { height: 200px; }
+  .column:nth-child(even) .column-label { visibility: hidden; } /* every other year label fits a phone */
+}
 
 /* ---------------------------------------------------------------- smaller screens */
 

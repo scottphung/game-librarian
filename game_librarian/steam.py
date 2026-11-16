@@ -9,7 +9,8 @@ Documented endpoints (Steamworks Web API reference):
   * IUserReviewsService/GetAppReviews - review summary and helpful reviews
 Public but undocumented endpoints (may change without notice):
   * store/api/appdetails              - descriptions, header image, genres, modes
-  * IStoreBrowseService/GetItems      - community tags, portrait cover, trailer clips, screenshots
+  * IStoreBrowseService/GetItems      - community tags, portrait cover, trailer clips, screenshots;
+                                        for candidate screening: app type, availability, release, review summary
   * IStoreService/GetTagList          - tag id -> tag name
 """
 
@@ -170,6 +171,25 @@ class SteamClient:
                 "include_trailers": True,
                 "include_screenshots": True,
             },
+        }
+        response = self._call_service("IStoreBrowseService/GetItems", payload)
+        items = {}
+        for item in response.get("store_items", []):
+            if item.get("success") == 1 and item.get("appid"):
+                items[int(item["appid"])] = item
+        return items
+
+    def get_item_summaries(self, appids: list[int], language: str = "english", country: str = "US") -> dict[int, dict]:
+        """Return name, app type, visibility, purchase option, release and review summary for up to 50 apps.
+
+        Uses IStoreBrowseService/GetItems (undocumented), like get_store_items, with the data the
+        candidate screening needs. Apps Steam does not return, or returns without success, are left out.
+        """
+        payload = {
+            "ids": [{"appid": appid} for appid in appids],
+            "context": {"language": language, "country_code": country},
+            "data_request": {"include_basic_info": True, "include_release": True, "include_reviews": True,
+                             "include_ratings": True},
         }
         response = self._call_service("IStoreBrowseService/GetItems", payload)
         items = {}

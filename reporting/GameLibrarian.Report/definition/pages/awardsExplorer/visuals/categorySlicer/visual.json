@@ -23,13 +23,13 @@
                       "Entity": "Awards"
                     }
                   },
-                  "Property": "Category"
+                  "Property": "Award"
                 }
               },
-              "queryRef": "Awards.Category",
-              "nativeQueryRef": "Category",
+              "queryRef": "Awards.Award",
+              "nativeQueryRef": "Award",
               "active": true,
-              "displayName": "Category"
+              "displayName": "Award"
             }
           ]
         }

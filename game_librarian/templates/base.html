@@ -7,6 +7,7 @@
   <title>{% block title %}Game Librarian{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
+  <script src="/static/wishlist.js?v={{ app_version }}" defer></script>
   <script src="/static/app.js?v={{ app_version }}" defer></script>
 </head>
 <body>
@@ -14,6 +15,7 @@
   <header class="site-header">
     <a class="wordmark" href="/">GAME LIBRARIAN</a>
     <nav class="site-nav" aria-label="Site">
+      <a class="nav-link" href="/wishlist"{% if active == "wishlist" %} aria-current="page"{% endif %}>Wishlist</a>
       <a class="nav-link" href="/dashboard"{% if active == "dashboard" %} aria-current="page"{% endif %}>Dashboard</a>
     </nav>
   </header>

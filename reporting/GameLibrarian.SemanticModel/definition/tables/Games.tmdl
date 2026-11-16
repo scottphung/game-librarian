@@ -1,4 +1,4 @@
-/// One row per curated game shown on the website, with its latest stored Steam review summary. Review counts live only in this table, so tags and awards (in their own tables) can never count a game twice.
+/// One row per catalog game shown on the website (hand-picked or promoted from a reviewed candidate), with its latest stored Steam review summary. Review counts live only in this table, so tags and awards (in their own tables) can never count a game twice.
 table Games
 	lineageTag: 91e6b716-6021-4fd5-9139-51d4a03dab3f
 
@@ -79,6 +79,12 @@ table Games
 		formatString: #,0
 		displayFolder: Catalog
 		lineageTag: b0549f28-464c-4331-bccb-c23a9419517a
+
+	/// Games added through the candidate review workflow (curated/promoted_games.csv) rather than hand-picked.
+	measure 'Promoted games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Catalog Source] = "Promoted candidate" ) )
+		formatString: #,0
+		displayFolder: Catalog
+		lineageTag: 6bf7a232-823c-412e-8d14-0c09df583449
 
 	column AppID
 		dataType: int64
@@ -188,6 +194,14 @@ table Games
 		summarizeBy: none
 		sourceColumn: award_wins
 
+	/// Verified wins in an organization's top category (Game of the Year, or Best Game at the BAFTA Games Awards).
+	column 'Top Award Wins'
+		dataType: int64
+		formatString: 0
+		lineageTag: 3b9c2a52-8dbd-4e56-a370-cf52f565c2e0
+		summarizeBy: none
+		sourceColumn: top_award_wins
+
 	column 'Has Review Data'
 		dataType: boolean
 		formatString: """TRUE"";""TRUE"";""FALSE"""
@@ -284,6 +298,13 @@ table Games
 		summarizeBy: none
 		sourceColumn: rank_note
 
+	/// Hand-picked (curated/games.csv) or Promoted candidate (curated/promoted_games.csv, added after review).
+	column 'Catalog Source'
+		dataType: string
+		lineageTag: ab861543-6358-48ba-b762-667d9d1da546
+		summarizeBy: none
+		sourceColumn: catalog_source
+
 	column 'Reviews Updated (UTC)'
 		dataType: dateTime
 		formatString: yyyy-mm-dd hh:nn
@@ -309,12 +330,12 @@ table Games
 				        {"publishers", type text}, {"genres", type text}, {"release_date", type text}, {"release_date_exact", type date},
 				        {"release_year", Int64.Type}, {"production_label", type text}, {"ranking_tier", Int64.Type},
 				        {"ranking_tier_name", type text}, {"award_status", type text}, {"award_entries", Int64.Type},
-				        {"award_wins", Int64.Type}, {"has_review_data", type logical}, {"positive_reviews", Int64.Type},
-				        {"negative_reviews", Int64.Type}, {"total_reviews", Int64.Type}, {"positive_share", type number},
-				        {"steam_percent_positive", Int64.Type}, {"review_score_desc", type text}, {"positive_band", type text},
-				        {"positive_band_order", Int64.Type}, {"in_four_year_window", type logical}, {"four_year_rank", Int64.Type},
-				        {"rank_status", type text}, {"rank_note", type text}, {"reviews_updated_at", type datetime},
-				        {"details_updated_at", type datetime}
+				        {"award_wins", Int64.Type}, {"top_award_wins", Int64.Type}, {"has_review_data", type logical},
+				        {"positive_reviews", Int64.Type}, {"negative_reviews", Int64.Type}, {"total_reviews", Int64.Type},
+				        {"positive_share", type number}, {"steam_percent_positive", Int64.Type}, {"review_score_desc", type text},
+				        {"positive_band", type text}, {"positive_band_order", Int64.Type}, {"in_four_year_window", type logical},
+				        {"four_year_rank", Int64.Type}, {"rank_status", type text}, {"rank_note", type text},
+				        {"catalog_source", type text}, {"reviews_updated_at", type datetime}, {"details_updated_at", type datetime}
 				    }, "en-US")
 				in
 				    Typed

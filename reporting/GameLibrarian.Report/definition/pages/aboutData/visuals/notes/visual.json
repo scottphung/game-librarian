@@ -31,7 +31,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "An analytical companion to the Game Librarian website. It summarizes the curated catalog (the games listed in curated/games.csv) and its verified award results. It is not a ranking of all Steam games.",
+                    "value": "An analytical companion to the Game Librarian website. It summarizes the catalog (the hand-picked games in curated/games.csv and the reviewed candidates in curated/promoted_games.csv; see Catalog Source) and its verified award results. It is not a ranking of all Steam games.",
                     "textStyle": {
                       "fontSize": "10pt",
                       "color": "#C3C2B7"
@@ -144,7 +144,7 @@
               {
                 "textRuns": [
                   {
-                    "value": "Only verified rows are included: The Game Awards' Game of the Year and independent-game category, 2014–2025. AAA / AA / Indie labels need game-specific evidence; Unclassified means no verified label. Both depend on the project's hand-curated data, so the tiers and award coverage are only as complete as that data.",
+                    "value": "Only verified rows are included: The Game Awards (Game of the Year and the independent-game category, 2014–2025), BAFTA Games Awards (Best Game, 2019–2026), Game Developers Choice Awards (Game of the Year, 2019–2026) and The Steam Awards (Game of the Year, Labor of Love and Better With Friends, 2018–2025). Year is the ceremony year, not the release year; use Award (organization and category) to tell the Game of the Year categories apart. AAA / AA / Indie labels need game-specific evidence; Unclassified means no verified label. Both depend on the project's hand-curated data, so the tiers and award coverage are only as complete as that data.",
                     "textStyle": {
                       "fontSize": "10pt",
                       "color": "#C3C2B7"

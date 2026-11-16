@@ -3,9 +3,9 @@
   "name": "entriesTable",
   "position": {
     "x": 264,
-    "y": 408,
+    "y": 448,
     "z": 14000,
-    "height": 304,
+    "height": 264,
     "width": 1000,
     "tabOrder": 14000
   },
@@ -37,11 +37,11 @@
                       "Entity": "Awards"
                     }
                   },
-                  "Property": "Category"
+                  "Property": "Award"
                 }
               },
-              "queryRef": "Awards.Category",
-              "nativeQueryRef": "Category"
+              "queryRef": "Awards.Award",
+              "nativeQueryRef": "Award"
             },
             {
               "field": {

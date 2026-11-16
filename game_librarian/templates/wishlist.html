@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Wishlist | Game Librarian{% endblock %}
+{% block body %}
+<main class="page wishlist-page" id="main">
+  <section class="hero" aria-labelledby="wishlist-title">
+    <h1 id="wishlist-title">Your wishlist</h1>
+    <p class="hero-sub">Games you saved from their details in Game Librarian.</p>
+  </section>
+
+  <section class="notice wishlist-about" aria-labelledby="wishlist-about-title">
+    <h2 id="wishlist-about-title" class="field-label">How this wishlist is stored</h2>
+    <ul>
+      <li>It is saved only in this browser on this device (browser local storage). It does not sync to other browsers or devices.</li>
+      <li>It is not your Steam wishlist and never changes it. Use <strong>View on Steam</strong> to wishlist a game on Steam.</li>
+      <li>Clearing this site's browser data, or using a private window, can erase it.</li>
+      <li>Nothing about it is sent to the Game Librarian server.</li>
+    </ul>
+  </section>
+
+  <noscript><p class="notice">The wishlist needs JavaScript, which is turned off in this browser.</p></noscript>
+  <p class="wishlist-message" data-wishlist-message role="status" tabindex="-1"></p>
+  <ul class="wishlist-list" data-wishlist-list role="list"></ul>
+  <p><a class="text-link" href="/">Continue browsing</a></p>
+</main>
+{% endblock %}

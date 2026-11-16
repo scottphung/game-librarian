@@ -95,6 +95,42 @@ CREATE TABLE IF NOT EXISTS sync_state (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+-- Games proposed for the catalog (see candidates.py). Nothing here is shown on the website until
+-- a candidate is promoted into curated/promoted_games.csv and synced.
+CREATE TABLE IF NOT EXISTS candidates (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    appid               INTEGER UNIQUE,          -- Steam app id; NULL until a title-only candidate is matched
+    igdb_id             INTEGER UNIQUE,          -- IGDB game id, when IGDB suggested it (provenance only)
+    title               TEXT NOT NULL,           -- the name the first source gave
+    sources             TEXT NOT NULL,           -- JSON list of {"source", "ref", "detail"}
+    match_method        TEXT NOT NULL,           -- steam_app | curated_award | igdb_steam_id | title_only | manual
+    suggested_appids    TEXT,                    -- JSON list of Steam app ids to check for a title-only candidate
+    status              TEXT NOT NULL DEFAULT 'pending',  -- see candidates.STATUSES
+    reason              TEXT,                    -- why the candidate has its status
+    steam_name          TEXT,                    -- the facts from the last screening
+    steam_type          INTEGER,
+    visible             INTEGER,
+    available           INTEGER,                 -- 1 when Steam sells it or offers it free (US store)
+    review_count        INTEGER,
+    percent_positive    INTEGER,
+    released_on         TEXT,                    -- ISO date of the Steam release, when Steam gives one
+    coming_soon         INTEGER,
+    content_descriptors TEXT,                    -- JSON list of Steam content descriptor ids
+    attempts            INTEGER NOT NULL DEFAULT 0,  -- failed screening attempts in a row
+    last_error          TEXT,
+    screened_at         TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS candidates_by_status ON candidates (status);
+CREATE TABLE IF NOT EXISTS candidate_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    command     TEXT NOT NULL,                   -- add-discovery | add-awards | add-igdb | screen
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL,                   -- running | success | partial | failed
+    summary     TEXT                             -- JSON counts and the first errors
+);
 """
 
 # Columns added after the first release. initialize() adds them to an existing database;
@@ -415,13 +451,13 @@ def _visible_filter(words: list[str], tags: list[str]) -> tuple[str, list]:
 def matching_games(conn: sqlite3.Connection, words: list[str], tags: list[str]) -> list[sqlite3.Row]:
     """Return the visible games that match a name search and tag filter, in library order.
 
-    Each row holds only what sorting and ranking need: appid, sort_name,
-    review_positive, review_total, release_date and coming_soon. With no words
-    and no tags, this is the whole visible catalog, which the ranking is computed over.
+    Each row holds only what filtering, sorting and ranking need: appid, sort_name,
+    review_positive, review_total, release_date, coming_soon and modes (JSON). With no
+    words and no tags, this is the whole visible catalog, which the ranking is computed over.
     """
     where, params = _visible_filter(words, tags)
     return conn.execute(
-        f"""SELECT g.appid, g.sort_name, g.review_positive, g.review_total, g.release_date, g.coming_soon
+        f"""SELECT g.appid, g.sort_name, g.review_positive, g.review_total, g.release_date, g.coming_soon, g.modes
             FROM games g WHERE {where} ORDER BY g.sort_name, g.appid""",
         params,
     ).fetchall()
@@ -452,6 +488,19 @@ def tags_for(conn: sqlite3.Connection, appids: list[int]) -> dict[int, list[str]
     return tags
 
 
+def top_tags_of_visible_games(conn: sqlite3.Connection, per_game: int) -> dict[int, list[str]]:
+    """Every visible game's `per_game` most-voted tags, most voted first (the input of related.py)."""
+    tags: dict[int, list[str]] = defaultdict(list)
+    rows = conn.execute(
+        f"""SELECT t.appid, t.tag FROM game_tags t JOIN games g ON g.appid = t.appid
+            WHERE {VISIBLE_GAMES} AND t.rank < ? ORDER BY t.appid, t.rank""",
+        (per_game,),
+    )
+    for row in rows:
+        tags[row["appid"]].append(row["tag"])
+    return dict(tags)
+
+
 def excerpts_for(conn: sqlite3.Connection, appids: list[int]) -> dict[int, dict[str, list[sqlite3.Row]]]:
     """Return review excerpts as {appid: {"positive": [...], "negative": [...]}}."""
     excerpts: dict[int, dict[str, list[sqlite3.Row]]] = defaultdict(lambda: {"positive": [], "negative": []})
@@ -476,3 +525,195 @@ def catalog_counts(conn: sqlite3.Connection) -> dict[str, int]:
               (SELECT COUNT(*) FROM discovered_apps) AS discovered"""
     ).fetchone()
     return dict(row)
+
+
+# ---------------------------------------------------------------------- candidate pipeline (candidates.py)
+
+
+@dataclass
+class CandidateFacts:
+    """What one screening learned about a candidate's Steam app (from IStoreBrowseService/GetItems)."""
+
+    steam_name: str | None
+    steam_type: int | None
+    visible: bool
+    available: bool
+    review_count: int
+    percent_positive: int
+    released_on: str | None  # ISO date
+    coming_soon: bool
+    content_descriptors: list[int]
+
+
+def candidate(conn: sqlite3.Connection, *, appid: int | None = None, candidate_id: int | None = None,
+              igdb_id: int | None = None) -> sqlite3.Row | None:
+    """One candidate, found by Steam app id, candidate id or IGDB id."""
+    for column, value in (("appid", appid), ("id", candidate_id), ("igdb_id", igdb_id)):
+        if value is not None:  # column names come from the fixed tuple above, never from input
+            return conn.execute(f"SELECT * FROM candidates WHERE {column} = ?", (value,)).fetchone()
+    return None
+
+
+def add_candidate(conn: sqlite3.Connection, *, title: str, source: dict, match_method: str, now: str,
+                  appid: int | None = None, igdb_id: int | None = None, status: str = "pending",
+                  reason: str | None = None, suggested_appids: list[int] | None = None) -> str:
+    """Add a candidate, or record one more source for an existing one. Return "new" or "merged".
+
+    A candidate is the same when it has the same Steam app id or the same IGDB id, so a game found
+    by several sources appears once, with every source listed.
+    """
+    existing = None
+    if appid is not None:
+        existing = candidate(conn, appid=appid)
+    if existing is None and igdb_id is not None:
+        existing = candidate(conn, igdb_id=igdb_id)
+    with conn:
+        if existing is not None:
+            sources = json.loads(existing["sources"])
+            if source not in sources:
+                sources.append(source)
+            conn.execute(
+                "UPDATE candidates SET sources = ?, igdb_id = COALESCE(igdb_id, ?), updated_at = ? WHERE id = ?",
+                (json.dumps(sources, ensure_ascii=False), igdb_id, now, existing["id"]),
+            )
+            return "merged"
+        conn.execute(
+            """INSERT INTO candidates (appid, igdb_id, title, sources, match_method, suggested_appids, status,
+                 reason, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (appid, igdb_id, title, json.dumps([source], ensure_ascii=False), match_method,
+             json.dumps(suggested_appids) if suggested_appids is not None else None, status, reason, now, now),
+        )
+    return "new"
+
+
+def discovered_apps_to_add(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:
+    """Discovery-index apps that are neither candidates nor catalog games yet, lowest app id first.
+
+    The order says nothing about quality; it only makes the work resumable: each run continues
+    where the last one stopped.
+    """
+    return conn.execute(
+        """SELECT appid, name FROM discovered_apps
+           WHERE appid NOT IN (SELECT appid FROM candidates WHERE appid IS NOT NULL)
+             AND appid NOT IN (SELECT appid FROM games WHERE is_curated = 1)
+           ORDER BY appid LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+
+def discovered_app_names(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Every named app in the discovery index (appid, name), for title-only matching."""
+    return conn.execute("SELECT appid, name FROM discovered_apps WHERE name IS NOT NULL AND name != '' "
+                        "ORDER BY appid").fetchall()
+
+
+def candidates_to_screen(conn: sqlite3.Connection, limit: int, *, max_attempts: int,
+                         recheck_before: str | None = None) -> list[sqlite3.Row]:
+    """Candidates with a Steam app id that are due for screening, oldest first.
+
+    Due: never screened (pending), or the last attempt failed fewer than `max_attempts` times in a row.
+    With `recheck_before`, eligible and ineligible candidates screened at or before that time are due
+    again (for example to see whether a game has collected enough reviews since).
+    """
+    recheck = "OR (status IN ('eligible', 'ineligible') AND screened_at <= :before)" if recheck_before else ""
+    return conn.execute(
+        f"""SELECT * FROM candidates
+            WHERE appid IS NOT NULL
+              AND (status = 'pending' OR (status = 'error' AND attempts < :attempts) {recheck})
+            ORDER BY id LIMIT :limit""",
+        {"attempts": max_attempts, "before": recheck_before, "limit": limit},
+    ).fetchall()
+
+
+def save_screening(conn: sqlite3.Connection, candidate_id: int, facts: CandidateFacts | None, *,
+                   status: str, reason: str, now: str) -> None:
+    """Store a screening result. `facts` is None when Steam returned no store data for the app."""
+    if facts is None:
+        fact_values = (None,) * 9
+    else:
+        fact_values = (facts.steam_name, facts.steam_type, int(facts.visible), int(facts.available),
+                       facts.review_count, facts.percent_positive, facts.released_on, int(facts.coming_soon),
+                       json.dumps(facts.content_descriptors))
+    with conn:
+        conn.execute(
+            """UPDATE candidates SET status = ?, reason = ?, steam_name = ?, steam_type = ?, visible = ?,
+                 available = ?, review_count = ?, percent_positive = ?, released_on = ?, coming_soon = ?,
+                 content_descriptors = ?, attempts = 0, last_error = NULL, screened_at = ?, updated_at = ?
+               WHERE id = ?""",
+            (status, reason, *fact_values, now, now, candidate_id),
+        )
+
+
+def record_screening_error(conn: sqlite3.Connection, candidate_id: int, *, error: str, now: str) -> None:
+    """Note a failed screening request. The candidate is tried again by a later run."""
+    with conn:
+        conn.execute(
+            """UPDATE candidates SET status = 'error', attempts = attempts + 1, last_error = ?, updated_at = ?
+               WHERE id = ?""",
+            (error, now, candidate_id),
+        )
+
+
+def set_candidate_status(conn: sqlite3.Connection, candidate_id: int, *, status: str, reason: str | None,
+                         now: str) -> None:
+    """Record a reviewer's decision (promoted, rejected) or a reset (pending)."""
+    with conn:
+        conn.execute("UPDATE candidates SET status = ?, reason = ?, updated_at = ? WHERE id = ?",
+                     (status, reason, now, candidate_id))
+
+
+def match_candidate(conn: sqlite3.Connection, candidate_id: int, appid: int, *, now: str) -> None:
+    """Give a title-only candidate the Steam app a reviewer confirmed; it is screened on the next run."""
+    with conn:
+        conn.execute(
+            """UPDATE candidates SET appid = ?, match_method = 'manual', status = 'pending',
+                 reason = 'Steam app confirmed by a reviewer; waiting for screening.', updated_at = ?
+               WHERE id = ?""",
+            (appid, now, candidate_id),
+        )
+
+
+def list_candidates(conn: sqlite3.Connection, *, status: str | None = None, source: str | None = None,
+                    limit: int = 25) -> list[sqlite3.Row]:
+    """Candidates for review: the most Steam reviews first, then the oldest."""
+    clauses, params = [], []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if source:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(candidates.sources) s WHERE json_extract(s.value, '$.source') = ?)")
+        params.append(source)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return conn.execute(
+        f"SELECT * FROM candidates {where} ORDER BY COALESCE(review_count, -1) DESC, id LIMIT ?",
+        [*params, limit],
+    ).fetchall()
+
+
+def candidate_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    """How many candidates have each status."""
+    return {row["status"]: row["n"] for row in conn.execute("SELECT status, COUNT(*) AS n FROM candidates GROUP BY status")}
+
+
+def start_candidate_run(conn: sqlite3.Connection, command: str, *, now: str) -> int:
+    """Record the start of a candidates command. A run left 'running' by a crashed process is marked failed."""
+    abandoned = json.dumps({"errors": ["The run stopped before it finished (the process ended early)."]})
+    with conn:
+        conn.execute(
+            "UPDATE candidate_runs SET status = 'failed', finished_at = ?, summary = ? WHERE status = 'running'",
+            (now, abandoned),
+        )
+        cursor = conn.execute("INSERT INTO candidate_runs (command, started_at, status) VALUES (?, ?, 'running')",
+                              (command, now))
+    return cursor.lastrowid
+
+
+def finish_candidate_run(conn: sqlite3.Connection, run_id: int, *, status: str, summary: dict, now: str) -> None:
+    with conn:
+        conn.execute("UPDATE candidate_runs SET status = ?, finished_at = ?, summary = ? WHERE id = ?",
+                     (status, now, json.dumps(summary, ensure_ascii=False), run_id))
+
+
+def recent_candidate_runs(conn: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM candidate_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()

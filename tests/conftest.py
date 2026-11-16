@@ -16,7 +16,8 @@ import pytest
 from game_librarian.config import Settings
 from game_librarian.steam import SteamClient
 
-TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1695: "Open World", 3871: "2D", 1667: "Horror"}
+TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1695: "Open World", 3871: "2D", 1667: "Horror",
+             1664: "Puzzle", 1625: "Platformer", 4085: "Anime", 21: "Adventure", 3859: "Multiplayer", 1742: "Story Rich"}
 
 
 def details_payload(appid: int, name: str, **overrides) -> dict:
@@ -62,6 +63,25 @@ def trailer_item(appid: int, position: int, name: str, all_ages: bool) -> dict:
     }
 
 
+def store_summary(name: str, *, app_type: int = 0, reviews: int = 1_000, percent: int = 90,
+                  released: str | None = "2024-01-01", free: bool = False, purchasable: bool = True,
+                  visible: bool = True, coming_soon: bool = False, descriptors: tuple[int, ...] = ()) -> dict:
+    """An IStoreBrowseService/GetItems item as candidate screening requests it (fields observed live)."""
+    item = {"name": name, "type": app_type, "visible": visible, "reviews": {"summary_filtered": {
+        "review_count": reviews, "percent_positive": percent, "review_score": 8, "review_score_label": "Very Positive"}}}
+    if released:
+        item["release"] = {"steam_release_date": int(datetime.fromisoformat(released).replace(tzinfo=timezone.utc).timestamp())}
+    if coming_soon:
+        item["release"] = {**item.get("release", {}), "is_coming_soon": True}
+    if free:
+        item["is_free"] = True
+    elif purchasable:
+        item["best_purchase_option"] = {"packageid": 1, "final_price_in_cents": "1999"}
+    if descriptors:
+        item["content_descriptorids"] = list(descriptors)
+    return item
+
+
 def review(recommendation_id: int, text: str, *, voted_up: bool, votes: int = 10, playtime: int = 600) -> dict:
     """One GetAppReviews review entry."""
     return {
@@ -83,6 +103,7 @@ class FakeSteam:
         self.tags: dict[int, list[tuple[int, int]]] = {}
         self.trailers: dict[int, list[tuple[str, bool]]] = {}  # (trailer name, all ages)
         self.reviews: dict[int, dict] = {}
+        self.store_summaries: dict[int, dict] = {}  # what candidate screening sees (see store_summary)
         self.app_list_pages: list[dict] = []
         self.down = False  # every request fails with a connection error
         self.failing_paths: set[str] = set()  # path fragments that answer HTTP 503
@@ -130,6 +151,13 @@ class FakeSteam:
         if path.endswith("/IStoreService/GetTagList/v1/"):
             tags = [{"tagid": tagid, "name": name} for tagid, name in TAG_NAMES.items()]
             return httpx.Response(200, json={"response": {"tags": tags}})
+        if path.endswith("/IStoreBrowseService/GetItems/v1/") and payload["data_request"].get("include_reviews"):
+            items = []  # a screening request: review summary, release, availability
+            for ident in payload["ids"]:
+                summary = self.store_summaries.get(ident["appid"])
+                items.append({"appid": ident["appid"], "success": 1, **summary} if summary
+                             else {"appid": 0, "success": 15, "visible": False})
+            return httpx.Response(200, json={"response": {"store_items": items}})
         if path.endswith("/IStoreBrowseService/GetItems/v1/"):
             items = []
             for ident in payload["ids"]:

@@ -6,9 +6,14 @@ when Steam is unavailable. The four-year ranking is recalculated on every reques
 from the stored review counts, the verified labels and today's date (see
 ranking.py), so it follows the latest sync and its window moves forward every day.
 
-Two views share the same search, filters and pagination: "Top-ranked games" (the
-default) shows only the games released in the four-year window, and "All games"
-shows the whole catalog, where only games in the four-year ranking carry a number.
+Views share the same search, filters, sort orders and pagination: "Top-ranked games"
+(the default) shows only the games released in the four-year window, "All games" shows
+the whole catalog, and collections (catalog.py) show the games that meet a documented
+rule. A card's number is always its place in the four-year ranking of the whole catalog;
+no view, filter or sort recalculates it.
+
+The Dashboard pages (dashboard.py) summarize the same catalog with the Power BI report's
+measures, drawn as HTML.
 
 Run with `python -m game_librarian serve` (uses the `create_app` factory).
 """
@@ -21,71 +26,40 @@ from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, ranking, store
+from . import __version__, catalog, dashboard, ranking, related, store
+from .catalog import ALL_VIEW, COLLECTION_KEYS, DEFAULT_VIEW, LABEL_ORDER, SORT_ALIASES, SORT_OPTIONS, SORTS, \
+    TOP_VIEW, VIEWS, CatalogGame
 from .config import PACKAGE_DIR, STORE_PAGE_URL, Settings, load_settings
-from .curated import Award, CuratedCache, CuratedData
+from .curated import PROMOTED, Award, CuratedCache, CuratedData
 from .prepare import concise_description, normalize_for_search, percent_positive, shorten
+from .report_export import ReportTables, collect_tables
 
 PAGE_SIZE = 12  # two cards per row on desktop: six rows per page
 SIDEBAR_TAG_LIMIT = 40
 MAX_SELECTED_TAGS = 10
 MAX_QUERY_LENGTH = 100
 CARD_TAG_COUNT = 3
+CARD_AWARD_COUNT = 3  # a card lists this many awards; the details list them all
 DETAILS_TAG_COUNT = 12
 DETAILS_EXCERPT_CHARS = 280  # keeps each review excerpt to a few lines in the details dialog
 DETAILS_STALE_AFTER = timedelta(days=14)
 REVIEWS_STALE_AFTER = timedelta(days=7)
 STEAM_REVIEWS_URL = "https://steamcommunity.com/app/{appid}/reviews/"
-POWER_BI_HOST = "app.powerbi.com"
 
-LABEL_ORDER = ("AAA", "AA", "Indie")
 UNCLASSIFIED = "Unclassified"
 LABEL_FILTERS = (*LABEL_ORDER, UNCLASSIFIED)
 ANY_AWARD = "any"
-
-
-@dataclass(frozen=True)
-class SortOption:
-    """One way to order the catalog: its URL value and menu label."""
-
-    key: str
-    label: str
-
-
-SORT_OPTIONS = (
-    SortOption("rank", "Rank (tier, then positive reviews)"),
-    SortOption("reviews", "Most Steam reviews"),
-    SortOption("positive", "Highest positive share"),
-    SortOption("name", "Name (A–Z)"),
-)
-SORTS = {option.key: option for option in SORT_OPTIONS}
-
-
-@dataclass(frozen=True)
-class CatalogView:
-    """A set of catalog games: its URL value, tab label, heading and default order."""
-
-    key: str
-    label: str
-    heading: str
-    default_sort: str
-
-
-TOP_VIEW, ALL_VIEW = "top", "all"
-VIEWS = {
-    # Only the games released in the four-year window, in rank order.
-    TOP_VIEW: CatalogView(TOP_VIEW, "Top-ranked · last four years", "Top-ranked games", "rank"),
-    # The whole catalog. A–Z by default, so older games are never listed as if they were ranked.
-    ALL_VIEW: CatalogView(ALL_VIEW, "All games", "All games", "name"),
-}
-DEFAULT_VIEW = TOP_VIEW
+# Steam's game-mode categories, by their English names (prepare.MODE_CATEGORY_IDS selects them by id).
+MODE_FILTERS = ("Single-player", "Multi-player", "Co-op", "Online Co-op", "Shared/Split Screen Co-op",
+                "LAN Co-op", "PvP", "Online PvP", "Shared/Split Screen PvP", "Shared/Split Screen",
+                "Cross-Platform Multiplayer", "MMO")
 
 
 # ---------------------------------------------------------------------- formatting helpers
@@ -145,19 +119,41 @@ def _older_than(value: str | None, age: timedelta, now: datetime) -> bool:
 
 
 @dataclass(frozen=True)
+class AwardChoices:
+    """The award filter values that exist in the verified, Steam-mapped curated data."""
+
+    organizations: tuple[str, ...] = ()
+    categories: tuple[str, ...] = ()
+    years: tuple[int, ...] = ()  # newest first
+
+
+def award_choices(curated: CuratedData) -> AwardChoices:
+    """Organizations and categories in file order, and award years newest first."""
+    shown = [award for award in curated.awards if award.review_status == "verified" and award.appid]
+    return AwardChoices(
+        organizations=tuple(dict.fromkeys(award.organization for award in shown)),
+        categories=tuple(dict.fromkeys(award.category for award in shown)),
+        years=tuple(sorted({award.year for award in shown}, reverse=True)),
+    )
+
+
+@dataclass(frozen=True)
 class CatalogQuery:
     """The view, search text, filters and sort order of a catalog page. Every link keeps them."""
 
     q: str = ""
     tags: tuple[str, ...] = ()
+    modes: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
-    award: str = ""  # "" = no award filter, "any" = any listed award, otherwise one award category
-    winners: bool = False  # only award winners (in the chosen category, if any)
+    award: str = ""  # "" = any category, "any" = any listed award, otherwise one award category
+    award_org: str = ""  # "" = any organization
+    award_year: str = ""  # "" = any award year, otherwise a four-digit year
+    winners: bool = False  # only award winners (matching the other award choices)
     sort: str = ""  # "" = the view's default order
     view: str = DEFAULT_VIEW
 
     @classmethod
-    def from_params(cls, params, award_categories: list[str]) -> CatalogQuery:
+    def from_params(cls, params, choices: AwardChoices) -> CatalogQuery:
         """Read the query string. Unknown or invalid values fall back to the defaults."""
         tags: list[str] = []
         for tag in params.getlist("tag"):
@@ -165,18 +161,25 @@ class CatalogQuery:
             if tag and tag not in tags:
                 tags.append(tag)
         wanted_labels = set(params.getlist("label"))
+        wanted_modes = set(params.getlist("mode"))
         award = params.get("award", "").strip()
+        award_org = params.get("award_org", "").strip()
+        award_year = params.get("award_year", "").strip()
         view = params.get("view", DEFAULT_VIEW)
         view = view if view in VIEWS else DEFAULT_VIEW
         sort = params.get("sort", "")
+        sort = SORT_ALIASES.get(sort, sort)
         # A sort equal to the view's default is stored as "", so switching views keeps only a deliberate choice.
         if sort not in SORTS or sort == VIEWS[view].default_sort:
             sort = ""
         return cls(
             q=params.get("q", "").strip()[:MAX_QUERY_LENGTH],
             tags=tuple(tags[:MAX_SELECTED_TAGS]),
+            modes=tuple(mode for mode in MODE_FILTERS if mode in wanted_modes),
             labels=tuple(label for label in LABEL_FILTERS if label in wanted_labels),
-            award=award if award == ANY_AWARD or award in award_categories else "",
+            award=award if award == ANY_AWARD or award in choices.categories else "",
+            award_org=award_org if award_org in choices.organizations else "",
+            award_year=award_year if award_year.isdigit() and int(award_year) in choices.years else "",
             winners=params.get("winners") in ("1", "on", "true"),
             sort=sort,
             view=view,
@@ -191,9 +194,14 @@ class CatalogQuery:
         """Query-string pairs; defaults are left out to keep URLs short."""
         params = [("q", self.q)] if self.q else []
         params.extend(("tag", tag) for tag in self.tags)
+        params.extend(("mode", mode) for mode in self.modes)
         params.extend(("label", label) for label in self.labels)
         if self.award:
             params.append(("award", self.award))
+        if self.award_org:
+            params.append(("award_org", self.award_org))
+        if self.award_year:
+            params.append(("award_year", self.award_year))
         if self.winners:
             params.append(("winners", "1"))
         if self.order != VIEWS[self.view].default_sort:
@@ -210,8 +218,12 @@ class CatalogQuery:
         return f"{path}?{urlencode(params)}" if params else path
 
     @property
+    def has_award_filter(self) -> bool:
+        return bool(self.award or self.award_org or self.award_year or self.winners)
+
+    @property
     def has_filters(self) -> bool:
-        return bool(self.q or self.tags or self.labels or self.award or self.winners)
+        return bool(self.q or self.tags or self.modes or self.labels or self.has_award_filter)
 
 
 def _page_number(value: str) -> int:
@@ -231,8 +243,14 @@ def _page_links(query: CatalogQuery, page: int, total_pages: int) -> list[dict]:
 
 
 def _award_filter_label(query: CatalogQuery) -> str:
-    category = "any listed award" if query.award in ("", ANY_AWARD) else query.award
-    return f"Won {category}" if query.winners else f"Award: {category}"
+    """'Won BAFTA Games Awards · Best Game · 2024', 'Award: any listed award', ..."""
+    parts = [query.award_org] if query.award_org else []
+    if query.award not in ("", ANY_AWARD):
+        parts.append(query.award)
+    if query.award_year:
+        parts.append(query.award_year)
+    what = " · ".join(parts) or "any listed award"
+    return f"Won {what}" if query.winners else f"Award: {what}"
 
 
 def _active_filters(query: CatalogQuery) -> list[dict]:
@@ -242,73 +260,54 @@ def _active_filters(query: CatalogQuery) -> list[dict]:
         chips.append({"label": f"Name: “{query.q}”", "url": replace(query, q="").url()})
     for label in query.labels:
         chips.append({"label": label, "url": replace(query, labels=tuple(x for x in query.labels if x != label)).url()})
-    if query.award or query.winners:
-        chips.append({"label": _award_filter_label(query), "url": replace(query, award="", winners=False).url()})
+    if query.has_award_filter:
+        chips.append({"label": _award_filter_label(query),
+                      "url": replace(query, award="", award_org="", award_year="", winners=False).url()})
     for tag in query.tags:
         chips.append({"label": tag, "url": replace(query, tags=tuple(x for x in query.tags if x != tag)).url()})
+    for mode in query.modes:
+        chips.append({"label": mode, "url": replace(query, modes=tuple(x for x in query.modes if x != mode)).url()})
     return chips
 
 
-# ---------------------------------------------------------------------- filtering and sorting
+# ---------------------------------------------------------------------- filtering
 
 
-def _award_categories(curated: CuratedData) -> list[str]:
-    """Award categories that can be shown (verified and mapped to a Steam app), in file order."""
-    return list(dict.fromkeys(a.category for a in curated.awards if a.review_status == "verified" and a.appid))
-
-
-def _verified_labels(curated: CuratedData, appid: int) -> list[str]:
-    """A game's verified AAA / AA / Indie labels, in display order."""
-    labels = curated.labels_for(appid)
-    return [name for name in LABEL_ORDER if name in labels]
-
-
-def _label_matches(labels: list[str], wanted: tuple[str, ...]) -> bool:
+def _label_matches(labels: tuple[str, ...], wanted: tuple[str, ...]) -> bool:
     """A game matches when it has any wanted label; "Unclassified" matches games without one."""
     if not wanted:
         return True
     return any(label in wanted for label in labels) or (UNCLASSIFIED in wanted and not labels)
 
 
-def _matching_awards(awards: list[Award], award: str, winners: bool) -> list[Award]:
+def _matching_awards(awards, org: str, category: str, year: str, winners: bool) -> list[Award]:
+    """The awards that fit every given choice; an empty choice ("" or "any") accepts every value."""
     return [
-        a for a in awards
-        if (award in ("", ANY_AWARD) or a.category == award) and (not winners or a.result == "winner")
+        award for award in awards
+        if (not org or award.organization == org)
+        and (category in ("", ANY_AWARD) or award.category == category)
+        and (not year or str(award.year) == year)
+        and (not winners or award.result == "winner")
     ]
 
 
-def _award_matches(awards: list[Award], award: str, winners: bool) -> bool:
-    return not (award or winners) or bool(_matching_awards(awards, award, winners))
+def _award_matches(game: CatalogGame, query: CatalogQuery) -> bool:
+    if not query.has_award_filter:
+        return True
+    return bool(_matching_awards(game.awards, query.award_org, query.award, query.award_year, query.winners))
 
 
-def _usable_share(row) -> float | None:
-    """The exact positive share, or None when the review summary cannot be used."""
-    if ranking.unranked_reason(row["review_positive"], row["review_total"]) is not None:
-        return None
-    return row["review_positive"] / row["review_total"]
+def _award_option_counts(games: list[CatalogGame], query: CatalogQuery, choices: AwardChoices) -> dict:
+    """Games each award option would show, given the other award choices (and every other filter)."""
+    def count(org: str, category: str, year: str) -> int:
+        return sum(1 for game in games if _matching_awards(game.awards, org, category, year, query.winners))
 
-
-def _sort_rows(rows: list, sort: str, placements: dict[int, ranking.Placement]) -> list:
-    """Order result rows. Games without usable review data always come last; ties fall back to A-Z.
-
-    By rank, games in the four-year ranking come first in rank order, and every
-    other game (Unranked, or outside the window in the All games view) follows A-Z.
-    """
-    if sort == "name":
-        return list(rows)  # matching_games already returns library order
-    if sort == "reviews":
-        def key(row):
-            total = row["review_total"] if _usable_share(row) is not None else None
-            return (total is None, -(total or 0), row["sort_name"], row["appid"])
-    elif sort == "positive":  # the raw Steam share
-        def key(row):
-            share = _usable_share(row)
-            return (share is None, -(share or 0), -(row["review_total"] or 0), row["sort_name"], row["appid"])
-    else:
-        def key(row):
-            rank = placements[row["appid"]].rank
-            return (rank is None, rank or 0, row["sort_name"], row["appid"])
-    return sorted(rows, key=key)
+    return {
+        "any": count(query.award_org, ANY_AWARD, query.award_year),
+        "categories": {category: count(query.award_org, category, query.award_year) for category in choices.categories},
+        "organizations": {org: count(org, query.award, query.award_year) for org in choices.organizations},
+        "years": {year: count(query.award_org, query.award, str(year)) for year in choices.years},
+    }
 
 
 # ---------------------------------------------------------------------- view building
@@ -349,6 +348,7 @@ def _award_view(award: Award) -> dict:
         "year": award.year,
         "category": award.category,
         "is_winner": award.result == "winner",
+        "is_top_award": award.is_top_award,
         "result": "Winner" if award.result == "winner" else "Nominee",
         "for_original_release": award.mapping == "edition",
         "award_title": award.award_title,
@@ -361,17 +361,19 @@ def _award_view(award: Award) -> dict:
 def _card_view(row, tags: list[str], curated: CuratedData, place: ranking.Placement,
                query: CatalogQuery, page: int) -> dict:
     appid = row["appid"]
+    awards = curated.awards_for(appid)
     return {
         "appid": appid,
         "name": row["name"] or row["curated_title"],
         **_placement_view(place),
         "release": _release_shown(row, place),
         "image_url": row["cover_image_url"] or row["header_image_url"],
-        "labels": _verified_labels(curated, appid),
+        "labels": [name for name in LABEL_ORDER if name in curated.labels_for(appid)],
         "tags": tags[:CARD_TAG_COUNT],
         "summary": concise_description(row["short_description"] or ""),
         "reviews": _review_summary(row),
-        "awards": [_award_view(award) for award in curated.awards_for(appid)],
+        "awards": [_award_view(award) for award in awards[:CARD_AWARD_COUNT]],
+        "more_awards": max(0, len(awards) - CARD_AWARD_COUNT),
         "store_url": STORE_PAGE_URL.format(appid=appid),
         "details_url": query.url(page, path=f"/games/{appid}"),
     }
@@ -406,8 +408,22 @@ def _excerpt_view(excerpt) -> dict:
     }
 
 
+def _related_view(suggestions: list[related.RelatedGame], rows: dict, query: CatalogQuery, page: int) -> list[dict]:
+    """Compact links to related games; each keeps the browsing context of the page it came from."""
+    return [
+        {
+            "appid": suggestion.appid,
+            "name": rows[suggestion.appid]["name"] or rows[suggestion.appid]["curated_title"],
+            "image_url": rows[suggestion.appid]["header_image_url"] or rows[suggestion.appid]["cover_image_url"],
+            "explanation": suggestion.explanation,
+            "url": query.url(page, path=f"/games/{suggestion.appid}"),
+        }
+        for suggestion in suggestions
+    ]
+
+
 def _details_view(row, tags: list[str], excerpts: dict, curated: CuratedData, place: ranking.Placement,
-                  now: datetime) -> dict:
+                  now: datetime, *, related_games: list[dict], related_note: str) -> dict:
     appid = row["appid"]
     labels = curated.labels_for(appid)
     tag_view = TOP_VIEW if place.in_window else ALL_VIEW  # a tag link always lists the game it came from
@@ -435,6 +451,8 @@ def _details_view(row, tags: list[str], excerpts: dict, curated: CuratedData, pl
         "store_url": STORE_PAGE_URL.format(appid=appid),
         "reviews_url": STEAM_REVIEWS_URL.format(appid=appid),
         "media": _media_view(row),
+        "related": related_games,
+        "related_note": related_note,
         "reviews": {
             **_review_summary(row),
             "status": row["reviews_status"],
@@ -465,53 +483,35 @@ def _sync_status(conn) -> dict:
     }
 
 
-def dashboard_view(url: str) -> dict:
-    """Decide how the configured report URL is shown on /dashboard.
-
-    - secure_embed: a Power BI "Embed report > Website or portal" link. The report
-      loads in a frame and each viewer signs in; Power BI checks their permission.
-    - public_embed: a "Publish to web" link. Anyone with it can view, without signing in.
-    - link: any other HTTPS URL (for example the report's own app.powerbi.com page),
-      opened in a new tab, where Power BI asks the viewer to sign in.
-    """
-    if not url:
-        return {"state": "not_connected"}
-    parts = urlsplit(url)
-    path = parts.path.rstrip("/").casefold()
-    if parts.hostname == POWER_BI_HOST and path == "/reportembed":
-        return {"state": "secure_embed", "url": url}
-    if parts.hostname == POWER_BI_HOST and path == "/view":
-        return {"state": "public_embed", "url": url}
-    return {"state": "link", "url": url}
-
-
 # ---------------------------------------------------------------------- app
 
 
 def create_app(settings: Settings | None = None, *, today: Callable[[], date] = date.today) -> FastAPI:
     """Build the web app. Tests pass their own Settings and a fixed `today`; `serve` uses the environment.
 
-    `today` gives the last day of the four-year ranking window: by default the
-    calendar date of the computer that runs the site, read again on every request.
+    `today` gives the last day of the four-year ranking window (and of the "Recent releases"
+    window): by default the calendar date of the computer that runs the site, read again on
+    every request.
     """
     settings = settings or load_settings()
     store.initialize(settings.db_path).close()  # an empty catalog is valid: the page explains how to sync
     curated_cache = CuratedCache(settings.curated_dir)
-    dashboard_url = settings.dashboard_url or ""
-    parsed = urlsplit(dashboard_url)
-    if dashboard_url and (parsed.scheme != "https" or not parsed.hostname):
-        raise ValueError("GAME_LIBRARIAN_DASHBOARD_URL must be an absolute HTTPS URL")
-    dashboard = dashboard_view(dashboard_url)
 
     app = FastAPI(title="Game Librarian", docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     templates.env.filters.update(
-        date=format_date, datetime=format_datetime, number=format_number, hours=format_hours, day=format_day
+        date=format_date, datetime=format_datetime, number=format_number, hours=format_hours, day=format_day,
+        rate=dashboard.format_rate, compact=dashboard.compact_number,
     )
     templates.env.globals["app_version"] = __version__  # cache-busts the stylesheet and script after an upgrade
 
-    def load_details(appid: int) -> dict | None:
+    def request_query(request: Request) -> tuple[CatalogQuery, int]:
+        """The catalog query and page number a details link carries, so its links keep the context."""
+        query = CatalogQuery.from_params(request.query_params, award_choices(curated_cache.get()))
+        return query, _page_number(request.query_params.get("page", "1"))
+
+    def load_details(appid: int, query: CatalogQuery, page: int) -> dict | None:
         """Everything the details view needs for one visible game, or None if it is not shown."""
         curated = curated_cache.get()
         conn = store.connect(settings.db_path)
@@ -520,99 +520,158 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             if row is None or not row["is_curated"] or row["details_updated_at"] is None:
                 return None
             window = ranking.RankingWindow.ending_on(today())
-            placements = ranking.place_catalog(store.matching_games(conn, [], []), curated, window)
+            catalog_rows = store.matching_games(conn, [], [])
+            placements = ranking.place_catalog(catalog_rows, curated, window)
             tags = store.tags_for(conn, [appid])[appid]
             excerpts = store.excerpts_for(conn, [appid])[appid]
+            top_tags = store.top_tags_of_visible_games(conn, related.TOP_TAGS)
+            facts = {game.appid: game for game in catalog.catalog_games(catalog_rows, curated, placements)}
+            suggestions = related.related_games(
+                appid, top_tags, {key: game.positive for key, game in facts.items()},
+                {key: game.sort_name for key, game in facts.items()},
+            )
+            related_rows = store.game_rows(conn, [suggestion.appid for suggestion in suggestions])
         finally:
             conn.close()
-        return _details_view(row, tags, excerpts, curated, placements[appid], datetime.now(timezone.utc))
+        return _details_view(
+            row, tags, excerpts, curated, placements[appid], datetime.now(timezone.utc),
+            related_games=_related_view(suggestions, related_rows, query, page),
+            related_note="" if suggestions else related.no_related_reason(appid, top_tags),
+        )
+
+    def report_tables() -> tuple[ReportTables, ranking.RankingWindow]:
+        """The dashboard's data: the report tables for today's four-year window, read on every request."""
+        window = ranking.RankingWindow.ending_on(today())
+        conn = store.connect(settings.db_path)
+        try:
+            return collect_tables(conn, curated_cache.get(), window), window
+        finally:
+            conn.close()
+
+    def render_dashboard(request: Request, section: str, tables: ReportTables, window: ranking.RankingWindow,
+                         view: dict):
+        context = {"active": "dashboard", "section": section, "dash": view, "window": window,
+                   "last_sync": tables.last_sync}
+        return templates.TemplateResponse(request, f"dashboard_{section}.html", context)
 
     @app.get("/dashboard", response_class=HTMLResponse)
-    def dashboard_page(request: Request):
-        return templates.TemplateResponse(request, "dashboard.html", {"dashboard": dashboard, "active": "dashboard"})
+    def dashboard_reception(request: Request):
+        """Player reception: the first page of the Power BI report, as HTML."""
+        tables, window = report_tables()
+        return render_dashboard(request, "reception", tables, window,
+                                dashboard.reception_page(tables, request.query_params))
+
+    @app.get("/dashboard/awards", response_class=HTMLResponse)
+    def dashboard_awards(request: Request):
+        """Awards: the report's Awards Explorer page, as HTML."""
+        tables, window = report_tables()
+        return render_dashboard(request, "awards", tables, window, dashboard.awards_page(tables, request.query_params))
+
+    @app.get("/dashboard/about", response_class=HTMLResponse)
+    def dashboard_about(request: Request):
+        """About the data: definitions, coverage and the loaded data."""
+        tables, window = report_tables()
+        return render_dashboard(request, "about", tables, window, dashboard.about_page(tables, window))
+
+    @app.get("/wishlist", response_class=HTMLResponse)
+    def wishlist_page(request: Request):
+        return templates.TemplateResponse(request, "wishlist.html", {"active": "wishlist"})
 
     @app.get("/games/{appid}/panel", response_class=HTMLResponse)
     def game_panel(request: Request, appid: int):
-        """The details as an HTML fragment for the in-page dialog."""
-        game = load_details(appid)
+        """The details as an HTML fragment for the in-page dialog. The query string is the list's context."""
+        query, page = request_query(request)
+        game = load_details(appid, query, page)
         return templates.TemplateResponse(request, "panel.html", {"game": game}, status_code=200 if game else 404)
 
     @app.get("/games/{appid}", response_class=HTMLResponse)
     def game_page(request: Request, appid: int):
         """The details as a full page: a direct link, and the fallback when JavaScript is off."""
-        query = CatalogQuery.from_params(request.query_params, _award_categories(curated_cache.get()))
-        back_url = query.url(_page_number(request.query_params.get("page", "1"))) + f"#game-{appid}"
-        game = load_details(appid)
+        query, page = request_query(request)
+        back_url = query.url(page) + f"#game-{appid}"
+        game = load_details(appid, query, page)
         context = {"game": game, "back_url": back_url}
         return templates.TemplateResponse(request, "game.html", context, status_code=200 if game else 404)
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         curated = curated_cache.get()
-        categories = _award_categories(curated)
-        query = CatalogQuery.from_params(request.query_params, categories)
+        choices = award_choices(curated)
+        query = CatalogQuery.from_params(request.query_params, choices)
         page_number = _page_number(request.query_params.get("page", "1"))
         words = normalize_for_search(query.q).split()
-        window = ranking.RankingWindow.ending_on(today())
+        current_day = today()
+        window = ranking.RankingWindow.ending_on(current_day)
 
         conn = store.connect(settings.db_path)
         try:
-            catalog = store.matching_games(conn, [], [])
-            # Placed over the whole catalog, so search and filters never change a game's rank.
-            placements = ranking.place_catalog(catalog, curated, window)
-            searched = store.matching_games(conn, words, list(query.tags)) if (words or query.tags) else catalog
-            labels_of = {row["appid"]: _verified_labels(curated, row["appid"]) for row in searched}
-            label_ok = {appid: _label_matches(labels, query.labels) for appid, labels in labels_of.items()}
-            award_ok = {
-                row["appid"]: _award_matches(curated.awards_for(row["appid"]), query.award, query.winners)
-                for row in searched
-            }
-            in_view = {appid: query.view == ALL_VIEW or placements[appid].in_window for appid in labels_of}
-            matches = [row for row in searched if label_ok[row["appid"]] and award_ok[row["appid"]]]
-            results = _sort_rows([row for row in matches if in_view[row["appid"]]], query.order, placements)
+            catalog_rows = store.matching_games(conn, [], [])
+            # Placed over the whole catalog, so search, filters, views and sorts never change a game's rank.
+            placements = ranking.place_catalog(catalog_rows, curated, window)
+            searched_rows = store.matching_games(conn, words, list(query.tags)) if (words or query.tags) else catalog_rows
+            searched = catalog.catalog_games(searched_rows, curated, placements)
+            mode_ok = {game.appid: set(query.modes).issubset(game.modes) for game in searched}
+            label_ok = {game.appid: _label_matches(game.labels, query.labels) for game in searched}
+            award_ok = {game.appid: _award_matches(game, query) for game in searched}
+            members = {key: {game.appid for game in searched if view.includes(game, current_day)}
+                       for key, view in VIEWS.items()}
+            in_view = members[query.view]
+            matches = [game for game in searched if mode_ok[game.appid] and label_ok[game.appid] and award_ok[game.appid]]
+            results = catalog.sort_games([game for game in matches if game.appid in in_view], query.order, current_day)
             total_pages = max(1, math.ceil(len(results) / PAGE_SIZE))
             if page_number > total_pages:
                 return RedirectResponse(query.url(total_pages), status_code=303)
             start = (page_number - 1) * PAGE_SIZE
-            page_appids = [row["appid"] for row in results[start : start + PAGE_SIZE]]
+            page_appids = [game.appid for game in results[start : start + PAGE_SIZE]]
             rows = store.game_rows(conn, page_appids)
             tags_by_game = store.tags_for(conn, page_appids)
-            tag_facets = store.tag_counts(conn, [row["appid"] for row in results], limit=SIDEBAR_TAG_LIMIT)
+            tag_facets = store.tag_counts(conn, [game.appid for game in results], limit=SIDEBAR_TAG_LIMIT)
             counts = store.catalog_counts(conn)
             sync_status = _sync_status(conn)
         finally:
             conn.close()
 
         # Option counts follow the view and the other active filters, so each number says what choosing it would show.
+        viewed = [game for game in searched if game.appid in in_view]
         label_counts: Counter = Counter()
-        award_counts: Counter = Counter()
-        for appid, labels in labels_of.items():
-            if not in_view[appid]:
-                continue
-            if award_ok[appid]:
-                label_counts.update(labels or [UNCLASSIFIED])
-            if label_ok[appid]:
-                awards = _matching_awards(curated.awards_for(appid), ANY_AWARD, query.winners)
-                award_counts.update({ANY_AWARD, *(award.category for award in awards)} if awards else ())
+        for game in viewed:
+            if award_ok[game.appid] and mode_ok[game.appid]:
+                label_counts.update(game.labels or (UNCLASSIFIED,))
+        award_counts = _award_option_counts(
+            [game for game in viewed if label_ok[game.appid] and mode_ok[game.appid]], query, choices)
+        mode_counts = Counter(mode for game in results for mode in set(game.modes))
         facet_names = {facet["tag"] for facet in tag_facets}
-        window_matches = sum(1 for row in matches if placements[row["appid"]].in_window)
+
+        def view_link(key: str) -> dict:
+            """A view or collection link that keeps the search and filters, with the games it would show."""
+            return {"key": key, "label": VIEWS[key].label, "url": replace(query, view=key).url(),
+                    "current": key == query.view, "games": sum(1 for game in matches if game.appid in members[key])}
+
+        window_matches = sum(1 for game in matches if game.in_window)
+        catalog_appids = [row["appid"] for row in catalog_rows]
         context = {
             "query": query,
             "view": VIEWS[query.view],
             # Each tab keeps the search and filters, and counts the games it would show with them.
-            "view_links": [
-                {"label": VIEWS[key].label, "url": replace(query, view=key).url(), "current": key == query.view,
-                 "games": window_matches if key == TOP_VIEW else len(matches)}
-                for key in (TOP_VIEW, ALL_VIEW)
-            ],
+            "view_links": [view_link(key) for key in (TOP_VIEW, ALL_VIEW)],
+            "collection_links": [view_link(key) for key in COLLECTION_KEYS],
             "window": window,
+            "recent_window": catalog.recent_window(current_day),
             "sort": SORTS[query.order],
             "sort_options": SORT_OPTIONS,
+            "mode_options": [
+                {"name": mode, "games": mode_counts[mode], "selected": mode in query.modes} for mode in MODE_FILTERS
+            ],
             "label_options": [
                 {"name": name, "games": label_counts[name], "selected": name in query.labels} for name in LABEL_FILTERS
             ],
-            "award_options": [{"value": ANY_AWARD, "label": "Any listed award", "games": award_counts[ANY_AWARD]}]
-            + [{"value": category, "label": category, "games": award_counts[category]} for category in categories],
+            "award_options": [{"value": ANY_AWARD, "label": "Any listed award", "games": award_counts["any"]}]
+            + [{"value": category, "label": category, "games": award_counts["categories"][category]}
+               for category in choices.categories],
+            "award_org_options": [{"value": org, "games": award_counts["organizations"][org]}
+                                  for org in choices.organizations],
+            "award_year_options": [{"value": str(year), "games": award_counts["years"][year]} for year in choices.years],
+            "award_organizations": choices.organizations,
             "tag_options": [
                 {"tag": facet["tag"], "games": facet["games"], "selected": facet["tag"] in query.tags}
                 for facet in tag_facets
@@ -623,7 +682,8 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
                 for appid in page_appids
             ],
             "total": len(results),
-            "catalog_total": len(catalog),
+            "catalog_total": len(catalog_rows),
+            "promoted_total": sum(1 for appid in catalog_appids if curated.catalog_source(appid) == PROMOTED),
             "window_total": sum(1 for place in placements.values() if place.in_window),
             "ranked_total": sum(1 for place in placements.values() if place.rank is not None),
             # Matching games the Top-ranked view leaves out because they are outside the window.

@@ -1,8 +1,10 @@
 """Web app: catalog cards, the four-year ranking, views, search, filters, sorting, pagination, details, dashboard."""
 
+import csv
+import json
 import re
-from dataclasses import replace
 from datetime import date
+from html import unescape
 
 import httpx
 import pytest
@@ -10,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from game_librarian import store
 from game_librarian.curated import CuratedGame
+from game_librarian.dashboard import compact_number, format_rate
+from game_librarian.report_export import export_report
 from game_librarian.steam import SteamClient
 from game_librarian.sync import SyncOptions, run_sync
 from game_librarian.web import PAGE_SIZE, create_app
@@ -88,6 +92,201 @@ def client(settings, games):
     return TestClient(make_app(settings))
 
 
+def set_modes(settings, modes_by_appid):
+    conn = store.connect(settings.db_path)
+    try:
+        for appid, modes in modes_by_appid.items():
+            conn.execute("UPDATE games SET modes = ? WHERE appid = ?", (json.dumps(modes), appid))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_mode_filters_match_all_and_keep_query(client, settings):
+    set_modes(settings, {101: ["Single-player", "Online Co-op"], 102: ["Single-player"]})
+    response = client.get('/', params=[('view', 'all'), ('mode', 'Single-player'), ('mode', 'Online Co-op')])
+    assert response.status_code == 200
+    assert 'Game 01' in response.text
+    assert 'Game 02' not in response.text
+    assert 'name="mode" value="Online Co-op" checked' in response.text
+    assert 'mode=Single-player' in response.text
+
+
+def test_mode_filters_are_kept_by_search_sort_views_pages_and_details(client, settings):
+    # Every fixture game has Single-player and Online Co-op (the fake Steam's default categories).
+    set_modes(settings, {103: ["Single-player"], 104: []})  # 104: Steam lists no mode data
+    params = [("mode", "Single-player"), ("mode", "Online Co-op"), ("sort", "name")]
+    html = client.get("/", params=params).text
+    assert 103 not in shown_appids(html) and 104 not in shown_appids(html)  # all selected modes are required
+    assert "Showing 1–12 of 12 games matching your filters" in text_of(html)
+    assert re.search(r'<span class="option-name">Online Co-op</span>\s*<span class="option-count">12</span>', html)
+    kept = "mode=Single-player&amp;mode=Online+Co-op"
+    assert f'href="/?{kept}&amp;view=all"' in view_switch(html)  # views (A-Z is All games' own default order)
+    assert f'href="/?{kept}&amp;sort=name&amp;view=goty"' in html  # collections
+    assert f'href="/games/101?{kept}&amp;sort=name"' in html  # details links
+    assert 'name="mode" value="Single-player" checked' in html  # the search and sort form submits them too
+    back = client.get("/games/101", params=params).text
+    assert f'href="/?{kept}&amp;sort=name#game-101"' in back  # and the details page links back with them
+    assert "Games whose Steam page lists no mode data are left out when a mode is selected; that does not mean" in html
+    panel = client.get("/games/104/panel").text
+    assert "<dt>Modes</dt><dd><span class=\"muted\"" in panel and "Not listed on Steam" in panel
+
+
+def test_wishlist_page_and_details_button(client):
+    page = client.get('/wishlist')
+    assert page.status_code == 200
+    assert 'data-wishlist-list' in page.text
+    details = client.get('/games/101/panel')
+    assert details.status_code == 200
+    assert 'data-wishlist-toggle' in details.text
+    assert 'data-appid="101"' in details.text
+
+
+def test_the_wishlist_explains_that_it_is_browser_local_and_not_steam(client):
+    page = text_of(client.get("/wishlist").text)
+    for phrase in ("saved only in this browser on this device", "does not sync to other browsers or devices",
+                   "It is not your Steam wishlist", "Clearing this site's browser data", "can erase it",
+                   "Nothing about it is sent to the Game Librarian server", "The wishlist needs JavaScript"):
+        assert phrase in page, phrase
+    assert re.search(r'<a class="nav-link" href="/wishlist"\s*>Wishlist</a>', client.get("/").text)
+    panel = client.get("/games/101/panel").text
+    assert 'aria-describedby="wishlist-note-101"' in panel and "saved in this browser only" in panel
+    assert '<script src="/static/wishlist.js?v=' in client.get("/").text
+
+
+# ---------------------------------------------------------------------- collections
+
+
+def test_collections_are_listed_with_counts_and_keep_the_filters(client):
+    html = client.get("/", params={"tag": "RPG"}).text
+    nav = re.search(r'<nav class="collection-switch".*?</nav>', html, re.S).group(0)
+    assert text_of(nav) == ("Collections Game of the Year winners 1 game Award winners & nominees 2 games "
+                            "Highly rated indies 0 games Big-budget games 2 games Hidden gems 0 games "
+                            "Recent releases 0 games")
+    assert 'href="/?tag=RPG&amp;view=goty"' in nav
+
+
+def test_the_goty_collection_lists_verified_top_award_wins_with_global_ranks(client):
+    html = client.get("/", params={"view": "goty"}).text
+    assert shown_appids(html) == [101]  # 102 was only nominated, in another category; 103's row is unverified
+    assert "<h2>Game of the Year winners</h2>" in html
+    assert "Games with a verified win in an organization's top category" in text_of(html)
+    assert "it is not recalculated for this collection" in text_of(html)
+    assert card_rank(html, 101) == "#1 in the four-year ranking"  # the same number as everywhere else
+    assert '<input type="hidden" name="view" value="goty">' in html
+    assert '<a class="collection-link" href="/?view=goty" aria-current="page">' in html
+
+
+def test_collections_use_their_own_default_sort_and_explain_empty_results(client):
+    assert shown_appids(client.get("/", params={"view": "big-budget"}).text) == [102, 101]  # most positive first
+    assert shown_appids(client.get("/", params={"view": "awards"}).text) == [101, 102]
+    empty = client.get("/", params={"view": "hidden-gems"}).text
+    assert shown_appids(empty) == [] and "No games in this collection yet" in empty
+    filtered = client.get("/", params={"view": "big-budget", "q": "nothing like this"}).text
+    assert "with the selected filters in this collection" in text_of(filtered)
+
+
+# ---------------------------------------------------------------------- awards from several organizations
+
+
+@pytest.fixture
+def multi_award_client(settings, games):
+    write_csv(settings.curated_dir / "awards.csv", [
+        AWARD,  # The Game Awards 2023 Game of the Year: 101 won
+        {**AWARD, "organization": "BAFTA Games Awards", "category": "Best Game", "year": "2024", "result": "nominee",
+         "steam_appid": "103", "award_title": "Game 03"},
+        {**AWARD, "organization": "The Steam Awards", "result": "nominee", "steam_appid": "104", "award_title": "Game 04"},
+        {**AWARD, "organization": "The Steam Awards", "category": "Labor of Love", "steam_appid": "105",
+         "award_title": "Game 05"},
+    ])
+    return TestClient(make_app(settings))
+
+
+def test_award_filters_distinguish_organizations_categories_and_years(multi_award_client):
+    def shown(**params):
+        return sorted(shown_appids(multi_award_client.get("/", params={"view": "all", **params}).text))
+
+    assert shown(award="Game of the Year") == [101, 104]  # the category name is shared by two organizations
+    assert shown(award_org="The Steam Awards", award="Game of the Year") == [104]
+    assert shown(award_org="The Steam Awards") == [104, 105]
+    assert shown(award_org="The Steam Awards", winners="1") == [105]
+    assert shown(award_year="2024") == [103]
+    assert shown(award_org="Nobody", award_year="1999") == list(range(101, 113))  # unknown values are ignored
+    assert shown(view="goty") == [101]  # the Steam nominee is not a winner; Labor of Love is not a top category
+
+
+def test_award_options_count_games_and_links_keep_the_award_choices(multi_award_client):
+    html = multi_award_client.get("/", params={"view": "all", "award_org": "The Steam Awards"}).text
+    assert '<option value="The Steam Awards" selected>The Steam Awards (2)</option>' in html
+    assert '<option value="BAFTA Games Awards">BAFTA Games Awards (1)</option>' in html
+    assert ">Game of the Year (1)</option>" in html and ">Labor of Love (1)</option>" in html  # Steam's categories
+    assert ">2023 (2)</option>" in html and ">2024 (0)</option>" in html
+    assert "Verified results from The Game Awards, BAFTA Games Awards, The Steam Awards." in text_of(html)
+    chips = re.search(r'<ul class="active-filters".*?</ul>', html, re.S).group(0)
+    assert "Award: The Steam Awards" in text_of(chips) and 'href="/?view=all"' in chips
+    won = multi_award_client.get("/", params={"view": "all", "award_org": "The Steam Awards", "award": "Labor of Love",
+                                              "winners": "1", "award_year": "2023"}).text
+    assert "Won The Steam Awards · Labor of Love · 2023" in text_of(won)
+    assert 'href="/games/105?award=Labor+of+Love&amp;award_org=The+Steam+Awards&amp;award_year=2023&amp;winners=1&amp;view=all"' in won
+
+
+def test_cards_and_details_name_the_organization_of_every_award(multi_award_client):
+    html = multi_award_client.get("/", params={"view": "all"}).text
+    assert "BAFTA Games Awards 2024 · Best Game · Nominee" in text_of(card_html(html, 103))
+    assert "The Steam Awards 2023 · Labor of Love · Winner" in text_of(card_html(html, 105))
+    panel = text_of(multi_award_client.get("/games/104/panel").text)
+    assert "Nominee The Steam Awards 2023 · Game of the Year Source" in panel
+
+
+# ---------------------------------------------------------------------- more games like this
+
+
+@pytest.fixture
+def related_client(settings, fake_steam, clock):
+    """Six games: three deckbuilder-like games, two open-world games and one unrelated game."""
+    tags = {801: (122, 3871, 1667, 1664, 1625), 802: (122, 3871, 1667, 1664, 4085), 803: (122, 3871, 1667, 21),
+            804: (19, 1695, 3859), 805: (19, 1695, 1742), 806: (492,)}
+    games = []
+    for appid, tag_ids in tags.items():
+        fake_steam.add_game(appid, f"Related {appid}", tags=tuple((tag, 1000 - n) for n, tag in enumerate(tag_ids)))
+        games.append(CuratedGame(appid, f"Related {appid}", ""))
+    run_test_sync(settings, fake_steam, clock, games)
+    write_csv(settings.curated_dir / "games.csv", [{"steam_appid": str(g.appid), "title": g.title} for g in games])
+    write_csv(settings.curated_dir / "awards.csv", [{**AWARD, "steam_appid": "806"}])
+    write_csv(settings.curated_dir / "classifications.csv", [{**LABEL, "steam_appid": "806"}])
+    return TestClient(make_app(settings))
+
+
+def related_section(html):
+    return re.search(r'<section class="details-section related".*?</section>', html, re.S).group(0)
+
+
+def test_details_suggest_related_games_with_reasons_and_keep_the_browsing_context(related_client):
+    section = related_section(related_client.get("/games/801/panel", params={"view": "all", "tag": "RPG", "page": "1"}).text)
+    assert "More games like this" in section
+    assert re.findall(r'data-details="(\d+)"', section) == ["802", "803"]  # 4 shared tags, then 3; never 801 itself
+    assert 'href="/games/802?tag=RPG&amp;view=all"' in section  # the list context travels with the link
+    assert "Shares 4 tags, including RPG, 2D and Horror" in section and "Shares RPG, 2D and Horror tags" in section
+    page = related_client.get("/games/801", params={"view": "all"}).text  # the full-page fallback has them too
+    assert 'href="/games/802?view=all"' in related_section(page)
+    assert "View on Steam" in page and "Steam reviews" in page  # the rest of the details stay
+
+
+def test_details_say_so_when_no_game_is_similar_enough(related_client):
+    section = related_section(related_client.get("/games/804/panel").text)  # 805 shares only two tags
+    assert "data-details" not in section
+    assert "No other catalog game shares at least 3 of this game's most-voted Steam tags" in text_of(section)
+
+
+def test_promoted_games_are_counted_in_the_catalog_status(client, settings):
+    write_csv(settings.curated_dir / "promoted_games.csv", [
+        {"steam_appid": "114", "title": "Game 14", "source": "discovery", "match_method": "steam_app",
+         "evidence": "Steam game.", "promoted_on": "2026-11-15"}])
+    write_csv(settings.curated_dir / "games.csv", [{"steam_appid": str(appid), "title": f"Game {appid - 100:02d}"}
+                                                    for appid in range(101, 114)])
+    assert "14 games with Steam data (1 added through candidate review)." in text_of(client.get("/").text)
+
+
 # appid, name, Steam release-date text, coming soon, positive reviews, verified label
 DATED_GAMES = [
     (301, "Cutoff Day", "Nov 9, 2022", False, 5_000, None),  # in: exactly the first day of the window
@@ -141,9 +340,10 @@ def text_of(html: str) -> str:
     """Visible-ish text with tags removed and whitespace collapsed, for phrase checks.
 
     The space a removed tag leaves before punctuation is dropped: "<strong>x</strong>:" -> "x:".
+    Entities are decoded, as a browser shows them: "&amp;" -> "&", "&#39;" -> "'".
     """
     text = " ".join(re.sub(r"<[^>]+>", " ", html).split())
-    return re.sub(r" ([.,:;)])", r"\1", text)
+    return unescape(re.sub(r" ([.,:;)])", r"\1", text))
 
 
 def view_switch(html: str) -> str:
@@ -243,7 +443,12 @@ def test_the_window_and_the_ranking_rules_are_explained_on_the_page(client):
         "games released earlier in the window, because they have had more time to collect reviews.",
         "Production labels and awards come from this project’s hand-curated data",
         "Awards are not part of the rank.",
-        "Searching and filtering never change a game’s rank.",
+        "Searching and filtering never change a game’s rank, and neither do the other sort orders or the "
+        "collections: a number is always the game’s place among all catalog games in the window.",
+        "Best player reception lists games with at least 500 Steam reviews first, highest positive share first, "
+        "so a handful of reviews cannot lead",
+        "Newest release uses exact Steam release dates up to today; unreleased games and games without an exact "
+        "date follow A–Z.",
     ):
         assert phrase in text, phrase
     assert "adjusted score" not in html.lower() and "500 ×" not in html  # the old formula is gone
@@ -345,7 +550,10 @@ def test_view_tabs_keep_the_search_and_filters_and_count_their_games(dated):
 def test_switching_views_keeps_only_a_deliberately_chosen_sort(client):
     assert 'href="/?view=all"' in view_switch(client.get("/").text)  # All games opens in its own default, A–Z
     assert 'href="/?view=all"' in view_switch(client.get("/", params={"sort": "rank"}).text)  # as sent by the form
-    assert 'href="/?sort=reviews&amp;view=all"' in view_switch(client.get("/", params={"sort": "reviews"}).text)
+    assert 'href="/?sort=most-positive&amp;view=all"' in view_switch(client.get("/", params={"sort": "most-positive"}).text)
+    # Sort values from before version 0.4 still work, under their new names.
+    assert 'href="/?sort=most-positive&amp;view=all"' in view_switch(client.get("/", params={"sort": "reviews"}).text)
+    assert 'href="/?sort=reception&amp;view=all"' in view_switch(client.get("/", params={"sort": "positive"}).text)
     assert 'href="/"' in view_switch(client.get("/", params={"view": "all", "sort": "name"}).text)
 
 
@@ -410,10 +618,12 @@ def test_award_filter_by_category_and_winners(client):
 def test_sort_options_reorder_the_results(client):
     by_name = shown_appids(client.get("/", params={"sort": "name"}).text)
     assert by_name == list(range(101, 101 + PAGE_SIZE))
-    assert shown_appids(client.get("/", params={"sort": "reviews"}).text)[0] == 114  # 1,400 + 300 reviews
-    assert shown_appids(client.get("/", params={"sort": "positive"}).text)[0] == 114
+    assert shown_appids(client.get("/", params={"sort": "most-positive"}).text)[0] == 114  # 1,400 positive reviews
+    assert shown_appids(client.get("/", params={"sort": "reception"}).text)[0] == 114  # 82% of 1,700
     assert '<option value="name" selected>Name (A–Z)</option>' in client.get("/?sort=name").text
-    assert '<option value="rank" selected>Rank (tier, then positive reviews)</option>' in client.get("/").text
+    assert '<option value="rank" selected>Production tier, then positive reviews</option>' in client.get("/").text
+    for key in ("most-positive", "reception", "newest"):
+        assert f'<option value="{key}"' in client.get("/").text
     assert shown_appids(client.get("/", params={"sort": "bogus"}).text)[0] == 101  # falls back to rank
 
 
@@ -523,37 +733,110 @@ def test_long_review_excerpts_are_shortened_in_the_details(settings, fake_steam,
 # ---------------------------------------------------------------------- dashboard
 
 
-def test_dashboard_explains_setup_until_a_report_is_connected(settings):
-    html = TestClient(make_app(settings)).get("/dashboard").text
-    assert "The Power BI report is not connected yet" in html
-    assert "python -m game_librarian export-report" in html and "reporting/GameLibrarian.pbip" in html
-    assert "GAME_LIBRARIAN_DASHBOARD_URL" in html and "README.md" in html
-    assert "<iframe" not in html
-    assert "the ranking rules" in html and "ranking formula" not in html
+def kpis(html: str) -> dict[str, str]:
+    """The dashboard's summary cards: label -> shown value."""
+    return dict(re.findall(r'<div class="kpi"><dt>([^<]+)</dt><dd>([^<]+)</dd>', html))
 
 
-def test_dashboard_embeds_secure_links_warns_about_public_ones_and_links_to_others(settings):
-    secure = "https://app.powerbi.com/reportEmbed?reportId=abc&autoAuth=true&ctid=def"
-    html = TestClient(make_app(replace(settings, dashboard_url=secure))).get("/dashboard").text
-    assert f'<iframe title="Game Librarian Power BI report" src="{secure.replace("&", "&amp;")}"' in html
-    assert "Viewers sign in to Power BI" in html
-
-    public = TestClient(make_app(replace(settings, dashboard_url="https://app.powerbi.com/view?r=xyz")))
-    html = public.get("/dashboard").text
-    assert "<iframe" in html and "Publish to web" in html and "anyone who has it can view" in html
-
-    report = "https://app.powerbi.com/groups/me/reports/abc/ReportSection"
-    html = TestClient(make_app(replace(settings, dashboard_url=report))).get("/dashboard").text
-    assert "<iframe" not in html and f'href="{report}"' in html and "Sign in with an account" in html
-
-    with pytest.raises(ValueError, match="HTTPS"):
-        create_app(replace(settings, dashboard_url="javascript:alert(1)"))
+def ranking_titles(html: str) -> list[tuple[str, str]]:
+    """(rank, game) for each row of the dashboard's four-year ranking table."""
+    return re.findall(r'<tr><td class="num">(\d+)</td><td><a class="text-link" href="/games/\d+">([^<]+)</a>', html)
 
 
-def test_dashboard_link_is_the_same_whether_or_not_a_report_is_configured(settings):
-    configured = replace(settings, dashboard_url="https://app.powerbi.com/groups/me/reports/abc")
-    for app_settings in (settings, configured):
-        assert re.search(r'href="/dashboard"\s*>Dashboard</a>', TestClient(make_app(app_settings)).get("/").text)
+def test_dashboard_shows_player_reception_as_html_without_power_bi(client):
+    html = client.get("/dashboard").text
+    assert "<title>Player reception | Dashboard | Game Librarian</title>" in html
+    assert re.search(r'href="/dashboard" aria-current="page">Player reception</a>', html)
+    assert "<iframe" not in html and "GAME_LIBRARIAN_DASHBOARD_URL" not in html
+    assert "14 of 14 catalog games in total." in html
+    # 14 games: 10,500 positive of 19,250 reviews pooled (Game n: 100 × n positive of 1,000 + 50 × n).
+    assert kpis(html) == {"Games with review data": "14", "Total Steam reviews": "19.2K",
+                          "Review-weighted positive rate": "54.5%", "Average game positive rate": "51.3%"}
+    assert html.count('class="dot"') == 14
+    assert 'title="Game 14: 1,700 reviews, 82% positive, #3 in the four-year ranking"' in html
+    expected = [("1", "Game 01"), ("2", "Game 02")] + [(str(rank), f"Game {17 - rank:02d}") for rank in range(3, 15)]
+    assert ranking_titles(html) == expected  # AAA, AA, then the most positive reviews
+    bands = dict(re.findall(r'<dt>([^<]+)</dt>\s*<dd class="bar-line">.*?<span class="bar-value">(\d+)</span>', html, re.S))
+    assert bands == {"95–100%": "0", "90–94%": "0", "80–89%": "1", "70–79%": "3", "Below 70%": "10",
+                     "No usable review data": "0"}
+    labels = re.findall(r'<dt>([^<]+?) <span class="muted">· (\d+) games?</span></dt>', html)
+    assert labels == [("AAA", "1"), ("AA + Indie", "1"), ("Unclassified", "12")]
+
+
+def test_dashboard_filters_keep_ranks_and_ignore_unknown_values(client):
+    html = client.get("/dashboard?tag=Indie").text  # the even games
+    assert "7 of 14 catalog games match the filters." in html
+    assert '<option value="Indie" selected>Indie (7)</option>' in html
+    assert ranking_titles(html) == [("2", "Game 02"), ("3", "Game 14"), ("5", "Game 12"), ("7", "Game 10"),
+                                    ("9", "Game 08"), ("11", "Game 06"), ("13", "Game 04")]
+    assert '<a class="text-link" href="/dashboard">Clear filters</a>' in html
+    assert ranking_titles(client.get("/dashboard?label=AAA").text) == [("1", "Game 01")]
+    assert ranking_titles(client.get("/dashboard?award_status=Nominee").text) == [("2", "Game 02")]
+    unknown = client.get("/dashboard?tag=Nope&label=Legendary&award_status=Champion").text
+    assert "14 of 14 catalog games in total." in unknown and "Clear filters" not in unknown
+
+
+def test_dashboard_awards_page_lists_verified_entries_with_their_sources(client):
+    html = client.get("/dashboard/awards").text
+    assert re.search(r'href="/dashboard/awards" aria-current="page">Awards</a>', html)
+    assert "3 of 3 verified award entries in total." in html  # the needs_review row is left out
+    assert kpis(html) == {"Award entries": "3", "Winners": "2", "Nominees (did not win)": "1",
+                          "Catalog games with awards": "2", "Entries matched to the catalog": "67%"}
+    rows = re.findall(r"<tr>\s*<td>(\d{4})</td><td>([^<]+)</td><td>(\w+)</td><td>([^<]+)</td>\s*<td>([^<]+)</td>", html)
+    assert rows == [
+        ("2024", "The Game Awards · Best Independent Game", "Nominee", "Game 02 Original", "Original release"),
+        ("2023", "The Game Awards · Game of the Year", "Winner", "Game 01", "This Steam app"),
+        ("2021", "The Game Awards · Game of the Year", "Winner", "Console Exclusive", "No Steam app"),
+    ]
+    assert html.count('href="https://example.invalid/winners" target="_blank" rel="noopener noreferrer">Source') == 3
+    assert '<a class="text-link" href="/games/102">Game 02</a>' in html
+    assert re.search(r'title="2024: 0 winners, 1 nominee"', html)
+
+    assert kpis(client.get("/dashboard/awards?result=Winner").text)["Award entries"] == "2"
+    assert kpis(client.get("/dashboard/awards?match=Not+mapped+to+Steam").text)["Award entries"] == "1"
+    assert kpis(client.get("/dashboard/awards?year=2023").text)["Award entries"] == "1"
+    assert kpis(client.get("/dashboard/awards?year=1999").text)["Award entries"] == "3"  # not a listed year
+
+
+def test_dashboard_about_page_describes_the_loaded_data(client):
+    html = unescape(client.get("/dashboard/about").text)
+    assert "<title>About the data | Dashboard | Game Librarian</title>" in html
+    assert "It covers the 14 catalog games (14 hand-picked, 0 promoted from reviewed candidates)" in html
+    assert "<dt>Award rows left out (not verified)</dt><dd>1</dd>" in html
+    coverage = re.findall(r"<tr><td>([^<]+)</td><td>([^<]+)</td><td class=\"num\">(\d+)</td><td class=\"num\">(\d+)</td></tr>", html)
+    assert coverage == [("The Game Awards · Best Independent Game", "2024", "1", "0"),
+                        ("The Game Awards · Game of the Year", "2021–2023", "2", "2")]
+
+
+def test_dashboard_numbers_match_the_power_bi_export(client, settings, tmp_path):
+    """The dashboard aggregates the rows export-report writes, so its cards equal the report's measures."""
+    export_report(settings, tmp_path, today=TODAY)
+    with (tmp_path / "games.csv").open(encoding="utf-8", newline="") as handle:
+        games = [row for row in csv.DictReader(handle) if row["has_review_data"] == "true"]
+    with (tmp_path / "awards.csv").open(encoding="utf-8", newline="") as handle:
+        awards = list(csv.DictReader(handle))
+    positive = sum(int(row["positive_reviews"]) for row in games)
+    total = sum(int(row["total_reviews"]) for row in games)
+    average = sum(float(row["positive_share"]) for row in games) / len(games)
+    in_catalog = sum(row["catalog_status"] == "In catalog" for row in awards)
+    assert kpis(client.get("/dashboard").text) == {
+        "Games with review data": str(len(games)), "Total Steam reviews": compact_number(total),
+        "Review-weighted positive rate": format_rate(positive / total), "Average game positive rate": format_rate(average)}
+    assert kpis(client.get("/dashboard/awards").text) == {
+        "Award entries": str(len(awards)), "Winners": str(sum(row["is_winner"] == "true" for row in awards)),
+        "Nominees (did not win)": str(sum(row["is_winner"] == "false" for row in awards)),
+        "Catalog games with awards": str(len({row["catalog_appid"] for row in awards if row["catalog_appid"]})),
+        "Entries matched to the catalog": format_rate(in_catalog / len(awards), 0)}
+
+
+def test_dashboard_pages_explain_an_empty_catalog(settings):
+    app = TestClient(make_app(settings))
+    reception = app.get("/dashboard").text
+    assert "No sync has saved data yet" in reception and "0 of 0 catalog games in total." in reception
+    assert kpis(reception)["Review-weighted positive rate"] == "No data"
+    assert "No game with review data matches the filters." in reception and "No ranked game matches" in reception
+    assert "No award entry matches the filters." in app.get("/dashboard/awards").text
+    assert "No verified award entries yet." in app.get("/dashboard/about").text
 
 
 # ---------------------------------------------------------------------- robustness
@@ -565,7 +848,8 @@ def test_pages_render_without_any_network_access(client, monkeypatch):
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
     monkeypatch.setattr(SteamClient, "get_json", refuse)
-    for url in ("/", "/?q=game&tag=RPG&page=2", "/?view=all&sort=rank", "/games/101/panel", "/games/101", "/dashboard"):
+    for url in ("/", "/?q=game&tag=RPG&page=2", "/?view=all&sort=rank", "/games/101/panel", "/games/101", "/dashboard",
+                "/dashboard?tag=RPG", "/dashboard/awards?year=2023", "/dashboard/about"):
         assert client.get(url).status_code == 200, url
 
 
@@ -595,7 +879,7 @@ def test_game_text_is_escaped(settings, fake_steam, clock):
     fake_steam.add_game(500, "<script>alert(1)</script> Quest")
     run_test_sync(settings, fake_steam, clock, [CuratedGame(500, "Script Quest", "")])
     app = TestClient(make_app(settings))
-    for url in ("/", "/games/500/panel"):
+    for url in ("/", "/games/500/panel", "/dashboard"):  # the dashboard shows the name in a dot's title and a table
         html = app.get(url).text
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt; Quest" in html

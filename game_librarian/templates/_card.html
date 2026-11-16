@@ -1,6 +1,7 @@
 {# One catalog card. Every value is escaped by Jinja autoescaping. The Details link covers the whole
    card (see .card-details::after), so a click anywhere opens the details; View on Steam sits above it.
-   `view` is "top" or "all": in All games a number is labeled as a four-year rank, because older games have none. #}
+   `view` is the view key: outside "top" (All games and the collections) a number is labeled as a
+   four-year rank, because the list also holds games without one and the number is never recalculated. #}
 
 {% macro award_text(award) -%}
   {{ award.organization }} {{ award.year }} · {{ award.category }} · <strong>{{ award.result }}</strong>
@@ -19,7 +20,7 @@
   </div>
   <div class="card-body">
     <p class="card-rank">
-      {% if game.rank and view == "all" %}#{{ game.rank }} <span class="rank-scope">in the four-year ranking</span>
+      {% if game.rank and view != "top" %}#{{ game.rank }} <span class="rank-scope">in the four-year ranking</span>
       {% elif game.rank %}<span class="visually-hidden">Four-year rank </span>#{{ game.rank }}
       {% elif game.in_window %}<span class="unranked" title="{{ game.rank_note }}">Unranked</span>
       {% else %}<span class="unranked" title="{{ game.rank_note }}">Not in the four-year ranking</span>{% endif %}
@@ -49,6 +50,7 @@
       {% for award in game.awards %}
       <li class="award{% if award.is_winner %} is-winner{% endif %}">{{ award_text(award) }}</li>
       {% endfor %}
+      {% if game.more_awards %}<li class="award-more">and {{ game.more_awards }} more {{ "award result" if game.more_awards == 1 else "award results" }} in the details</li>{% endif %}
     </ul>
     {% endif %}
     <div class="card-actions">

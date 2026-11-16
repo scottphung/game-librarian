@@ -70,7 +70,7 @@ table Awards
 		summarizeBy: none
 		sourceColumn: organization
 
-	/// The ceremony year.
+	/// The year of the award ceremony or edition, as the organization names it, not the game's release year. BAFTA and GDCA ceremonies honor the previous year's games.
 	column Year
 		dataType: int64
 		formatString: 0
@@ -78,12 +78,27 @@ table Awards
 		summarizeBy: none
 		sourceColumn: year
 
-	/// The category name as the cited sources give it (2020-2022 sources call the independent-game category "Best Indie Game").
+	/// The category name as the cited sources give it (2020-2022 sources call The Game Awards' independent-game category "Best Indie Game"). Several organizations use "Game of the Year": use Award to tell them apart.
 	column Category
 		dataType: string
 		lineageTag: d836b9f0-9736-4880-afee-27ac5d003f87
 		summarizeBy: none
 		sourceColumn: category
+
+	/// The organization and the category, which together name one award, such as "BAFTA Games Awards · Best Game".
+	column Award
+		dataType: string
+		lineageTag: 2eeafd30-0007-487a-9cea-2572626d4a92
+		summarizeBy: none
+		sourceColumn: award_name
+
+	/// TRUE for an organization's top category: Game of the Year, or Best Game at the BAFTA Games Awards.
+	column 'Is Top Award'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: d3d0d1ed-6e01-43ca-b842-36fbe17bbd9f
+		summarizeBy: none
+		sourceColumn: is_top_award
 
 	/// Winner or Nominee. A nominee that won is listed only as Winner.
 	column Result
@@ -177,6 +192,7 @@ table Awards
 				    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
 				    Typed = Table.TransformColumnTypes(Promoted, {
 				        {"award_id", Int64.Type}, {"organization", type text}, {"year", Int64.Type}, {"category", type text},
+				        {"award_name", type text}, {"is_top_award", type logical},
 				        {"result", type text}, {"is_winner", type logical}, {"award_title", type text}, {"catalog_game", type text},
 				        {"steam_appid", Int64.Type}, {"catalog_appid", Int64.Type}, {"steam_mapping", type text},
 				        {"award_applies_to", type text}, {"catalog_status", type text}, {"mapping_note", type text},
