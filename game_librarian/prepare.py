@@ -382,6 +382,79 @@ def content_hash(*parts: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------- prices
+
+# What one store region says about buying an app. A missing price is never read as "free".
+PRICED = "priced"  # Steam offers a purchase option with a price
+FREE = "free"  # Steam marks the app as free (is_free)
+NOT_SOLD = "not_sold"  # Steam shows the app but offers no way to buy it in this region now
+UNAVAILABLE = "unavailable"  # Steam returned no store item for the app in this region
+PRICE_STATUSES = (PRICED, FREE, NOT_SOLD, UNAVAILABLE)
+
+
+@dataclass
+class PriceFacts:
+    """The price of one app in one Steam store region, as IStoreBrowseService/GetItems reports it."""
+
+    status: str  # one of PRICE_STATUSES
+    final_cents: int | None = None  # the price to pay now, in the region's currency (cents)
+    original_cents: int | None = None  # the price before the discount; equal to final_cents without one
+    discount_percent: int = 0
+    final_text: str | None = None  # Steam's own formatting, such as "$7.49"
+    original_text: str | None = None
+    discount_ends_at: str | None = None  # ISO 8601 UTC, when Steam gives an end date
+    discount_hidden: bool = False  # Steam asks not to present the price as a discount (compliance rules)
+    purchase_option: str | None = None  # the option's name, such as the game or a bundle that contains it
+
+
+def _cents(value: Any) -> int | None:
+    """Steam sends 64-bit integers as strings ("2499"). Return an int, or None when absent or malformed."""
+    try:
+        cents = int(value)
+    except (TypeError, ValueError):
+        return None
+    return cents if cents >= 0 else None
+
+
+def _text(value: Any) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def price_from_store_item(item: dict) -> PriceFacts:
+    """Read the free flag and the best purchase option of one GetItems store item.
+
+    Free only when Steam says so (`is_free`). An item without a priced purchase option is
+    NOT_SOLD in that region: it may be sold only in another edition or bundle, or not at all.
+    A discount's end is the earliest end date among the option's active discounts.
+    """
+    if item.get("is_free") is True:
+        return PriceFacts(status=FREE)
+    option = item.get("best_purchase_option")
+    final = _cents(option.get("final_price_in_cents")) if isinstance(option, dict) else None
+    if final is None:
+        return PriceFacts(status=NOT_SOLD)
+    percent = option.get("discount_pct")
+    percent = percent if isinstance(percent, int) and 0 < percent <= 100 else 0
+    original = _cents(option.get("original_price_in_cents")) if percent else final
+    ends = []
+    for discount in option.get("active_discounts") or []:
+        end = _cents(discount.get("discount_end_date")) if isinstance(discount, dict) else None
+        if end:
+            ends.append(end)
+    return PriceFacts(
+        status=PRICED,
+        final_cents=final,
+        original_cents=original,
+        discount_percent=percent,
+        final_text=_text(option.get("formatted_final_price")),
+        original_text=_text(option.get("formatted_original_price")) if percent else None,
+        discount_ends_at=iso_from_unix(min(ends)) if percent and ends else None,
+        discount_hidden=bool(option.get("hide_discount_pct_for_compliance")
+                             or option.get("price_cannot_be_displayed_as_discount")),
+        purchase_option=_text(option.get("purchase_option_name")),
+    )
+
+
 # ---------------------------------------------------------------------- reviews
 
 # Steam hides spoilers until clicked, so they are removed from excerpts: "[spoiler]…[/spoiler]".

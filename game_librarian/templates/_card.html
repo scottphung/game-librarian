@@ -1,7 +1,9 @@
 {# One catalog card. Every value is escaped by Jinja autoescaping. The Details link covers the whole
    card (see .card-details::after), so a click anywhere opens the details; View on Steam sits above it.
    `view` is the view key: outside "top" (All games and the collections) a number is labeled as a
-   four-year rank, because the list also holds games without one and the number is never recalculated. #}
+   five-year rank, because the list also holds games without one and the number is never recalculated.
+   Under the number, a ranked card names its award group and award counts (ranking.py); its first listed
+   award is the one that sets the group. #}
 
 {% macro award_text(award) -%}
   {{ award.organization }} {{ award.year }} · {{ award.category }} · <strong>{{ award.result }}</strong>
@@ -20,15 +22,25 @@
   </div>
   <div class="card-body">
     <p class="card-rank">
-      {% if game.rank and view != "top" %}#{{ game.rank }} <span class="rank-scope">in the four-year ranking</span>
-      {% elif game.rank %}<span class="visually-hidden">Four-year rank </span>#{{ game.rank }}
+      {% if game.rank and view != "top" %}#{{ game.rank }} <span class="rank-scope">in the five-year ranking</span>
+      {% elif game.rank %}<span class="visually-hidden">Five-year rank </span>#{{ game.rank }}
       {% elif game.in_window %}<span class="unranked" title="{{ game.rank_note }}">Unranked</span>
-      {% else %}<span class="unranked" title="{{ game.rank_note }}">Not in the four-year ranking</span>{% endif %}
+      {% else %}<span class="unranked" title="{{ game.rank_note }}">Not in the five-year ranking</span>{% endif %}
     </p>
+    {% if game.rank %}
+    <p class="card-rank-basis" title="Award group: {{ game.rank_group_name }}{% if game.rank_for_original_release %}, for the original release{% endif %}">
+      <span class="visually-hidden">Award group: </span>{{ game.rank_group_label }}{% if game.rank_for_original_release %} (for the original release){% endif %} · {{ game.rank_award_counts or "ranked by Steam reception" }}
+    </p>
+    {% endif %}
     <h3 class="card-title" id="card-title-{{ game.appid }}">{{ game.name }}</h3>
+    {% if game.labels %}
     <ul class="label-list" aria-label="Production label">
-      {% for label in game.labels %}<li class="label">{{ label }}</li>{% else %}<li class="label is-unclassified">Unclassified</li>{% endfor %}
+      {% for label in game.labels %}<li class="label">{{ label }}</li>{% endfor %}
     </ul>
+    {% endif %}
+    {% if game.sale %}
+    <p class="card-sale"><span class="sale-badge">{{ game.sale.label }}<span class="visually-hidden"> (Steam {{ game.sale.region }} store, price checked {{ game.sale.checked_at|datetime }})</span></span></p>
+    {% endif %}
     <p class="card-release">
       {%- if not game.release %}No release date on Steam
       {%- elif game.upcoming %}Release: {{ game.release }}

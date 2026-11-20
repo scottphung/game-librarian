@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Data Stories | Game Librarian{% endblock %}
+
+{% block body %}
+<main class="page stories-page" id="main">
+  <section class="hero" aria-labelledby="stories-title">
+    <h1 id="stories-title">Data Stories.</h1>
+    <p class="hero-sub">Journeys through game series, built from sourced facts: when each game first came out, where, and how long players waited between main games.</p>
+  </section>
+
+  {% if cards %}
+  <ul class="story-cards" role="list">
+    {% for card in cards %}
+    <li>
+      <article class="story-card" aria-labelledby="story-{{ card.story.slug }}">
+        <h2 id="story-{{ card.story.slug }}"><a class="story-card-link" href="/stories/{{ card.story.slug }}">{{ card.story.title }}</a></h2>
+        <p class="story-card-span">{{ card.first }}–{{ card.last }}</p>
+        <p>{{ card.story.summary }}</p>
+        <p class="small muted">{{ card.entries }} games, {{ card.main }} of them main games · facts checked {{ card.story.checked_on|day }} against Wikipedia</p>
+      </article>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="notice"><h2>No stories yet</h2><p>No valid story file was found in <code>curated/stories/</code>.</p></div>
+  {% endif %}
+  {% if problem_count %}
+  <p class="status-problem small">{{ problem_count }} story {{ "row has a problem" if problem_count == 1 else "rows have problems" }} and {{ "is" if problem_count == 1 else "are" }} left out. Run <code>python -m game_librarian check-curated</code>.</p>
+  {% endif %}
+  <p class="small muted">Stories include games that are not sold on Steam. A game links to Game Librarian only when the same game is in the catalog.</p>
+</main>
+{% endblock %}

@@ -2,6 +2,11 @@
 
    This is the site's own wishlist, not the Steam wishlist. It stays in one browser on one device,
    is never sent to the server, and disappears when the site's browser data is cleared.
+   An id is a game key (game_librarian/identity.py): a Steam app id such as "271590", as every entry
+   saved before version 0.6 already is, or "igdb-<IGDB id>" for a game without a Steam app in the
+   catalog. The storage key and format are unchanged, so existing wishlists keep working as they are.
+   A game can have aliases (its other keys): a game saved as "igdb-52189" before it came to the Steam
+   catalog still counts as saved when its catalog details list that alias, so it is never saved twice.
    Pure storage logic, shared by app.js (window.GameLibrarianWishlist) and the Node tests
    (tests/js/wishlist.test.mjs, which pass a fake storage object). */
 (function (root, factory) {
@@ -13,6 +18,8 @@
   "use strict";
 
   var KEY = "game-librarian-wishlist-v1";
+  // A Steam app id, or "igdb-" and an IGDB game id.
+  var GAME_KEY = /^(?:\d+|igdb-\d+)$/;
 
   // The browser's localStorage when this site may use it, else null. Reading window.localStorage can
   // throw (blocked site data), and setItem can throw (storage full or read-only), so both are tried.
@@ -39,7 +46,7 @@
     var items = [];
     value.forEach(function (item) {
       var id = item && String(item.id);
-      if (id && /^\d+$/.test(id) && typeof item.name === "string" && !seen[id]) {
+      if (id && GAME_KEY.test(id) && typeof item.name === "string" && !seen[id]) {
         seen[id] = true;
         items.push({ id: id, name: item.name });
       }
@@ -49,18 +56,25 @@
 
   function write(store, items) { store.setItem(KEY, JSON.stringify(items)); }
 
-  function has(store, id) {
-    var key = String(id);
-    return read(store).some(function (item) { return item.id === key; });
+  // The game's key and its aliases, as strings: keys(42, ["igdb-7"]) -> ["42", "igdb-7"].
+  function keys(id, aliases) {
+    return [String(id)].concat((aliases || []).map(String)).filter(function (key) { return GAME_KEY.test(key); });
   }
 
-  // Add the game, or remove it when it is already saved. Returns true when the game is now saved.
-  function toggle(store, id, name) {
-    var key = String(id);
+  // Whether the game is saved under its key or any of its aliases.
+  function has(store, id, aliases) {
+    var wanted = keys(id, aliases);
+    return read(store).some(function (item) { return wanted.indexOf(item.id) >= 0; });
+  }
+
+  // Add the game, or remove it when it is already saved (under its key or an alias).
+  // A new entry uses the game's current key. Returns true when the game is now saved.
+  function toggle(store, id, name, aliases) {
+    var wanted = keys(id, aliases);
     var items = read(store);
-    var saved = items.some(function (item) { return item.id === key; });
-    items = items.filter(function (item) { return item.id !== key; });
-    if (!saved) { items.push({ id: key, name: String(name) }); }
+    var saved = items.some(function (item) { return wanted.indexOf(item.id) >= 0; });
+    items = items.filter(function (item) { return wanted.indexOf(item.id) < 0; });
+    if (!saved) { items.push({ id: String(id), name: String(name) }); }
     write(store, items);
     return !saved;
   }

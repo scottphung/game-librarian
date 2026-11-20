@@ -5,15 +5,25 @@
 <div class="dash-grid">
   <section class="chart-card" aria-labelledby="what-title">
     <h2 class="chart-title" id="what-title">What this dashboard is</h2>
-    <p class="chart-sub">An HTML version of the Power BI report in <code>reporting/</code>, with the same measure definitions. It is calculated from the catalog on every page load, so no export is needed. It covers the {{ dash.games|number }} catalog games ({{ (dash.games - dash.promoted)|number }} hand-picked, {{ dash.promoted|number }} promoted from reviewed candidates), not all of Steam.</p>
-    <h3 class="chart-title">Player reception</h3>
-    <p class="chart-sub">Review counts are Steam's review summaries: Steam purchasers, all languages. The review-weighted positive rate pools every review, so games with many reviews dominate. The average game positive rate gives every game the same weight. A game counts once, however many tags or awards it has.</p>
-    <h3 class="chart-title">Four-year ranking</h3>
-    <p class="chart-sub">Only games released {{ dash.window.start|day }} – {{ dash.window.end|day }} are ranked. Verified AAA games come first, then AA, then Indie and Unclassified together; within a tier, more positive Steam reviews rank higher. Ranks come from the whole catalog, so filters never renumber them. This is a discovery order, not a judgment of quality.</p>
-    <h3 class="chart-title">Refreshing</h3>
-    <p class="chart-sub">Run <code>python -m game_librarian sync</code>, then reload the page. Nothing refreshes automatically unless you schedule the sync. The optional Power BI version needs <code>export-report</code> and Power BI Desktop (see <code>reporting/README.md</code>).</p>
-    <h3 class="chart-title">Not included</h3>
-    <p class="chart-sub">Prices, player counts and trends over time: the project stores only the latest values, so there is no history to chart.</p>
+    <p class="chart-sub"><a class="text-link" href="/dashboard">Trending games</a> charts the games of the Trending page from the snapshots this site saves; it is on the website only, not in the Power BI report. Player reception, Awards and this page are an HTML version of the Power BI report in <code>reporting/</code>, with the same measure definitions, calculated from the catalog on every page load. They cover the {{ dash.games|number }} catalog games ({{ (dash.games - dash.promoted)|number }} hand-picked, {{ dash.promoted|number }} promoted from reviewed candidates), not all of Steam.</p>
+    <details class="about-topic">
+      <summary>Player reception</summary>
+      <p class="chart-sub">Review counts are Steam's review summaries: Steam purchasers, all languages. The review-weighted positive rate pools every review, so games with many reviews dominate. The average game positive rate gives every game the same weight. A game counts once, however many tags or awards it has.</p>
+    </details>
+    <details class="about-topic">
+      <summary>Five-year ranking</summary>
+      <p class="chart-sub">Only games released {{ dash.window.start|day }} – {{ dash.window.end|day }} are ranked. A game’s highest-priority verified award result sets its group: {{ dash.rank_groups|join("; ") }}. Within a group, more distinct verified wins rank higher, then more distinct verified nominations; Steam reception breaks the remaining ties (games with at least {{ dash.reliable_reviews|number }} reviews first, highest positive share first, then more reviews), then the title and the Steam app ID. Production labels play no part. A game with an award keeps its place without usable review data; a game with neither an award nor usable reviews is Unranked. Ranks come from the whole catalog, so filters never renumber them.</p>
+      <p class="chart-sub">This is Game Librarian’s editorial discovery ranking, not an objective measure of quality. Award coverage is incomplete, so “No award recorded” does not mean a game never received an award.</p>
+      <p class="chart-sub">The website ranks the five full years before {{ dash.window.end.year }} plus {{ dash.window.end.year }} so far. The Power BI report keeps its own window, the four years up to the export day, so its ranks can differ.</p>
+    </details>
+    <details class="about-topic">
+      <summary>Refreshing</summary>
+      <p class="chart-sub">Run <code>python -m game_librarian sync</code>, then reload the page. Nothing refreshes automatically unless you schedule the sync. The optional Power BI version needs <code>export-report</code> and Power BI Desktop (see <code>reporting/README.md</code>).</p>
+    </details>
+    <details class="about-topic">
+      <summary>Snapshots, trends and what is not included</summary>
+      <p class="chart-sub">Since version 0.5 each sync also saves dated snapshots of player counts and review totals, and the latest price per game. They appear on the <a class="text-link" href="/dashboard">Trending games</a> page and are not part of the Power BI export. A snapshot is one moment; a change over time needs snapshots that were actually saved on different days, and nothing before the first snapshot can be reconstructed. Sales, revenue and Steam's Top Sellers chart are not collected: review and player counts are not sales.</p>
+    </details>
   </section>
 
   <section class="chart-card" aria-labelledby="loaded-title">
@@ -21,7 +31,7 @@
     <dl class="facts">
       <div><dt>Catalog games</dt><dd>{{ dash.games|number }}</dd></div>
       <div><dt>With review data</dt><dd>{{ dash.games_with_review_data|number }}</dd></div>
-      <div><dt>In the four-year window</dt><dd>{{ dash.in_window|number }}</dd></div>
+      <div><dt>In the five-year window</dt><dd>{{ dash.in_window|number }}</dd></div>
       <div><dt>Ranked</dt><dd>{{ dash.ranked|number }}</dd></div>
       <div><dt>With a verified label</dt><dd>{{ dash.labelled|number }}</dd></div>
       <div><dt>Verified award entries</dt><dd>{{ dash.award_entries|number }}</dd></div>

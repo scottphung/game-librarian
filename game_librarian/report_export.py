@@ -5,8 +5,9 @@ catalog and the curated CSV files and writes one UTF-8 CSV file per table. Nothi
 is sent anywhere, and no setting (in particular the Steam API key) is written.
 
 Tables, one row per:
-  games.csv        visible catalog game: review counts, production label, four-year rank, award status, and
-                   where it came from (hand-picked in games.csv, or promoted from a reviewed candidate)
+  games.csv        visible catalog game: review counts, production label, four-year rank with its award group
+                   (ranking_tier, 1-8) and distinct award counts, award status, and where it came from
+                   (hand-picked in games.csv, or promoted from a reviewed candidate)
   game_tags.csv    game and Steam tag (a bridge table: a game has many tags)
   tags.csv         Steam tag (the dimension behind the tag slicer)
   awards.csv       verified award result, linked to a catalog game when one matches; award_name joins the
@@ -18,7 +19,8 @@ the window ending on the day of the export. It does not move until the next expo
 
 Review counts exist only in games.csv. Tags and awards filter games through their
 own tables instead of being joined onto them, so a game with several tags or awards
-is never counted twice in review totals.
+is never counted twice in review totals. games.csv counts each distinct award result
+of a game once (ranking.award_summary), as the ranking does.
 
 The website's dashboard (dashboard.py) aggregates the same tables in memory
 (collect_tables), so it shows the same numbers as the Power BI report.
@@ -37,13 +39,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import ranking, store
+from .catalog import NO_VERIFIED_LABEL
 from .config import STORE_PAGE_URL, Settings
-from .curated import PROMOTED, CuratedData, load_curated
+from .curated import PROMOTED, CuratedData, award_identity, load_curated
 from .prepare import percent_positive
 
 LABEL_ORDER = ("AAA", "AA", "Indie")
 LABEL_JOINER = " + "  # a game with several verified labels: "AA + Indie"
-UNCLASSIFIED = "Unclassified"
 # A game's award status and an award row's result.
 WINNER, NOMINEE, NO_LISTED_AWARD = "Winner", "Nominee", "No listed award"
 # Where an award result matches Steam.
@@ -58,8 +60,9 @@ DATA_FOLDER_PARAMETER = re.compile(r'(expression DataFolder = )"(?:[^"]|"")*"')
 
 GAME_COLUMNS = [
     "appid", "title", "steam_url", "developers", "publishers", "genres", "release_date", "release_date_exact",
-    "release_year", "production_label", "ranking_tier", "ranking_tier_name", "award_status", "award_entries",
-    "award_wins", "top_award_wins", "has_review_data", "positive_reviews", "negative_reviews", "total_reviews",
+    "release_year", "production_label", "ranking_tier", "ranking_tier_name", "ranking_tier_original_release",
+    "award_status", "award_entries", "award_wins", "award_nominations", "top_award_wins", "has_review_data",
+    "positive_reviews", "negative_reviews", "total_reviews",
     "positive_share", "steam_percent_positive", "review_score_desc", "positive_band", "positive_band_order",
     "in_four_year_window", "four_year_rank", "rank_status", "rank_note", "catalog_source", "reviews_updated_at",
     "details_updated_at",
@@ -135,14 +138,14 @@ def _game_rows(rows: list, curated: CuratedData, placements: dict[int, ranking.P
     for row in rows:
         appid = row["appid"]
         labels = [name for name in LABEL_ORDER if name in curated.labels_for(appid)]
-        awards = curated.awards_for(appid)
-        wins = sum(award.result == "winner" for award in awards)
-        top_wins = sum(award.result == "winner" and award.is_top_award for award in awards)
+        place = placements[appid]
+        summary = place.awards  # distinct verified results, as the ranking counts them
+        top_wins = len({award_identity(award) for award in curated.awards_for(appid)
+                        if award.result == "winner" and award.is_top_award})
         positive, total = row["review_positive"], row["review_total"]
-        usable = ranking.unranked_reason(positive, total) is None
+        usable = ranking.review_problem(positive, total) is None
         percent = percent_positive(positive, total) if usable else None
         band, band_order = _positive_band(percent)
-        place = placements[appid]
         year = RELEASE_YEAR.search(row["release_date"] or "")
         games.append({
             "appid": appid,
@@ -154,12 +157,14 @@ def _game_rows(rows: list, curated: CuratedData, placements: dict[int, ranking.P
             "release_date": row["release_date"] or "",
             "release_date_exact": place.released_on.isoformat() if place.released_on else "",
             "release_year": year.group(0) if year else "",
-            "production_label": LABEL_JOINER.join(labels) or UNCLASSIFIED,
-            "ranking_tier": place.tier,
-            "ranking_tier_name": place.tier_name,
-            "award_status": WINNER if wins else (NOMINEE if awards else NO_LISTED_AWARD),
-            "award_entries": len(awards),
-            "award_wins": wins,
+            "production_label": LABEL_JOINER.join(labels) or NO_VERIFIED_LABEL,
+            "ranking_tier": summary.group,  # the award group, 1-8 (ranking.AWARD_GROUP_NAMES)
+            "ranking_tier_name": summary.group_name,
+            "ranking_tier_original_release": summary.for_original_release,
+            "award_status": WINNER if summary.wins else (NOMINEE if summary.nominations else NO_LISTED_AWARD),
+            "award_entries": summary.wins + summary.nominations,
+            "award_wins": summary.wins,
+            "award_nominations": summary.nominations,
             "top_award_wins": top_wins,
             "has_review_data": usable,
             "positive_reviews": positive if usable else None,

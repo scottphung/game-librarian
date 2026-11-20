@@ -56,13 +56,13 @@ table Games
 		displayFolder: Ranking
 		lineageTag: c802f930-e9cd-446c-9904-4b748d3f3261
 
-	/// Games with a four-year rank: released in the four-year window and with a usable positive Steam review count.
+	/// Games with a four-year rank: released in the four-year window, with a verified award result or a usable Steam review summary.
 	measure 'Ranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Ranked" ) )
 		formatString: #,0
 		displayFolder: Ranking
 		lineageTag: 051e1f96-d1b4-4172-b094-008e2868f14e
 
-	/// Games released in the four-year window without a usable positive review count. They have no four-year rank.
+	/// Games released in the four-year window with no award recorded and no usable Steam review summary. They have no four-year rank.
 	measure 'Unranked games' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Rank Status] = "Unranked" ) )
 		formatString: #,0
 		displayFolder: Ranking
@@ -74,8 +74,8 @@ table Games
 		displayFolder: Ranking
 		lineageTag: de22d0cf-7490-412c-8ba0-5c10c804d3d6
 
-	/// Games with at least one verified AAA, AA or Indie label.
-	measure 'Games with a verified label' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Production Label] <> "Unclassified" ) )
+	/// Games with at least one verified AAA, AA or Indie label. Exports made before 0.8 call the other games "Unclassified" instead of "No verified label", so both are left out.
+	measure 'Games with a verified label' = CALCULATE ( COUNTROWS ( Games ), KEEPFILTERS ( Games[Production Label] <> "No verified label" && Games[Production Label] <> "Unclassified" ) )
 		formatString: #,0
 		displayFolder: Catalog
 		lineageTag: b0549f28-464c-4331-bccb-c23a9419517a
@@ -149,14 +149,14 @@ table Games
 		summarizeBy: none
 		sourceColumn: release_year
 
-	/// Verified curated labels: AAA, AA, Indie, or a combination such as "AA + Indie". Unclassified means no verified label, not "not indie".
+	/// Verified curated labels: AAA, AA, Indie, or a combination such as "AA + Indie". "No verified label" means none has been verified, not "not indie" (exports made before 0.8 say "Unclassified").
 	column 'Production Label'
 		dataType: string
 		lineageTag: 342032fe-f1ad-472e-850c-2aae90714294
 		summarizeBy: none
 		sourceColumn: production_label
 
-	/// The ranking tier from the verified labels: 1 = AAA, 2 = AA, 3 = Indie and Unclassified. A game with two labels takes the higher tier.
+	/// The four-year ranking's first key since 0.9: the award group of the game's highest-priority verified award result, in Game Librarian's editorial order. 1 = The Game Awards, Game of the Year won; 2 = BAFTA Games Awards, Best Game won; 3 = D.I.C.E. Awards, Game of the Year won; 4 = Game Developers Choice Awards, Game of the Year won; 5 = The Steam Awards, Game of the Year won; 6 = another verified win; 7 = verified nominations, no win; 8 = no award recorded. Production labels play no part. (Before 0.9 it was the production tier: 1 = AAA, 2 = AA, 3 = Indie or no verified label.)
 	column 'Ranking Tier'
 		dataType: int64
 		formatString: 0
@@ -164,13 +164,21 @@ table Games
 		summarizeBy: none
 		sourceColumn: ranking_tier
 
-	/// AAA, AA, or Indie and Unclassified: the tier that orders the four-year ranking before positive reviews.
+	/// The name of the award group in Ranking Tier, such as "The Game Awards - Game of the Year winner" or "No award recorded". Award coverage is incomplete: "No award recorded" does not mean that the game never received an award.
 	column 'Ranking Tier Name'
 		dataType: string
 		lineageTag: 5d5158af-ac7c-423b-b9a4-fdf9a1291270
 		summarizeBy: none
 		sourceColumn: ranking_tier_name
 		sortByColumn: 'Ranking Tier'
+
+	/// TRUE when every award result that sets the ranking tier went to the original release of the remaster or edition Steam sells (Awards[Award Applies To] = "Original release"). Such awards count for the edition, as on the website.
+	column 'Ranking Tier From Original Release'
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: fdac6baa-0a03-4a0e-9ebd-73f3f86acc2a
+		summarizeBy: none
+		sourceColumn: ranking_tier_original_release
 
 	/// Best verified award result mapped to this game: Winner, Nominee or No listed award.
 	column 'Award Status'
@@ -179,7 +187,7 @@ table Games
 		summarizeBy: none
 		sourceColumn: award_status
 
-	/// Verified award results (wins and nominations) mapped to this game.
+	/// Distinct verified award results (wins and nominations) mapped to this game: a result recorded twice counts once, and a nominee that won counts once, as a win. Equals Awards Won + Award Nominations.
 	column 'Listed Awards'
 		dataType: int64
 		formatString: 0
@@ -187,6 +195,7 @@ table Games
 		summarizeBy: none
 		sourceColumn: award_entries
 
+	/// Distinct verified wins mapped to this game. Within an award group, more wins rank higher in the four-year ranking.
 	column 'Awards Won'
 		dataType: int64
 		formatString: 0
@@ -194,7 +203,15 @@ table Games
 		summarizeBy: none
 		sourceColumn: award_wins
 
-	/// Verified wins in an organization's top category (Game of the Year, or Best Game at the BAFTA Games Awards).
+	/// Distinct verified nominations of this game that did not win. With equal wins, more nominations rank higher in the four-year ranking. A nomination never counts as a win.
+	column 'Award Nominations'
+		dataType: int64
+		formatString: 0
+		lineageTag: 21592e39-270e-42fb-8219-b31628e7a8ed
+		summarizeBy: none
+		sourceColumn: award_nominations
+
+	/// Distinct verified wins in an organization's top category (Game of the Year, or Best Game at the BAFTA Games Awards).
 	column 'Top Award Wins'
 		dataType: int64
 		formatString: 0
@@ -276,7 +293,7 @@ table Games
 		summarizeBy: none
 		sourceColumn: in_four_year_window
 
-	/// Place in the four-year ranking, as on the website (1 = first): tier (AAA, then AA, then Indie and Unclassified), then more positive Steam reviews, then title A-Z, then app ID. Blank outside the window and for Unranked games.
+	/// Place in the four-year ranking, as on the website (1 = first): award group (Ranking Tier), then more Awards Won, then more Award Nominations, then Steam reception (games with at least 500 reviews first, the higher Positive Share first, then more Total Reviews; then games with fewer reviews; then games without review data), then title A-Z, then app ID. Game Librarian's editorial discovery order, not a measure of quality. Blank outside the window and for Unranked games.
 	column 'Four-Year Rank'
 		dataType: int64
 		formatString: 0
@@ -284,7 +301,7 @@ table Games
 		summarizeBy: none
 		sourceColumn: four_year_rank
 
-	/// Ranked, Unranked (in the window without a usable positive review count) or Not in the four-year ranking.
+	/// Ranked, Unranked (in the window, with no award recorded and no usable Steam review summary) or Not in the four-year ranking.
 	column 'Rank Status'
 		dataType: string
 		lineageTag: 68ee50ed-123b-4fef-b619-9bbb69fdd0ee
@@ -329,7 +346,8 @@ table Games
 				        {"appid", Int64.Type}, {"title", type text}, {"steam_url", type text}, {"developers", type text},
 				        {"publishers", type text}, {"genres", type text}, {"release_date", type text}, {"release_date_exact", type date},
 				        {"release_year", Int64.Type}, {"production_label", type text}, {"ranking_tier", Int64.Type},
-				        {"ranking_tier_name", type text}, {"award_status", type text}, {"award_entries", Int64.Type},
+				        {"ranking_tier_name", type text}, {"ranking_tier_original_release", type logical}, {"award_status", type text},
+				        {"award_entries", Int64.Type}, {"award_nominations", Int64.Type},
 				        {"award_wins", Int64.Type}, {"top_award_wins", Int64.Type}, {"has_review_data", type logical},
 				        {"positive_reviews", Int64.Type}, {"negative_reviews", Int64.Type}, {"total_reviews", Int64.Type},
 				        {"positive_share", type number}, {"steam_percent_positive", Int64.Type}, {"review_score_desc", type text},

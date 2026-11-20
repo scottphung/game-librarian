@@ -1,12 +1,12 @@
 """Catalog views, collections and sort orders: which games a page lists, and in what order.
 
 Everything here is pure: it works on the facts in `CatalogGame` (built from the stored
-Steam data, the verified curated data and the four-year ranking), with no SQL and no
+Steam data, the verified curated data and the five-year ranking), with no SQL and no
 network, so every rule can be tested on its own.
 
-Views. "Top-ranked" lists the games in the four-year ranking window; "All games" lists
+Views. "Top-ranked" lists the games in the five-year ranking window; "All games" lists
 the whole catalog. Collections are further views with a documented membership rule.
-The four-year rank shown on a card never depends on the view, the filters or the sort:
+The five-year rank shown on a card never depends on the view, the filters or the sort:
 it is calculated once over the whole catalog (see ranking.py).
 
 Review counts are Steam's (all languages, Steam purchasers). A count says roughly how
@@ -25,16 +25,25 @@ from typing import Callable, Iterable
 from . import ranking
 from .curated import Award, CuratedData
 from .prepare import percent_positive
+from .publishers import PublisherIndex
+from .ranking import RELIABLE_REVIEW_COUNT  # reviews needed before a positive share leads or qualifies (ranking.py)
 
-# A review summary needs this many Steam reviews before its positive share is used to lead the
-# "Best player reception" order or to qualify a game for a review-based collection. With fewer
-# reviews a handful of votes can swing the share a lot.
-RELIABLE_REVIEW_COUNT = 500
 HIGHLY_RATED_MIN_PERCENT = 90  # "Highly rated indies" and "Hidden gems": at least 90% positive
 HIDDEN_GEM_MAX_REVIEWS = 20_000  # "Hidden gems": at most this many Steam reviews (a rough visibility cap)
 RECENT_DAYS = 365  # "Recent releases": released in the last 365 days, today included
 
 LABEL_ORDER = ("AAA", "AA", "Indie")
+# The filter choice (and report value) for a game without a verified AAA, AA or Indie label; cards and details
+# show no badge for it. Before 0.8 it was called "Unclassified": links and exports that use that word still work.
+NO_VERIFIED_LABEL, LEGACY_NO_LABEL = "No verified label", "Unclassified"
+
+# Steam's review summary labels, best first, exactly as Steam returns them with the review totals.
+# Steam assigns them; Game Librarian only reads them. Other texts ("No user reviews", "3 user reviews")
+# are not reception labels and match no filter.
+STEAM_REVIEW_LABELS = ("Overwhelmingly Positive", "Very Positive", "Positive", "Mostly Positive", "Mixed",
+                       "Mostly Negative", "Negative", "Very Negative", "Overwhelmingly Negative")
+# "Strong player reception" wherever the site uses the phrase (the Trending sections).
+STRONG_RECEPTION_LABELS = ("Overwhelmingly Positive", "Very Positive")
 
 
 @dataclass(frozen=True)
@@ -49,9 +58,13 @@ class CatalogGame:
     total: int | None  # all Steam reviews, from the same summary; None when not usable
     released_on: date | None  # exact Steam release date, when Steam gives one
     upcoming: bool  # not released yet: coming soon, or an exact date after today
-    in_window: bool  # released inside the four-year ranking window
-    rank: int | None  # four-year rank, None when outside the window or Unranked
+    in_window: bool  # released inside the five-year ranking window
+    rank: int | None  # five-year rank, None when outside the window or Unranked
     modes: tuple[str, ...] = ()  # Steam game modes, such as "Single-player"
+    publishers: frozenset[str] = frozenset()  # publisher keys, after grouping (publishers.py)
+    review_label: str | None = None  # Steam's review summary label (STEAM_REVIEW_LABELS), when usable
+    players: int | None = None  # players in game on Steam at the newest snapshot; None when unknown
+    players_at: str | None = None  # when that snapshot was taken, UTC ISO 8601
 
     @property
     def percent(self) -> int | None:
@@ -64,14 +77,21 @@ class CatalogGame:
         return self.positive / self.total if self.total else None
 
 
-def catalog_games(rows: Iterable, curated: CuratedData, placements: dict[int, ranking.Placement]) -> list[CatalogGame]:
-    """Build CatalogGame facts for stored rows (as returned by store.matching_games), keeping their order."""
+def catalog_games(rows: Iterable, curated: CuratedData, placements: dict[int, ranking.Placement], *,
+                  publishers: PublisherIndex | None = None, players: dict | None = None) -> list[CatalogGame]:
+    """Build CatalogGame facts for stored rows (as returned by store.matching_games), keeping their order.
+
+    `publishers` gives each game's grouped publishers; `players` holds the newest player snapshot
+    rows (store.latest_player_counts). Without them those facts stay empty.
+    """
+    players = players or {}
     games = []
     for row in rows:
         appid = row["appid"]
         place = placements[appid]
-        usable = ranking.unranked_reason(row["review_positive"], row["review_total"]) is None
+        usable = ranking.review_problem(row["review_positive"], row["review_total"]) is None
         labels = curated.labels_for(appid)
+        snapshot = players.get(appid)
         games.append(CatalogGame(
             appid=appid,
             sort_name=row["sort_name"],
@@ -84,6 +104,11 @@ def catalog_games(rows: Iterable, curated: CuratedData, placements: dict[int, ra
             in_window=place.in_window,
             rank=place.rank,
             modes=tuple(json.loads(row["modes"] or "[]")),
+            publishers=publishers.keys_for(appid) if publishers else frozenset(),
+            review_label=row["review_score_desc"] if usable and row["review_score_desc"] in STEAM_REVIEW_LABELS
+            else None,
+            players=snapshot["players"] if snapshot else None,
+            players_at=snapshot["captured_at"] if snapshot and snapshot["players"] is not None else None,
         ))
     return games
 
@@ -144,8 +169,8 @@ TOP_VIEW, ALL_VIEW = "top", "all"
 VIEWS: dict[str, CatalogView] = {
     view.key: view
     for view in (
-        # Only the games released in the four-year window, in rank order.
-        CatalogView(TOP_VIEW, "Top-ranked · last four years", "Top-ranked games", "rank",
+        # Only the games released in the five-year window, in rank order. The page fills in the window's first year.
+        CatalogView(TOP_VIEW, "Top-ranked · since {start_year}", "Top-ranked games", "rank",
                     lambda game, today: game.in_window),
         # The whole catalog. A–Z by default, so older games are never listed as if they were ranked.
         CatalogView(ALL_VIEW, "All games", "All games", "name", lambda game, today: True),
@@ -195,9 +220,10 @@ class SortOption:
 
 
 SORT_OPTIONS = (
-    SortOption("rank", "Production tier, then positive reviews"),
+    SortOption("rank", "Five-year rank (awards, then reception)"),
     SortOption("most-positive", "Most positive Steam reviews"),
     SortOption("reception", "Best player reception"),
+    SortOption("players", "Most players on Steam (latest snapshot)"),
     SortOption("newest", "Newest release"),
     SortOption("name", "Name (A–Z)"),
 )
@@ -210,13 +236,25 @@ def _library_order(game: CatalogGame) -> tuple:
     return (game.sort_name, game.appid)
 
 
+def reception_order(game: CatalogGame) -> tuple:
+    """The "Best player reception" sort key, shared with the Trending sections and the five-year ranking.
+
+    Games with at least RELIABLE_REVIEW_COUNT reviews lead, highest positive share first (ties:
+    more reviews, then A–Z); games with fewer reviews follow, then games without review data.
+    """
+    return (*ranking.reception_key(game.positive, game.total), *_library_order(game))
+
+
 def sort_games(games: list[CatalogGame], sort: str, today: date) -> list[CatalogGame]:
     """Order games. Every order is deterministic: ties go to the title A–Z, then the Steam app id.
 
-    - rank: games in the four-year ranking first, in rank order; the others follow A–Z.
+    - rank: games in the five-year ranking first, in rank order (award group, wins, nominations,
+      then Steam reception; see ranking.py); the others follow A–Z.
     - most-positive: the most positive Steam reviews first (the count, not the share).
     - reception: games with at least RELIABLE_REVIEW_COUNT reviews first, highest positive share first
       (ties: more reviews); then games with fewer reviews, in the same order.
+    - players: the most players in game at the newest player snapshot first; games without a
+      count (never collected, or Steam reported none) follow A–Z.
     - newest: exact release dates up to today, newest first; games not released yet and games
       without an exact release date follow A–Z.
     - name: library order (title A–Z ignoring case, accents, punctuation and a leading article).
@@ -230,8 +268,10 @@ def sort_games(games: list[CatalogGame], sort: str, today: date) -> list[Catalog
             return (game.positive is None, -(game.positive or 0), *_library_order(game))
     elif sort == "reception":
         def key(game):
-            group = 2 if game.total is None else (0 if game.total >= RELIABLE_REVIEW_COUNT else 1)
-            return (group, -(game.share or 0), -(game.total or 0), *_library_order(game))
+            return reception_order(game)
+    elif sort == "players":
+        def key(game):
+            return (game.players is None, -(game.players or 0), *_library_order(game))
     elif sort == "newest":
         def key(game):
             released = game.released_on is not None and not game.upcoming and game.released_on <= today

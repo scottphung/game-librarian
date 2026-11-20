@@ -1,0 +1,87 @@
+{# Details of a game known from IGDB only: an upcoming game, or a game without a Steam app in the catalog.
+   Only IGDB facts are shown, with IGDB as the source. Steam reviews, prices, awards and player counts are
+   not shown here: they exist only for the Steam catalog games. #}
+{% from "_live.html" import live_section %}
+{% from "_critics.html" import critics_section %}
+{% from "_platforms.html" import availability_lines %}
+
+{% macro igdb_details(game, heading_id) -%}
+{# The main button: a verified Steam app, else a verified official website, else a verified store page. #}
+{% set links = game.official + game.stores %}
+{% set primary = none if game.steam_url else (links[0] if links else none) %}
+<div class="details is-igdb" data-key="{{ game.key }}">
+  <div class="details-main">
+    <p class="details-rank">
+      <strong>{% if game.state.upcoming %}Upcoming{% elif game.availability and game.availability.announced %}Released on some platforms{% else %}Released{% endif %}</strong> · not in the Steam catalog
+    </p>
+    <h2 class="details-title" id="{{ heading_id }}" tabindex="-1">{{ game.name }}</h2>
+
+    <dl class="facts">
+      <div><dt>Platforms</dt><dd class="avail-list">{{ availability_lines(game.availability) }}</dd></div>
+      {% if game.game_type and game.game_type != "Main game" %}<div><dt>Type</dt><dd>{{ game.game_type }}</dd></div>{% endif %}
+      <div><dt>Publisher</dt><dd>{% if game.publishers %}{{ game.publishers|join(", ") }}{% else %}<span class="muted">Not listed on IGDB</span>{% endif %}</dd></div>
+      {% if game.developers %}<div><dt>Developer</dt><dd>{{ game.developers|join(", ") }}</dd></div>{% endif %}
+    </dl>
+
+    {% if game.summary %}
+      <p class="details-description">{{ game.summary }}</p>
+      <p class="small muted">Description from IGDB.com.</p>
+    {% else %}<p class="muted">IGDB has no description for this game.</p>{% endif %}
+
+    <p class="details-cta">
+      {% if game.steam_url %}
+        <a class="button button-primary button-large" href="{{ game.steam_url }}" target="_blank" rel="noopener">View on Steam<span class="visually-hidden"> (opens in a new tab)</span></a>
+      {% elif primary %}
+        <a class="button button-primary button-large" href="{{ primary.url }}" target="_blank" rel="noopener nofollow">{{ primary.kind }}<span class="visually-hidden"> (opens in a new tab)</span></a>
+      {% endif %}
+      <button class="button button-secondary button-large" type="button" data-wishlist-toggle data-key="{{ game.key }}" data-aliases="{{ game.aliases|join(' ') }}" data-name="{{ game.name }}" aria-describedby="wishlist-note-{{ game.key }}" hidden>Add to wishlist</button>
+      <span class="small" data-wishlist-status role="status"></span>
+    </p>
+    <p class="small muted wishlist-note" id="wishlist-note-{{ game.key }}" data-wishlist-note hidden>The Game Librarian wishlist is saved in this browser only. It is not your Steam wishlist. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
+
+    {% set more = links if game.steam_url else links[1:] %}
+    {% if more %}
+    <p class="small link-row">
+      {% for site in more %}<a class="text-link" href="{{ site.url }}" target="_blank" rel="noopener nofollow">{{ site.kind }}</a>{% endfor %}
+    </p>
+    {% endif %}
+    {% if game.unverified_links %}
+    <p class="small link-row muted">
+      <span>Also listed by IGDB, not verified:</span>
+      {% for site in game.unverified_links %}<a class="text-link" href="{{ site.url }}" target="_blank" rel="noopener nofollow">{{ site.kind }}</a>{% endfor %}
+    </p>
+    {% endif %}
+    {% if links or game.unverified_links %}
+    <p class="small muted">A store link is verified when it points to that store's own site; an official website, when its domain is also the official website IGDB lists for the publisher or developer.</p>
+    {% endif %}
+
+    <p class="small muted steam-note">
+      {% if game.steam_url %}Steam: {{ game.steam_reason }}
+      {% elif game.steam_match == "needs_review" %}Steam: IGDB lists a Steam app, but the match is not verified, so it is not linked. {{ game.steam_reason }}
+      {% elif game.steam_match == "rejected" %}Steam: a reviewer decided that no Steam app is this game.
+      {% elif game.steam_match == "unchecked" %}Steam: not checked yet.
+      {% else %}Steam: no Steam store page is known for this game.{% endif %}
+      Steam reviews, prices, awards and player counts appear only for games in the Steam catalog.
+    </p>
+
+    {{ critics_section(game.critics, heading_id) }}
+    {{ live_section(game.live, heading_id) }}
+
+    <p class="updated">
+      Data from {% if game.igdb_url %}<a class="text-link" href="{{ game.igdb_url }}" target="_blank" rel="noopener">IGDB.com</a>{% else %}IGDB.com{% endif %},
+      checked <time datetime="{{ game.checked_at }}">{{ game.checked_at|date }}</time>. Release dates are shown only as precisely as IGDB states them.
+    </p>
+  </div>
+
+  <aside class="details-media" aria-label="Cover">
+    {% if game.cover_url %}
+    <figure class="media-figure is-cover">
+      <div class="media-frame"><img src="{{ game.cover_url }}" alt="Cover art for {{ game.name }}" loading="lazy" referrerpolicy="no-referrer"></div>
+      <figcaption>Cover art from IGDB.com. No trailer clip is shown for games outside the Steam catalog.</figcaption>
+    </figure>
+    {% else %}
+    <p class="muted small">IGDB has no cover image for this game.</p>
+    {% endif %}
+  </aside>
+</div>
+{%- endmacro %}

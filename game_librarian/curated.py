@@ -8,6 +8,13 @@ production-scale/indie classifications:
                        `python -m game_librarian candidates promote` appends to it
   awards.csv           award results, edited by hand
   classifications.csv  AAA / AA / Indie labels, edited by hand
+  publisher_aliases.csv  optional: Steam publisher names that belong to another publisher
+                       name (for the publisher filter), edited by hand
+  steam_matches.csv    optional: a reviewer's decision on the Steam app of an IGDB game
+                       (upcoming.py), edited by hand
+  critic_articles.csv  optional: a reviewer's decision on the Wikipedia article whose review
+                       table a game's critic scores come from (critics.py), edited by hand
+  stories/*.json       the Data Stories (loaded by stories.py, not here)
 
 The sync command only reads the two game lists, and the web app reads the award
 and classification files directly, so no sync can overwrite curated facts.
@@ -24,12 +31,18 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from .identity import parse_key
+from .publishers import publisher_key
+
 log = logging.getLogger(__name__)
 
 GAMES_FILE = "games.csv"
 PROMOTED_FILE = "promoted_games.csv"
 AWARDS_FILE = "awards.csv"
 CLASSIFICATIONS_FILE = "classifications.csv"
+PUBLISHER_ALIASES_FILE = "publisher_aliases.csv"
+STEAM_MATCHES_FILE = "steam_matches.csv"
+CRITIC_ARTICLES_FILE = "critic_articles.csv"
 
 # Where a catalog game comes from: games.csv or promoted_games.csv.
 HAND_PICKED, PROMOTED = "hand-picked", "promoted"
@@ -49,6 +62,17 @@ TOP_AWARD_CATEGORIES = {
     ("Game Developers Choice Awards", "Game of the Year"),
     ("The Steam Awards", "Game of the Year"),
 }
+# Game Librarian's editorial display order for a game's awards (README "Award display order"): wins of these
+# awards first, in this order, then other wins, then nominations. The ranking's award groups follow the same
+# order (ranking.py). It is an editorial choice, not a measure of prestige, and it never changes an award's
+# data. curated/awards.csv has no D.I.C.E. rows today, so that place stays empty until verified rows are added.
+AWARD_DISPLAY_ORDER = (
+    ("The Game Awards", "Game of the Year"),
+    ("BAFTA Games Awards", "Best Game"),
+    ("D.I.C.E. Awards", "Game of the Year"),
+    ("Game Developers Choice Awards", "Game of the Year"),
+    ("The Steam Awards", "Game of the Year"),
+)
 
 # Required columns. Optional ones (title, note, mapping_note, checked_on, checked_by, ...) default to "".
 GAME_COLUMNS = ["steam_appid"]
@@ -59,6 +83,11 @@ AWARD_COLUMNS = [
 CLASSIFICATION_COLUMNS = ["steam_appid", "label", "review_status", "evidence_url", "evidence_summary"]
 # promoted_games.csv also has source, match_method, evidence and promoted_on (written by `candidates promote`).
 PROMOTED_COLUMNS = ["steam_appid", "title", "source", "match_method", "evidence", "promoted_on"]
+PUBLISHER_ALIAS_COLUMNS = ["steam_publisher", "publisher", "review_status", "source_url"]
+STEAM_MATCH_COLUMNS = ["igdb_id", "steam_appid", "decision", "checked_on", "checked_by"]
+STEAM_MATCH_DECISIONS = {"match", "no_match"}
+CRITIC_ARTICLE_COLUMNS = ["game", "article", "decision", "checked_on", "checked_by"]
+CRITIC_ARTICLE_DECISIONS = {"use", "reject"}
 OPTIONAL_COLUMNS = ["title", "note", "mapping_note", "checked_on", "checked_by",
                     "source", "match_method", "evidence", "promoted_on"]
 
@@ -112,6 +141,40 @@ class Classification:
     checked_on: str
 
 
+@dataclass(frozen=True)
+class PublisherAlias:
+    """A Steam publisher name that belongs to another publisher name, with the source that says so."""
+
+    steam_publisher: str
+    publisher: str
+    review_status: str
+    source_url: str
+
+
+@dataclass(frozen=True)
+class SteamMatchDecision:
+    """A reviewer's decision about an IGDB game's Steam app: `match` (it is `steam_appid`) or `no_match`."""
+
+    igdb_id: int
+    steam_appid: int | None
+    decision: str
+    checked_on: str
+    checked_by: str
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class CriticArticleDecision:
+    """A reviewer's decision about a game's Wikipedia article: `use` `article`, or `reject` the automatic match."""
+
+    game: str  # a game key: a Steam app id or "igdb-<id>"
+    article: str
+    decision: str
+    checked_on: str
+    checked_by: str
+    note: str = ""
+
+
 @dataclass
 class CuratedData:
     """Everything loaded from curated/, plus the problems found while loading."""
@@ -123,9 +186,18 @@ class CuratedData:
     awards_by_appid: dict[int, list[Award]] = field(default_factory=dict)
     labels_by_appid: dict[int, dict[str, Classification]] = field(default_factory=dict)
     sources_by_appid: dict[int, str] = field(default_factory=dict)
+    publisher_alias_rows: list[PublisherAlias] = field(default_factory=list)
+    steam_match_decisions: dict[int, SteamMatchDecision] = field(default_factory=dict)
+    critic_article_decisions: dict[str, CriticArticleDecision] = field(default_factory=dict)
+
+    @property
+    def publisher_aliases(self) -> dict[str, str]:
+        """Verified aliases: the key of a Steam publisher spelling -> the publisher name it belongs to."""
+        return {publisher_key(row.steam_publisher): row.publisher
+                for row in self.publisher_alias_rows if row.review_status == "verified"}
 
     def awards_for(self, appid: int) -> list[Award]:
-        """Verified awards mapped to this app: top-award wins, other wins, then nominations; newest first."""
+        """Verified awards mapped to this app, in the editorial display order (award_display_key)."""
         return self.awards_by_appid.get(appid, [])
 
     def labels_for(self, appid: int) -> dict[str, Classification]:
@@ -212,7 +284,10 @@ def _load_games(path: Path, problems: _Problems, *, catalog_source: str = HAND_P
 
 
 def _load_awards(path: Path, problems: _Problems) -> list[Award]:
+    """Read awards.csv. A verified row that repeats an earlier verified result for the same game is reported
+    and skipped, so no page, ranking or report counts one result twice."""
     awards = []
+    verified_lines: dict[tuple, int] = {}  # a verified result -> the line that recorded it first
     for line, row in _read_rows(path, AWARD_COLUMNS, problems):
         errors = []
         for column in ("organization", "category", "award_title"):
@@ -234,6 +309,15 @@ def _load_awards(path: Path, problems: _Problems) -> list[Award]:
             errors.append(f"review_status must be one of {sorted(REVIEW_STATUSES)}, got {row['review_status']!r}")
         if row["checked_on"] and not _is_date(row["checked_on"]):
             errors.append(f"checked_on must be a YYYY-MM-DD date, got {row['checked_on']!r}")
+        if not errors and row["review_status"] == "verified":
+            # The same organization, year, category and result for the same Steam app (unmapped: the same title).
+            result = (_name_key(row["organization"]), int(row["year"]), _name_key(row["category"]), row["result"],
+                      int(row["steam_appid"]) if row["steam_appid"] else _name_key(row["award_title"]))
+            if result in verified_lines:
+                errors.append(f"repeats the result on line {verified_lines[result]} (same organization, year, "
+                              "category, result and game); it is counted once")
+            else:
+                verified_lines[result] = line
         if errors:
             problems.add(path.name, line, "; ".join(errors))
             continue
@@ -290,16 +374,139 @@ def _load_classifications(path: Path, problems: _Problems) -> list[Classificatio
     return classifications
 
 
+def _load_publisher_aliases(path: Path, problems: _Problems) -> list[PublisherAlias]:
+    """Read publisher_aliases.csv (optional). Each Steam spelling may appear once and must name another publisher."""
+    aliases, seen = [], set()
+    for line, row in _read_rows(path, PUBLISHER_ALIAS_COLUMNS, problems, required=False):
+        errors = []
+        for column in ("steam_publisher", "publisher"):
+            if not publisher_key(row[column]):
+                errors.append(f"{column} is empty")
+        if not errors and publisher_key(row["steam_publisher"]) == publisher_key(row["publisher"]):
+            errors.append("steam_publisher and publisher are already grouped as the same name")
+        if row["review_status"] not in REVIEW_STATUSES:
+            errors.append(f"review_status must be one of {sorted(REVIEW_STATUSES)}, got {row['review_status']!r}")
+        if not _is_url(row["source_url"]):
+            errors.append("source_url must start with https:// or http://")
+        if row["checked_on"] and not _is_date(row["checked_on"]):
+            errors.append(f"checked_on must be a YYYY-MM-DD date, got {row['checked_on']!r}")
+        if not errors and publisher_key(row["steam_publisher"]) in seen:
+            errors.append(f"duplicate steam_publisher {row['steam_publisher']!r}")
+        if errors:
+            problems.add(path.name, line, "; ".join(errors))
+            continue
+        seen.add(publisher_key(row["steam_publisher"]))
+        aliases.append(PublisherAlias(steam_publisher=row["steam_publisher"], publisher=row["publisher"],
+                                      review_status=row["review_status"], source_url=row["source_url"]))
+    return aliases
+
+
+def _review_errors(row: dict[str, str]) -> list[str]:
+    """Problems with the reviewer columns shared by steam_matches.csv and critic_articles.csv."""
+    errors = []
+    if not _is_date(row["checked_on"]):
+        errors.append(f"checked_on must be a YYYY-MM-DD date, got {row['checked_on']!r}")
+    if not row["checked_by"]:
+        errors.append("checked_by is empty (say who reviewed it)")
+    return errors
+
+
+def _load_steam_matches(path: Path, problems: _Problems) -> dict[int, SteamMatchDecision]:
+    """Read steam_matches.csv (optional): one decision per IGDB game."""
+    decisions: dict[int, SteamMatchDecision] = {}
+    for line, row in _read_rows(path, STEAM_MATCH_COLUMNS, problems, required=False):
+        errors = _review_errors(row)
+        igdb_id = int(row["igdb_id"]) if row["igdb_id"].isdigit() and int(row["igdb_id"]) > 0 else None
+        if igdb_id is None:
+            errors.append(f"igdb_id must be a positive whole number, got {row['igdb_id']!r}")
+        if row["decision"] not in STEAM_MATCH_DECISIONS:
+            errors.append(f"decision must be one of {sorted(STEAM_MATCH_DECISIONS)}, got {row['decision']!r}")
+        appid = int(row["steam_appid"]) if row["steam_appid"].isdigit() and int(row["steam_appid"]) > 0 else None
+        if row["decision"] == "match" and appid is None:
+            errors.append("a match needs the Steam app id in steam_appid")
+        if igdb_id is not None and igdb_id in decisions:
+            errors.append(f"duplicate igdb_id {igdb_id}")
+        if errors:
+            problems.add(path.name, line, "; ".join(errors))
+            continue
+        decisions[igdb_id] = SteamMatchDecision(igdb_id, appid, row["decision"], row["checked_on"],
+                                                row["checked_by"], row["note"])
+    return decisions
+
+
+def _load_critic_articles(path: Path, problems: _Problems) -> dict[str, CriticArticleDecision]:
+    """Read critic_articles.csv (optional): one decision per game key."""
+    decisions: dict[str, CriticArticleDecision] = {}
+    for line, row in _read_rows(path, CRITIC_ARTICLE_COLUMNS, problems, required=False):
+        errors = _review_errors(row)
+        key = parse_key(row["game"])
+        if key is None:
+            errors.append(f"game must be a Steam app id or igdb-<IGDB id>, got {row['game']!r}")
+        if row["decision"] not in CRITIC_ARTICLE_DECISIONS:
+            errors.append(f"decision must be one of {sorted(CRITIC_ARTICLE_DECISIONS)}, got {row['decision']!r}")
+        if row["decision"] == "use" and not row["article"]:
+            errors.append("using an article needs its English Wikipedia title in article")
+        if key is not None and str(key) in decisions:
+            errors.append(f"duplicate game {row['game']!r}")
+        if errors:
+            problems.add(path.name, line, "; ".join(errors))
+            continue
+        decisions[str(key)] = CriticArticleDecision(str(key), row["article"], row["decision"], row["checked_on"],
+                                                    row["checked_by"], row["note"])
+    return decisions
+
+
+def _name_key(text: str) -> str:
+    """A name compared without case or extra spaces, so "Game of the year " still names the same award."""
+    return " ".join(text.split()).casefold()
+
+
+_DISPLAY_PLACES = {(_name_key(org), _name_key(category)): place
+                   for place, (org, category) in enumerate(AWARD_DISPLAY_ORDER)}
+# Each organization appears once in AWARD_DISPLAY_ORDER, so its place there also orders ties between organizations.
+_ORGANIZATION_PLACES = {_name_key(org): place for place, (org, _) in enumerate(AWARD_DISPLAY_ORDER)}
+OTHER_WINS, NOMINATIONS = len(AWARD_DISPLAY_ORDER), len(AWARD_DISPLAY_ORDER) + 1  # the last two groups
+
+
+def award_display_group(award: Award) -> int:
+    """The award's group in AWARD_DISPLAY_ORDER (0 = The Game Awards' Game of the Year win), OTHER_WINS or NOMINATIONS.
+
+    Only a "winner" result can reach a top group: a nomination for Game of the Year is still a nomination.
+    """
+    if award.result != "winner":
+        return NOMINATIONS
+    return _DISPLAY_PLACES.get((_name_key(award.organization), _name_key(award.category)), OTHER_WINS)
+
+
+def award_identity(award: Award) -> tuple[str, int, str]:
+    """The award a row is about: organization, year and category, compared without case or extra spaces.
+
+    Two rows with the same identity and result for one game record the same result, so it is counted once.
+    """
+    return _name_key(award.organization), award.year, _name_key(award.category)
+
+
+def award_display_key(award: Award) -> tuple:
+    """Sort key for a game's awards: the group, then the newest award year first.
+
+    Ties (same group and year) go to the organizations in AWARD_DISPLAY_ORDER's order, then any other
+    organization A–Z, then the category, the awarded title and the source link A–Z, so the order is the
+    same on every page load.
+    """
+    organization = _name_key(award.organization)
+    return (award_display_group(award), -award.year,
+            _ORGANIZATION_PLACES.get(organization, len(_ORGANIZATION_PLACES)), organization,
+            _name_key(award.category), award.award_title.casefold(), award.source_url)
+
+
 def _index_awards(awards: list[Award]) -> dict[int, list[Award]]:
-    """Group displayable awards (verified and mapped to a Steam app) by app id."""
+    """Group displayable awards (verified and mapped to a Steam app) by app id, in the editorial display order."""
     by_appid: dict[int, list[Award]] = {}
     for award in awards:
         if award.review_status == "verified" and award.appid is not None:
             by_appid.setdefault(award.appid, []).append(award)
     for appid_awards in by_appid.values():
-        # Top-award (Game of the Year, Best Game) wins first, then other wins, then nominations; newest first.
-        appid_awards.sort(key=lambda a: (not (a.is_top_award and a.result == "winner"), a.result != "winner",
-                                         -a.year, a.organization, a.category))
+        appid_awards.sort(key=award_display_key)
     return by_appid
 
 
@@ -327,6 +534,9 @@ def load_curated(curated_dir: Path) -> CuratedData:
     awards = _load_awards(curated_dir / AWARDS_FILE, problems)
     classifications = _load_classifications(curated_dir / CLASSIFICATIONS_FILE, problems)
     labels_by_appid = _index_labels(classifications, problems)  # may add conflict problems
+    publisher_alias_rows = _load_publisher_aliases(curated_dir / PUBLISHER_ALIASES_FILE, problems)
+    steam_match_decisions = _load_steam_matches(curated_dir / STEAM_MATCHES_FILE, problems)
+    critic_article_decisions = _load_critic_articles(curated_dir / CRITIC_ARTICLES_FILE, problems)
     return CuratedData(
         games=games,
         awards=awards,
@@ -335,6 +545,9 @@ def load_curated(curated_dir: Path) -> CuratedData:
         awards_by_appid=_index_awards(awards),
         labels_by_appid=labels_by_appid,
         sources_by_appid={game.appid: game.catalog_source for game in games},
+        publisher_alias_rows=publisher_alias_rows,
+        steam_match_decisions=steam_match_decisions,
+        critic_article_decisions=critic_article_decisions,
     )
 
 
@@ -351,7 +564,8 @@ class CuratedCache:
 
     def _current_stamp(self) -> tuple:
         stamp = []
-        for name in (GAMES_FILE, PROMOTED_FILE, AWARDS_FILE, CLASSIFICATIONS_FILE):
+        for name in (GAMES_FILE, PROMOTED_FILE, AWARDS_FILE, CLASSIFICATIONS_FILE, PUBLISHER_ALIASES_FILE,
+                     STEAM_MATCHES_FILE, CRITIC_ARTICLES_FILE):
             path = self._dir / name
             stamp.append(path.stat().st_mtime_ns if path.exists() else None)
         return tuple(stamp)

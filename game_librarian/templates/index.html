@@ -5,7 +5,7 @@
 <div class="page">
   <section class="hero" aria-labelledby="discover-title">
     <h1 id="discover-title">Discover.</h1>
-    <p class="hero-sub">Find games worth exploring through Steam player reception, curated awards and verified production labels.</p>
+    <p class="hero-sub">Find games worth following, from big studios and small ones: browse by publisher, genre, game mode, awards and player reception, then save the ones you are waiting for.</p>
   </section>
 
   <div class="catalog">
@@ -20,7 +20,7 @@
           <label class="field-label" for="q">Search by game name</label>
           <div class="search-row">
             <input id="q" name="q" type="search" value="{{ query.q }}" placeholder="e.g. Hades" maxlength="100" autocomplete="off">
-            <button class="button button-primary" type="submit">Search</button>
+            <button class="button button-primary" type="submit" id="search-submit">Search</button>
           </div>
         </div>
 
@@ -33,6 +33,31 @@
           </select>
         </div>
 
+        <div class="field">
+          <label class="field-label" for="publisher">Publisher</label>
+          <select id="publisher" name="publisher" data-autosubmit>
+            <option value=""{% if not query.publisher %} selected{% endif %}>Any publisher</option>
+            {% for option in publisher_options %}
+            <option value="{{ option.name }}"{% if option.selected %} selected{% endif %}>{{ option.name }} ({{ option.games }})</option>
+            {% endfor %}
+          </select>
+          <p class="hint">Publishers as Steam lists them, grouped when names differ only in case, punctuation, a company type such as “Inc.”, or a note such as “(Mac)” or “(Japan)”. A few renamed publishers are joined by hand, each with a source.</p>
+        </div>
+
+        <fieldset class="field">
+          <legend class="field-label">Steam reviews</legend>
+          <div class="option-list">
+            {% for option in reception_options %}
+            <label class="option{% if option.selected %} is-selected{% endif %}">
+              <input type="checkbox" name="reception" value="{{ option.name }}"{% if option.selected %} checked{% endif %} data-autosubmit>
+              <span class="option-name">{{ option.name }}</span>
+              <span class="option-count">{{ option.games }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <p class="hint">Steam's own summary of each game's reviews (all languages, Steam purchasers) at the last sync. A game needs any selected summary.</p>
+        </fieldset>
+
         <fieldset class="field">
           <legend class="field-label">Production label</legend>
           <div class="option-list">
@@ -44,7 +69,7 @@
             </label>
             {% endfor %}
           </div>
-          <p class="hint">Labels appear only with verified evidence. Unclassified means no verified label, not “not indie”.</p>
+          <p class="hint">Labels appear only with verified evidence. “No verified label” means no evidence has been verified yet, not “not indie”; such games show no label.</p>
         </fieldset>
 
         <fieldset class="field award-fields">
@@ -91,14 +116,15 @@
           </div>
         </fieldset>
 
-        <fieldset class="field field-tags">
+        {# Tag boxes do not apply on their own: tick several, then Apply filters (app.js shows what is pending). #}
+        <fieldset class="field field-tags" data-deferred-filters data-max-selected="{{ max_selected_tags }}" aria-describedby="tag-hint">
           <legend class="field-label">Genres &amp; tags</legend>
-          <p class="hint">Steam community tags. A game must have every selected tag; numbers count games in the current results.</p>
+          <p class="hint" id="tag-hint">Steam community tags. A game must have every selected tag. Tick as many as you like (up to {{ max_selected_tags }}), then select <strong>Apply filters</strong>. Selected tags are listed first; numbers count games in the current results and update when you apply.</p>
           {% if tag_options %}
           <div class="option-list tag-list">
             {% for option in tag_options %}
             <label class="option{% if option.selected %} is-selected{% endif %}">
-              <input type="checkbox" name="tag" value="{{ option.tag }}"{% if option.selected %} checked{% endif %} data-autosubmit>
+              <input type="checkbox" name="tag" value="{{ option.tag }}"{% if option.selected %} checked{% endif %}>
               <span class="option-name">{{ option.tag }}</span>
               <span class="option-count">{{ option.games }}</span>
             </label>
@@ -109,8 +135,9 @@
           {% endif %}
         </fieldset>
 
-        <div class="filter-actions">
-          <button class="button button-primary" type="submit">Apply filters</button>
+        <div class="filter-actions" data-apply-bar>
+          <p class="pending-note" data-pending-note role="status"></p>
+          <button class="button button-primary" type="submit" id="apply-filters">Apply filters</button>
           <a class="text-link" href="{{ clear_url }}">Clear filters</a>
         </div>
       </form>
@@ -161,35 +188,41 @@
         <div class="results-title">
           <h2>{{ view.heading }}</h2>
           <details class="info-tip">
-            <summary aria-label="How the ranking works"><span aria-hidden="true">i</span></summary>
+            <summary><span class="info-icon" aria-hidden="true">i</span><span class="info-text">How the ranking works</span></summary>
             <div class="info-panel">
               <h3>How the ranking works</h3>
-              <p><strong>Which games.</strong> Only games released in the last four years: from {{ window.start|day }} to today, {{ window.end|day }}. The window moves forward every day. Older games, games not released yet and games without an exact release date on Steam are not ranked; you find them under All games.</p>
-              <p><strong>Order.</strong> Verified AAA games come first, then verified AA games, then Indie and Unclassified games together. Within each tier, the game with more positive Steam reviews ranks higher. So an AAA game can rank above an AA game, and an AA game above an Indie or Unclassified game, even when it has fewer positive reviews.</p>
-              <p><strong>Ties</strong> (same tier, same number of positive reviews) go to the title A–Z, then the Steam app ID. <strong>Unranked</strong> games were released in the window but have no usable positive review count (not fetched yet, no reviews, or inconsistent counts). They are listed after the ranked games.</p>
-              <p><strong>What a rank means.</strong> It is a discovery order, not a judgment of quality. Counting positive reviews favors popular games, and games released earlier in the window, because they have had more time to collect reviews.</p>
-              <p>Production labels and awards come from this project’s hand-curated data: most games have no verified label (Unclassified), and the awards cover selected categories and years of each organization. Awards are not part of the rank. Searching and filtering never change a game’s rank, and neither do the other sort orders or the collections: a number is always the game’s place among all catalog games in the window.</p>
-              <p><strong>Other sort orders.</strong> <em>Most positive Steam reviews</em> counts positive reviews. <em>Best player reception</em> lists games with at least 500 Steam reviews first, highest positive share first, so a handful of reviews cannot lead; games with fewer reviews follow. <em>Newest release</em> uses exact Steam release dates up to today; unreleased games and games without an exact date follow A–Z. Games without review data come last in the review-based orders.</p>
+              <p><strong>Which games.</strong> Only games released from {{ window.start|day }} to today, {{ window.end|day }}: the five full years before {{ window.end.year }}, plus {{ window.end.year }} so far. The window moves forward every 1 January. Older games, games not released yet and games without an exact release date on Steam are not ranked; you find them under <a class="text-link" href="{{ all_games_url }}">All games</a>.</p>
+              <p><strong>1. Award group.</strong> A game’s highest-priority verified award result puts it in one of these groups. Every game in a group ranks above every game in a later group, whatever its reviews:</p>
+              <ol class="rank-groups">
+                {% for group in rank_groups %}<li>{{ group.name }}{% if not group.recorded %} <span class="muted">(no verified results recorded yet)</span>{% endif %}</li>{% endfor %}
+              </ol>
+              <p><strong>2. Number of awards.</strong> Within a group, more distinct verified wins rank higher; with equal wins, more distinct verified nominations. A nomination never counts as a win, and a result recorded twice counts once. Under the rank number, each card names its group and counts; its first listed award is the one that sets the group.</p>
+              <p><strong>3. Steam reception</strong> breaks the remaining ties, as in <em>Best player reception</em>: games with at least {{ reliable_reviews|number }} Steam reviews first, highest positive share first, then more reviews; then games with fewer reviews, in the same order; then games without a usable review summary. Last come the title A–Z and the Steam app ID, so every rank is distinct.</p>
+              <p><strong>Missing data.</strong> Missing, zero or inconsistent review counts are never read as zero reviews or 0% positive. A game with a verified award keeps its award-based place without them, and its card says the review data is unavailable. A game with no award recorded and no usable review summary is <strong>Unranked</strong>: it has no number and is listed after the ranked games.</p>
+              <p><strong>What a rank means.</strong> This is Game Librarian’s editorial discovery ranking, not an objective measure of game quality. Award coverage is incomplete: the curated data covers selected organizations, categories and years, so “No award recorded” does not mean a game has never received an award. An award to the original release of a remaster or edition counts for the edition Steam sells and is marked “for the original release”.</p>
+              <p>Production labels (AAA, AA, Indie) do not affect the rank; use the Production label filter to see them. Searching and filtering never change a game’s rank, and neither do the other sort orders or the collections: a number is always the game’s place among all catalog games in the window.</p>
+              <p><strong>Other sort orders.</strong> <em>Most positive Steam reviews</em> counts positive reviews. <em>Best player reception</em> lists games with at least {{ reliable_reviews|number }} Steam reviews first, highest positive share first, so a handful of reviews cannot lead; games with fewer reviews follow. <em>Most players on Steam</em> uses each game's newest player-count snapshot, taken by the sync: one moment, which varies with the time of day. <em>Newest release</em> uses exact Steam release dates up to today; unreleased games and games without an exact date follow A–Z. Games without review data come last in the review-based orders, and games without a player count come last in the player order.</p>
             </div>
           </details>
         </div>
+        {# One or two short lines; the full rules are in the "How the ranking works" panel (the i button). #}
         {% if view.is_collection %}
-        <p class="results-scope">{{ view.description }}{% if query.view == "recent" %} Window: {{ recent_window[0]|day }} – {{ recent_window[1]|day }}.{% endif %} A number (#) is the game’s place in the four-year ranking of all catalog games released {{ window.start|day }} – {{ window.end|day }}; it is not recalculated for this collection.</p>
+        <p class="results-scope">{{ view.description }}{% if query.view == "recent" %} Window: {{ recent_window[0]|day }} – {{ recent_window[1]|day }}.{% endif %} A number (#) is the game’s five-year rank among all catalog games, not its place in this collection.</p>
         {% elif query.view == "all" %}
-        <p class="results-scope">Every game in the catalog, including older and unreleased games. A number (#) is a game’s place in the four-year ranking of games released {{ window.start|day }} – {{ window.end|day }}; other games have no number.</p>
+        <p class="results-scope">Every game in the catalog, including older and unreleased games. A number (#) is a five-year rank (released {{ window.start|day }} – {{ window.end|day }}); other games have none.</p>
         {% else %}
-        <p class="results-scope">Games released <strong>{{ window.start|day }} – {{ window.end|day }}</strong>: the last four years, up to today. Older and unreleased games, and games without an exact release date, are in <a class="text-link" href="{{ all_games_url }}">All games</a>.</p>
+        <p class="results-scope">Games released in the last five full years and this year so far: <strong>{{ window.start|day }} – {{ window.end|day }}</strong>.<br>Ranked by awards and player reception.</p>
         {% endif %}
         {% if counts.ready and total %}
         <p class="results-meta">
           Showing {{ first_shown }}–{{ last_shown }} of {{ total|number }} {{ "game" if total == 1 else "games" }}
           {%- if query.has_filters %} matching your filters{% endif %}
-          {%- if query.view != "top" %} · {{ ranked_total|number }} of {{ catalog_total|number }} catalog games are in the four-year ranking.
+          {%- if query.view != "top" %} · {{ ranked_total|number }} of {{ catalog_total|number }} catalog games are in the five-year ranking.
           {%- if query.order == "rank" %} Ranked games come first; the others follow A–Z.{% endif %}
           {%- else %} · {{ ranked_total|number }} of {{ window_total|number }} games in the window are ranked.{% endif %}
         </p>
         {% if query.has_filters and outside_matches %}
-        <p class="results-meta"><a class="text-link" href="{{ all_games_url }}">{{ outside_matches|number }} more matching {{ "game is" if outside_matches == 1 else "games are" }} outside the four-year ranking</a>.</p>
+        <p class="results-meta"><a class="text-link" href="{{ all_games_url }}">{{ outside_matches|number }} more matching {{ "game is" if outside_matches == 1 else "games are" }} outside the five-year ranking</a>.</p>
         {% endif %}
         {% endif %}
         {% if active_filters %}
@@ -212,7 +245,7 @@
         </div>
       {% elif total == 0 and not query.has_filters and query.view == "top" %}
         <div class="notice">
-          <h3>No games in the four-year window</h3>
+          <h3>No games in the five-year window</h3>
           <p>No catalog game has an exact Steam release date between {{ window.start|day }} and {{ window.end|day }}. <a class="text-link" href="{{ all_games_url }}">Show all games</a>.</p>
         </div>
       {% elif total == 0 and not query.has_filters %}
@@ -223,9 +256,9 @@
       {% elif total == 0 %}
         <div class="notice">
           <h3>No matching games</h3>
-          <p>No games match{% if query.q %} “{{ query.q }}”{% endif %} with the selected filters{% if query.view == "top" %} in the four-year ranking{% elif view.is_collection %} in this collection{% endif %}.</p>
+          <p>No games match{% if query.q %} “{{ query.q }}”{% endif %} with the selected filters{% if query.view == "top" %} in the five-year ranking{% elif view.is_collection %} in this collection{% endif %}.</p>
           {% if outside_matches %}
-          <p><a class="text-link" href="{{ all_games_url }}">Show {{ outside_matches|number }} matching {{ "game" if outside_matches == 1 else "games" }} in All games</a>. {{ "It is" if outside_matches == 1 else "They are" }} outside the four-year ranking.</p>
+          <p><a class="text-link" href="{{ all_games_url }}">Show {{ outside_matches|number }} matching {{ "game" if outside_matches == 1 else "games" }} in All games</a>. {{ "It is" if outside_matches == 1 else "They are" }} outside the five-year ranking.</p>
           {% endif %}
           <p><a class="text-link" href="{{ clear_url }}">Clear filters</a>, or remove one of the filters above.</p>
         </div>
@@ -254,10 +287,5 @@
   </div>
 </div>
 
-<dialog class="game-dialog" id="game-dialog" aria-labelledby="dialog-heading">
-  <button class="dialog-close" type="button" data-close-dialog autofocus>
-    <span aria-hidden="true">×</span><span class="visually-hidden">Close details</span>
-  </button>
-  <div class="dialog-content" data-dialog-content></div>
-</dialog>
+{% include "_dialog.html" %}
 {% endblock %}

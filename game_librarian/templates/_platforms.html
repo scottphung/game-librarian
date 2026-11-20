@@ -1,0 +1,29 @@
+{# Where a game is out and where it is only announced (upcoming.Availability, from IGDB's per-platform release
+   dates on the day the page is served). Dates are shown only as precisely as IGDB gives them: a day, a month,
+   a quarter, a year or TBA. `limit` caps the groups per kind in compact lists; the details show them all. #}
+
+{% macro availability_lines(av, limit=99) -%}
+{%- if av and av.known -%}
+  {%- for group in av.available[:limit] -%}
+    <span class="avail is-out"><span class="avail-key">Available on</span> {{ group.platforms|join(", ") }} <span class="avail-date">since {{ group.label }}{% if group.first and group.first.status != "full" %} ({{ group.first.status }}){% endif %}{% if group.regional %} (other regions have other dates){% endif %}</span></span>
+  {%- endfor -%}
+  {%- if av.available|length > limit %}<span class="avail muted">and {{ av.available|length - limit }} more {{ "release date" if av.available|length - limit == 1 else "release dates" }} on other platforms</span>{% endif -%}
+  {%- for item in av.early -%}
+    <span class="avail is-early"><span class="avail-key">{{ item.status|capitalize }} on</span> {{ item.platforms|join(", ") }} <span class="avail-date">since {{ item.label }}</span></span>
+  {%- endfor -%}
+  {%- for group in av.announced[:limit] -%}
+    <span class="avail is-announced"><span class="avail-key">{{ "Full release announced for" if av.early else "Announced for" }}</span> {{ group.platforms|join(", ") }} <span class="avail-date">· {{ group.label }}{% if group.regional %} (other regions have other dates){% endif %}</span></span>
+  {%- endfor -%}
+  {%- if av.announced|length > limit %}<span class="avail muted">and {{ av.announced|length - limit }} more announced {{ "date" if av.announced|length - limit == 1 else "dates" }}</span>{% endif -%}
+  {%- if av.undated -%}
+    <span class="avail is-undated"><span class="avail-key">Listed without a release date:</span> {{ av.undated|join(", ") }}</span>
+  {%- endif -%}
+{%- else -%}
+  <span class="avail muted">Platforms: not known (IGDB lists none for this game)</span>
+{%- endif -%}
+{%- endmacro %}
+
+{# The reach of a list: every platform, or Steam alone. #}
+{% macro scope_badge(kind) -%}
+  {%- if kind == "steam" %}<span class="scope-badge is-steam">Steam only</span>{% else %}<span class="scope-badge">All platforms</span>{% endif -%}
+{%- endmacro %}

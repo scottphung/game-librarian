@@ -1,0 +1,51 @@
+{# "What the critics said": scores read from the review table of the game's English Wikipedia article
+   (critics.py). Only scores from a verified article, in a format the parser reads safely, are shown. #}
+{% macro critic_row(row) -%}
+<li class="critic-item">
+  <span class="critic-outlet">{{ row.outlet }}</span>
+  <span class="critic-score">{{ row.score }}</span>
+  {%- if row.label %} <span class="critic-label">{{ row.label }}</span>{% endif %}
+  {%- if row.table_title %} <span class="critic-table muted">· {{ row.table_title }}</span>{% endif %}
+  {%- if row.review_url %} <a class="critic-source text-link" href="{{ row.review_url }}" target="_blank" rel="noopener nofollow">source<span class="visually-hidden"> Wikipedia cites for {{ row.outlet }}'s score (opens in a new tab)</span></a>{% endif %}
+</li>
+{%- endmacro %}
+
+{% macro critics_section(c, heading_id) -%}
+<section class="details-section critics-block" aria-labelledby="{{ heading_id }}-critics">
+  <h3 id="{{ heading_id }}-critics">What the critics said</h3>
+  {% if c.state == "unreleased" %}
+    <p class="muted small">Not released yet, so there are no critic reviews to show.</p>
+  {% elif c.state == "not_checked" %}
+    <p class="muted small">Critic scores have not been looked up for this game yet. They come from English Wikipedia (<code>python -m game_librarian critics</code>).</p>
+  {% elif c.state == "needs_review" %}
+    <p class="muted small">No critic scores are shown: the Wikipedia article found for this game is waiting for a person to confirm that it is about this game and edition.</p>
+  {% elif c.state == "rejected" %}
+    <p class="muted small">No critic scores are shown: a reviewer decided that the Wikipedia article found for this game is not about it.</p>
+  {% elif c.state == "not_found" %}
+    <p class="muted small">No English Wikipedia article was found for this game through its identifiers on Wikidata, so no critic scores are shown.</p>
+  {% elif c.state == "error" %}
+    <p class="muted small">Critic scores could not be read from Wikipedia at the last check.</p>
+  {% elif c.state == "no_table" %}
+    <p class="muted small">The game's Wikipedia article has no review table, so no critic scores are shown.</p>
+  {% elif c.state == "unsupported" %}
+    <p class="muted small">The review table in the game's Wikipedia article uses a format this site does not read safely, so its scores wait for review and are not shown.</p>
+  {% else %}
+    {% if c.aggregates %}
+    <h4 class="critics-heading">Aggregate scores</h4>
+    <ul class="critic-list" role="list">{% for row in c.aggregates %}{{ critic_row(row) }}{% endfor %}</ul>
+    <p class="small muted">Calculated by each aggregator from many published reviews.</p>
+    {% endif %}
+    {% if c.critics %}
+    <h4 class="critics-heading">Reviews</h4>
+    <ul class="critic-list" role="list">{% for row in c.critics %}{{ critic_row(row) }}{% endfor %}</ul>
+    {% endif %}
+    {% if c.hidden %}<p class="small muted">{{ c.hidden }} more {{ "score is" if c.hidden == 1 else "scores are" }} in the table in a format this site does not read safely (such as several scores in one cell without a platform), so {{ "it waits" if c.hidden == 1 else "they wait" }} for review and {{ "is" if c.hidden == 1 else "are" }} not shown.</p>{% endif %}
+    <p class="small muted">
+      Each score in its publication's own scale, as listed in the English Wikipedia article
+      “<a class="text-link" href="{{ c.article.revision_url or c.article.url }}" target="_blank" rel="noopener">{{ c.article.title }}</a>”{% if c.article.revision_at %} (revision of {{ c.article.revision_at|date }}){% endif %}, checked {{ c.checked_at|date }}.
+      A platform or edition appears only where the table names one. Critics' scores are separate from Steam player reviews; this site does not convert or average them.
+      Wikipedia content is available under <a class="text-link" href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>.
+    </p>
+  {% endif %}
+</section>
+{%- endmacro %}

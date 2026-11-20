@@ -1,0 +1,8 @@
+{# The details dialog. app.js opens it for any link with data-details on a page that includes this markup;
+   without JavaScript those links open the full details page instead. #}
+<dialog class="game-dialog" id="game-dialog" aria-labelledby="dialog-heading">
+  <button class="dialog-close" type="button" data-close-dialog autofocus>
+    <span aria-hidden="true">×</span><span class="visually-hidden">Close details</span>
+  </button>
+  <div class="dialog-content" data-dialog-content></div>
+</dialog>

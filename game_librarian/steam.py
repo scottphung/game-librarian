@@ -7,16 +7,19 @@ Every method raises SteamError when Steam cannot be reached or keeps failing.
 Documented endpoints (Steamworks Web API reference):
   * IStoreService/GetAppList          - catalog discovery, needs an API key
   * IUserReviewsService/GetAppReviews - review summary and helpful reviews
+  * ISteamUserStats/GetNumberOfCurrentPlayers - players in game right now, no key needed
 Public but undocumented endpoints (may change without notice):
-  * store/api/appdetails              - descriptions, header image, genres, modes
+  * store/api/appdetails              - descriptions, header image, genres, modes; the store's currency
   * IStoreBrowseService/GetItems      - community tags, portrait cover, trailer clips, screenshots;
-                                        for candidate screening: app type, availability, release, review summary
+                                        for candidate screening: app type, availability, release, review summary;
+                                        for prices: the free flag and the best purchase option
   * IStoreService/GetTagList          - tag id -> tag name
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -44,10 +47,16 @@ REVIEW_TYPE_NEGATIVE = 2
 
 APP_LIST_PAGE_SIZE = 10_000
 STORE_ITEMS_TAG_COUNT = 20
+# An ISO 4217 currency code, such as "USD".
+CURRENCY_CODE = re.compile(r"[A-Z]{3}")
 
 
 class SteamError(Exception):
     """Steam could not be reached, or answered with an error, after all retries."""
+
+
+class SteamNotFound(SteamError):
+    """Steam answered HTTP 404: it has nothing at that address (for example, no player count for an app)."""
 
 
 class SteamClient:
@@ -120,7 +129,8 @@ class SteamClient:
                     last_problem = f"HTTP {response.status_code}"
                     delay = self._retry_after_seconds(response) or delay
                 else:
-                    raise SteamError(f"HTTP {response.status_code} from {url}")
+                    error = SteamNotFound if response.status_code == 404 else SteamError
+                    raise error(f"HTTP {response.status_code} from {url}")
             if attempt < MAX_ATTEMPTS:
                 self._sleep(delay)
         raise SteamError(f"{url} failed after {MAX_ATTEMPTS} attempts ({last_problem})")
@@ -156,21 +166,15 @@ class SteamClient:
         response = self._call_service("IStoreService/GetTagList", {"language": language})
         return {int(tag["tagid"]): tag["name"] for tag in response.get("tags", [])}
 
-    def get_store_items(self, appids: list[int], language: str = "english", country: str = "US") -> dict[int, dict]:
-        """Return tags, asset names, trailers and screenshots for several apps in one call.
+    def _get_items(self, appids: list[int], data_request: dict, language: str, country: str) -> dict[int, dict]:
+        """Call IStoreBrowseService/GetItems for up to 50 apps and return {appid: store item}.
 
-        Uses IStoreBrowseService/GetItems. Apps Steam does not know, or will not show,
-        are left out of the result.
+        Apps Steam does not know, or will not show in `country`, are left out of the result.
         """
         payload = {
             "ids": [{"appid": appid} for appid in appids],
             "context": {"language": language, "country_code": country},
-            "data_request": {
-                "include_assets": True,
-                "include_tag_count": STORE_ITEMS_TAG_COUNT,
-                "include_trailers": True,
-                "include_screenshots": True,
-            },
+            "data_request": data_request,
         }
         response = self._call_service("IStoreBrowseService/GetItems", payload)
         items = {}
@@ -178,25 +182,64 @@ class SteamClient:
             if item.get("success") == 1 and item.get("appid"):
                 items[int(item["appid"])] = item
         return items
+
+    def get_store_items(self, appids: list[int], language: str = "english", country: str = "US") -> dict[int, dict]:
+        """Return tags, asset names, trailers and screenshots for several apps in one call."""
+        data_request = {
+            "include_assets": True,
+            "include_tag_count": STORE_ITEMS_TAG_COUNT,
+            "include_trailers": True,
+            "include_screenshots": True,
+        }
+        return self._get_items(appids, data_request, language, country)
 
     def get_item_summaries(self, appids: list[int], language: str = "english", country: str = "US") -> dict[int, dict]:
         """Return name, app type, visibility, purchase option, release and review summary for up to 50 apps.
 
-        Uses IStoreBrowseService/GetItems (undocumented), like get_store_items, with the data the
-        candidate screening needs. Apps Steam does not return, or returns without success, are left out.
+        The data the candidate screening needs, from the same undocumented GetItems endpoint.
         """
-        payload = {
-            "ids": [{"appid": appid} for appid in appids],
-            "context": {"language": language, "country_code": country},
-            "data_request": {"include_basic_info": True, "include_release": True, "include_reviews": True,
-                             "include_ratings": True},
-        }
-        response = self._call_service("IStoreBrowseService/GetItems", payload)
-        items = {}
-        for item in response.get("store_items", []):
-            if item.get("success") == 1 and item.get("appid"):
-                items[int(item["appid"])] = item
-        return items
+        data_request = {"include_basic_info": True, "include_release": True, "include_reviews": True,
+                        "include_ratings": True}
+        return self._get_items(appids, data_request, language, country)
+
+    def get_purchase_options(self, appids: list[int], country: str = "US", language: str = "english") -> dict[int, dict]:
+        """Return each app's free flag and best purchase option in the store of `country`, for up to 50 apps.
+
+        GetItems includes `is_free` and `best_purchase_option` (price, discount, the discount's end
+        date) without any data request flag (checked live on 2026-11-19), so none is sent.
+        """
+        return self._get_items(appids, {}, language, country)
+
+    def get_store_currency(self, appid: int, country: str = "US") -> str | None:
+        """Return the currency code ("USD") of the Steam store in `country`, read from one paid app's price.
+
+        GetItems formats prices ("$7.49") but names no currency, so the currency comes from the
+        price_overview of store/api/appdetails. Returns None when Steam gives none for this app.
+        """
+        data = self.get_json(f"{STORE_API_BASE}/appdetails",
+                             {"appids": appid, "cc": country.lower(), "filters": "price_overview"})
+        entry = data.get(str(appid)) if isinstance(data, dict) else None
+        details = entry.get("data") if isinstance(entry, dict) else None
+        overview = details.get("price_overview") if isinstance(details, dict) else None
+        currency = overview.get("currency") if isinstance(overview, dict) else None
+        return currency if isinstance(currency, str) and CURRENCY_CODE.fullmatch(currency) else None
+
+    def get_current_players(self, appid: int) -> int | None:
+        """Return how many people play the app on Steam right now, or None when Steam reports no count.
+
+        ISteamUserStats/GetNumberOfCurrentPlayers is documented and needs no key. Steam answers
+        HTTP 404 for an app it has no count for; that is a missing count, not a failed request.
+        Players who play without being connected to Steam are not counted (Valve's documentation).
+        """
+        try:
+            data = self.get_json(f"{WEB_API_BASE}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", {"appid": appid})
+        except SteamNotFound:
+            return None
+        response = data.get("response") if isinstance(data, dict) else None
+        if not isinstance(response, dict) or response.get("result") != 1:
+            return None
+        count = response.get("player_count")
+        return count if isinstance(count, int) and count >= 0 else None
 
     def get_app_details(self, appid: int, language: str = "english", country: str = "us") -> dict | None:
         """Return the store details for one app, or None when Steam has none (store/api/appdetails)."""

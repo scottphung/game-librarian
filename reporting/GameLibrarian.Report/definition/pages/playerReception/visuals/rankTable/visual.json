@@ -56,8 +56,8 @@
                 }
               },
               "queryRef": "Games.Ranking Tier Name",
-              "nativeQueryRef": "Tier",
-              "displayName": "Tier"
+              "nativeQueryRef": "Award group",
+              "displayName": "Award group"
             },
             {
               "field": {
@@ -67,12 +67,27 @@
                       "Entity": "Games"
                     }
                   },
-                  "Property": "Positive Reviews"
+                  "Property": "Awards Won"
                 }
               },
-              "queryRef": "Games.Positive Reviews",
-              "nativeQueryRef": "Positive reviews",
-              "displayName": "Positive reviews"
+              "queryRef": "Games.Awards Won",
+              "nativeQueryRef": "Wins",
+              "displayName": "Wins"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Games"
+                    }
+                  },
+                  "Property": "Award Nominations"
+                }
+              },
+              "queryRef": "Games.Award Nominations",
+              "nativeQueryRef": "Nominations",
+              "displayName": "Nominations"
             },
             {
               "field": {
@@ -139,7 +154,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Four-year ranking: tier, then positive reviews'"
+                  "Value": "'Four-year ranking: awards, then Steam reception'"
                 }
               }
             }

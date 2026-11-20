@@ -1,4 +1,4 @@
-"""Shared test helpers: an in-memory fake Steam, synthetic payloads and a controllable clock.
+"""Shared test helpers: an in-memory fake Steam and Gamalytic, synthetic payloads and a controllable clock.
 
 All names, texts and numbers here are made up for tests. They are never shown by the app.
 """
@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from game_librarian.config import Settings
+from game_librarian.gamalytic import GamalyticClient
 from game_librarian.steam import SteamClient
 
 TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1695: "Open World", 3871: "2D", 1667: "Horror",
@@ -82,6 +83,21 @@ def store_summary(name: str, *, app_type: int = 0, reviews: int = 1_000, percent
     return item
 
 
+def purchase_item(name: str, cents: int = 1999, *, discount: int = 0, ends: int | None = None,
+                  hidden: bool = False) -> dict:
+    """The price part of an IStoreBrowseService/GetItems item, shaped like Steam's (fields observed live on
+    2026-11-19: prices in cents as strings, the discount's end as a Unix time)."""
+    final = cents * (100 - discount) // 100
+    option = {"packageid": 1, "purchase_option_name": name, "final_price_in_cents": str(final),
+              "formatted_final_price": f"${final / 100:.2f}", "hide_discount_pct_for_compliance": hidden,
+              "price_cannot_be_displayed_as_discount": False}
+    if discount:
+        option.update(original_price_in_cents=str(cents), formatted_original_price=f"${cents / 100:.2f}",
+                      discount_pct=discount,
+                      active_discounts=[{"discount_amount": str(cents - final), "discount_end_date": ends}] if ends else [])
+    return {"best_purchase_option": option}
+
+
 def review(recommendation_id: int, text: str, *, voted_up: bool, votes: int = 10, playtime: int = 600) -> dict:
     """One GetAppReviews review entry."""
     return {
@@ -104,6 +120,9 @@ class FakeSteam:
         self.trailers: dict[int, list[tuple[str, bool]]] = {}  # (trailer name, all ages)
         self.reviews: dict[int, dict] = {}
         self.store_summaries: dict[int, dict] = {}  # what candidate screening sees (see store_summary)
+        self.prices: dict[int, dict] = {}  # GetItems price fields per app (see purchase_item); missing = no store item
+        self.players: dict[int, int] = {}  # current players per app; missing = HTTP 404, as Steam answers
+        self.currency = "USD"  # what appdetails' price_overview reports for every store region
         self.app_list_pages: list[dict] = []
         self.down = False  # every request fails with a connection error
         self.failing_paths: set[str] = set()  # path fragments that answer HTTP 503
@@ -112,10 +131,15 @@ class FakeSteam:
 
     def add_game(self, appid: int, name: str, *, tags=((122, 900), (19, 800)), positive: int = 3,
                  negative: int = 3, totals=(900, 100, "Very Positive"), trailers=(("Launch Trailer", True),),
-                 **detail_overrides) -> None:
+                 price: dict | None = None, players: int | None = None, **detail_overrides) -> None:
+        """A game on the fake Steam: $19.99 without a discount unless `price` says otherwise, and no player
+        count (HTTP 404) unless `players` is given."""
         self.details[appid] = details_payload(appid, name, **detail_overrides)
         self.tags[appid] = list(tags)
         self.trailers[appid] = list(trailers)
+        self.prices[appid] = price if price is not None else purchase_item(name)
+        if players is not None:
+            self.players[appid] = players
         self.reviews[appid] = {
             "totals": totals,
             "positive": [review(appid * 100 + i, f"Positive review number {i} for {name}.", voted_up=True)
@@ -141,6 +165,10 @@ class FakeSteam:
             return httpx.Response(503)
         payload = json.loads(params["input_json"]) if "input_json" in params else {}
 
+        if path == "/api/appdetails" and params.get("filters") == "price_overview":
+            appid = int(params["appids"])  # the store currency is read from one priced app
+            overview = {"currency": self.currency, "initial": 1999, "final": 1999, "discount_percent": 0}
+            return httpx.Response(200, json={str(appid): {"success": True, "data": {"price_overview": overview}}})
         if path == "/api/appdetails":
             appid = int(params["appids"])
             if appid in self.failing_appids:
@@ -148,6 +176,18 @@ class FakeSteam:
             data = self.details.get(appid)
             entry = {"success": True, "data": data} if data else {"success": False}
             return httpx.Response(200, json={str(appid): entry})
+        if path.endswith("/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"):
+            appid = int(params["appid"])
+            if appid not in self.players:
+                return httpx.Response(404)  # what Steam answers for an app it has no count for
+            return httpx.Response(200, json={"response": {"player_count": self.players[appid], "result": 1}})
+        if path.endswith("/IStoreBrowseService/GetItems/v1/") and not payload["data_request"]:
+            items = []  # a price request: the free flag and the best purchase option
+            for ident in payload["ids"]:
+                price = self.prices.get(ident["appid"])
+                items.append({"appid": ident["appid"], "success": 1, "visible": True, **price} if price is not None
+                             else {"appid": 0, "success": 15, "visible": False})
+            return httpx.Response(200, json={"response": {"store_items": items}})
         if path.endswith("/IStoreService/GetTagList/v1/"):
             tags = [{"tagid": tagid, "name": name} for tagid, name in TAG_NAMES.items()]
             return httpx.Response(200, json={"response": {"tags": tags}})
@@ -204,6 +244,49 @@ class FakeSteam:
                         "last_appid": apps[-1]["appid"] if apps else 0}})
             return httpx.Response(200, json={"response": {"apps": []}})
         return httpx.Response(404)
+
+
+class FakeGamalytic:
+    """Gamalytic's free list endpoint in memory, answering like the live one did on 2026-11-20 (gamalytic.py).
+
+    `copies` holds copiesSold per Steam app id; an app id without one is left out of the answer, as Gamalytic leaves
+    out games it has no data for. `responses` are consumed one per request before normal answers: an HTTP status to
+    answer with, or "timeout". Every request is kept in `requests`.
+    """
+
+    CACHE_TIMESTAMP = 1_795_183_238_291  # Unix milliseconds: 20 Nov 2026, 14:00:38 UTC, as on the live answers
+
+    def __init__(self) -> None:
+        self.copies: dict[int, int] = {}
+        self.responses: list[int | str] = []
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.responses:
+            planned = self.responses.pop(0)
+            if planned == "timeout":
+                raise httpx.ReadTimeout("Gamalytic did not answer (test)", request=request)
+            if planned != 200:
+                return httpx.Response(planned, json={"message": f"planned answer {planned} (test)"})
+        if request.url.path != "/steam-games/list":
+            return httpx.Response(404, json={"message": "not found"})
+        appids = [int(value) for value in request.url.params["appids"].split(",")]
+        result = [{"steamId": appid, "copiesSold": self.copies[appid]} for appid in appids if appid in self.copies]
+        return httpx.Response(200, json={"pages": 1, "total": len(result), "result": result,
+                                         "cacheTimestamp": self.CACHE_TIMESTAMP})
+
+    def client(self) -> GamalyticClient:
+        return GamalyticClient(http=httpx.Client(transport=httpx.MockTransport(self.handler)), sleep=lambda seconds: None)
+
+
+@pytest.fixture(autouse=True)
+def fake_gamalytic(monkeypatch) -> FakeGamalytic:
+    """Every test's Gamalytic: `sync` asks for sales estimates by default (no setting needed), so without this a
+    command-line test would reach the real API. The test suite never does."""
+    fake = FakeGamalytic()
+    monkeypatch.setattr("game_librarian.__main__.GamalyticClient", fake.client)
+    return fake
 
 
 class Clock:

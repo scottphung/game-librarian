@@ -16,7 +16,8 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .prepare import GameDetails, ReviewExcerpt, ReviewSummary, content_hash, normalize_for_search, sort_key
+from .prepare import (GameDetails, PriceFacts, ReviewExcerpt, ReviewSummary, content_hash, normalize_for_search,
+                      sort_key)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -131,11 +132,177 @@ CREATE TABLE IF NOT EXISTS candidate_runs (
     status      TEXT NOT NULL,                   -- running | success | partial | failed
     summary     TEXT                             -- JSON counts and the first errors
 );
+-- The latest Steam price of each catalog game in one store region. A new check replaces the row;
+-- a failed check leaves it, so its checked_at shows how old it is (pricing.py decides what is fresh).
+CREATE TABLE IF NOT EXISTS prices (
+    appid            INTEGER PRIMARY KEY REFERENCES games(appid) ON DELETE CASCADE,
+    country_code     TEXT NOT NULL,              -- the Steam store region, such as "US"
+    currency         TEXT,                       -- ISO 4217 code Steam reports for that region, when known
+    status           TEXT NOT NULL,              -- priced | free | not_sold | unavailable (prepare.PRICE_STATUSES)
+    final_cents      INTEGER,
+    original_cents   INTEGER,
+    discount_percent INTEGER NOT NULL DEFAULT 0,
+    final_text       TEXT,                       -- Steam's own formatting, such as "$7.49"
+    original_text    TEXT,
+    discount_ends_at TEXT,                       -- UTC ISO 8601, when Steam gives an end date
+    discount_hidden  INTEGER NOT NULL DEFAULT 0, -- 1: Steam asks not to present the price as a discount
+    purchase_option  TEXT,
+    checked_at       TEXT NOT NULL               -- when Steam reported these values, UTC ISO 8601
+);
+-- Dated snapshots: one row per game and capture time, never updated or deleted, so a change over
+-- time can only be measured between captures that exist. A snapshot is one moment, not a trend.
+CREATE TABLE IF NOT EXISTS player_snapshots (
+    appid       INTEGER NOT NULL REFERENCES games(appid) ON DELETE CASCADE,
+    captured_at TEXT NOT NULL,                   -- when Steam reported the count, UTC ISO 8601
+    players     INTEGER,                         -- people in game on Steam; NULL when Steam reported no count
+    PRIMARY KEY (appid, captured_at)
+);
+CREATE TABLE IF NOT EXISTS review_snapshots (
+    appid       INTEGER NOT NULL REFERENCES games(appid) ON DELETE CASCADE,
+    captured_at TEXT NOT NULL,
+    total       INTEGER NOT NULL,                -- Steam's review summary: all languages, Steam purchasers
+    positive    INTEGER NOT NULL,
+    negative    INTEGER NOT NULL,
+    PRIMARY KEY (appid, captured_at)
+);
+-- Refreshes of other sources than Steam (upcoming = IGDB, critics = Wikipedia, sales_estimates = Gamalytic), one row
+-- per run.
+CREATE TABLE IF NOT EXISTS source_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    source      TEXT NOT NULL,                   -- upcoming | critics | sales_estimates
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL,                   -- running | success | partial | failed
+    summary     TEXT                             -- JSON counts and the first errors
+);
+-- IGDB game records (upcoming.py). A record is never deleted, so an igdb-<id> key keeps working after
+-- the game leaves the upcoming lists or gets released. JSON columns hold what IGDB returned, as parsed.
+CREATE TABLE IF NOT EXISTS igdb_games (
+    igdb_id             INTEGER PRIMARY KEY,
+    name                TEXT NOT NULL,
+    slug                TEXT,
+    igdb_url            TEXT,
+    summary             TEXT,
+    game_type           INTEGER,
+    game_status         INTEGER,
+    first_release_date  INTEGER,                 -- IGDB's own timestamp; used only when no date can be read
+    cover_image_id      TEXT,
+    platforms           TEXT,                    -- JSON list of platform names
+    release_dates       TEXT,                    -- JSON list of upcoming.ReleaseDate fields
+    release_summary     TEXT,                    -- JSON {platform: {label}}: earliest full release per platform
+    publishers          TEXT,
+    developers          TEXT,
+    websites            TEXT,                    -- JSON list of {kind, url}
+    steam_appids        TEXT,                    -- JSON list of the Steam app ids IGDB lists
+    steam_appid         INTEGER,                 -- the verified Steam app, else NULL
+    steam_match         TEXT NOT NULL DEFAULT 'unchecked',  -- verified | needs_review | none | rejected | unchecked
+    steam_match_reason  TEXT,
+    steam_checked_at    TEXT,
+    first_seen_at       TEXT NOT NULL,
+    checked_at          TEXT NOT NULL            -- the last refresh that got this record from IGDB
+);
+-- A platform's full-release date as IGDB stated it before and after one refresh.
+CREATE TABLE IF NOT EXISTS release_changes (
+    igdb_id     INTEGER NOT NULL REFERENCES igdb_games(igdb_id) ON DELETE CASCADE,
+    platform    TEXT NOT NULL,
+    before      TEXT,                            -- NULL: no date for this platform before
+    after       TEXT,                            -- NULL: no date for this platform now
+    kind        TEXT NOT NULL,                   -- upcoming.DateChange.kind
+    noticed_at  TEXT NOT NULL,
+    PRIMARY KEY (igdb_id, platform, noticed_at)
+);
+-- Dated PopScore snapshots of the upcoming games in each list, never updated: position changes can
+-- only be measured between snapshots that exist.
+CREATE TABLE IF NOT EXISTS popularity_snapshots (
+    signal         TEXT NOT NULL,                -- upcoming.Signal.key
+    igdb_id        INTEGER NOT NULL,
+    captured_at    TEXT NOT NULL,
+    position       INTEGER NOT NULL,             -- place in IGDB's order of this signal, 1 = highest value
+    value          REAL NOT NULL,                -- IGDB's value (a relative share or a position code, not a count)
+    calculated_at  TEXT,                         -- when IGDB calculated the value
+    PRIMARY KEY (signal, igdb_id, captured_at)
+);
+-- The IGDB game of each catalog app: linked when exactly one IGDB game lists the Steam app.
+CREATE TABLE IF NOT EXISTS steam_igdb_links (
+    appid       INTEGER PRIMARY KEY,
+    igdb_id     INTEGER,
+    status      TEXT NOT NULL,                   -- linked | none | ambiguous
+    checked_at  TEXT NOT NULL
+);
+-- "Watch it live": the last Twitch answer per game, deleted after 24 hours (Twitch's caching limit).
+CREATE TABLE IF NOT EXISTS twitch_live (
+    game_key      TEXT PRIMARY KEY,
+    status        TEXT NOT NULL,                 -- ok | no_category | ambiguous | error | rate_limited
+    category_id   TEXT,
+    category_name TEXT,
+    streams       TEXT,                          -- JSON list of twitch.Stream fields
+    fetched_at    TEXT,                          -- the last successful answer
+    checked_at    TEXT NOT NULL,                 -- the last attempt
+    retry_at      TEXT,                          -- after a failure: do not ask again before this
+    error         TEXT
+);
+-- "Most watched on Twitch": Twitch's newest Get Top Games answer, replaced at each check and deleted after
+-- 24 hours (Twitch's caching limit). No history is kept: trends over time would need an agreement with Twitch.
+CREATE TABLE IF NOT EXISTS twitch_top_games (
+    position    INTEGER PRIMARY KEY,             -- place in Twitch's order of all categories, 1 = most viewers
+    category_id TEXT NOT NULL,
+    name        TEXT NOT NULL,                   -- Twitch's category name
+    igdb_id     INTEGER,                         -- the IGDB game Twitch links to the category, else NULL
+    checked_at  TEXT NOT NULL                    -- when Twitch gave this order, UTC ISO 8601
+);
+-- "What the critics said": the Wikipedia article chosen for a game, and the scores read from it.
+CREATE TABLE IF NOT EXISTS critic_articles (
+    game_key        TEXT PRIMARY KEY,
+    status          TEXT NOT NULL,               -- verified | needs_review | not_found | rejected | error
+    reason          TEXT,
+    wikidata_ids    TEXT,                        -- JSON list of the Wikidata items found by identifier
+    article_title   TEXT,
+    article_section TEXT,                        -- the section a redirect points to, if any
+    revision_id     INTEGER,
+    revision_at     TEXT,
+    table_status    TEXT,                        -- ok | no_table | unsupported | not_read
+    checked_at      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS critic_scores (
+    game_key     TEXT NOT NULL REFERENCES critic_articles(game_key) ON DELETE CASCADE,
+    position     INTEGER NOT NULL,
+    table_title  TEXT,
+    outlet_code  TEXT,
+    outlet       TEXT NOT NULL,
+    kind         TEXT NOT NULL,                  -- aggregate | critic
+    score        TEXT,                           -- the original score as written, such as "9/10" or "A-"
+    label        TEXT,                           -- platform or edition as written in the table
+    review_url   TEXT,
+    status       TEXT NOT NULL,                  -- ok | needs_review
+    reason       TEXT,
+    PRIMARY KEY (game_key, position)
+);
+-- Estimated Steam copies sold (gamalytic.py): one row per game and collection, never updated, so an older estimate
+-- stays next to a newer one. Gamalytic revises its model, so the difference between two collections is not a number
+-- of copies sold in between. Gamalytic's terms forbid sharing its data: the site shows these rows only to a browser
+-- on the computer that runs it, and the Power BI export leaves them out.
+CREATE TABLE IF NOT EXISTS sales_estimates (
+    appid            INTEGER NOT NULL REFERENCES games(appid) ON DELETE CASCADE,
+    collected_at     TEXT NOT NULL,              -- when this site asked, UTC ISO 8601
+    source           TEXT NOT NULL,              -- who made the estimate: "Gamalytic"
+    copies_sold      INTEGER,                    -- the estimate; NULL when the source gave none (never stored as 0)
+    source_cached_at TEXT,                       -- the answer's own time (Gamalytic's cacheTimestamp), UTC ISO 8601
+    PRIMARY KEY (appid, collected_at)
+);
 """
 
 # Columns added after the first release. initialize() adds them to an existing database;
 # CREATE TABLE IF NOT EXISTS alone never changes a table that already exists.
 ADDED_GAME_COLUMNS = {"preview_clip": "TEXT", "screenshot_url": "TEXT"}
+
+# Review totals saved before review snapshots existed were real observations at reviews_updated_at,
+# so they seed the review history. INSERT OR IGNORE makes this safe to run on every start.
+SEED_REVIEW_SNAPSHOTS = """
+INSERT OR IGNORE INTO review_snapshots (appid, captured_at, total, positive, negative)
+SELECT appid, reviews_updated_at, review_total, review_positive, COALESCE(review_negative, review_total - review_positive)
+FROM games
+WHERE reviews_updated_at IS NOT NULL AND review_total > 0 AND review_positive BETWEEN 0 AND review_total
+"""
 
 # Only games that are still in curated/games.csv and were fetched at least once are shown.
 VISIBLE_GAMES = "g.is_curated = 1 AND g.details_updated_at IS NOT NULL"
@@ -175,6 +342,7 @@ def initialize(db_path: Path) -> sqlite3.Connection:
         for column, column_type in ADDED_GAME_COLUMNS.items():
             if column not in existing:  # names come from the constant above, never from input
                 conn.execute(f"ALTER TABLE games ADD COLUMN {column} {column_type}")
+        conn.execute(SEED_REVIEW_SNAPSHOTS)
     return conn
 
 
@@ -303,7 +471,10 @@ def save_reviews(
     day_range_used: int | None,
     now: str,
 ) -> None:
-    """Replace the review summary and excerpts of one game in a single transaction."""
+    """Replace the review summary and excerpts of one game in a single transaction.
+
+    A usable summary (some reviews, consistent counts) is also kept as a dated review snapshot.
+    """
     with conn:
         conn.execute(
             """UPDATE games SET reviews_status = 'ok', reviews_error = NULL, reviews_updated_at = ?,
@@ -312,6 +483,12 @@ def save_reviews(
                WHERE appid = ?""",
             (now, now, summary.total, summary.positive, summary.negative, summary.score_desc, day_range_used, appid),
         )
+        if summary.total > 0 and 0 <= summary.positive <= summary.total:  # zeros stand for "no answer"
+            conn.execute(
+                """INSERT OR REPLACE INTO review_snapshots (appid, captured_at, total, positive, negative)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (appid, now, summary.total, summary.positive, summary.negative),
+            )
         conn.execute("DELETE FROM review_excerpts WHERE appid = ?", (appid,))
         for polarity, excerpts in (("positive", positive), ("negative", negative)):
             conn.executemany(
@@ -333,6 +510,43 @@ def record_reviews_problem(conn: sqlite3.Connection, appid: int, *, error: str, 
             "UPDATE games SET reviews_status = 'error', reviews_error = ?, reviews_checked_at = ? WHERE appid = ?",
             (error, now, appid),
         )
+
+
+def save_prices(conn: sqlite3.Connection, prices: dict[int, PriceFacts], *, country: str, currency: str | None,
+                now: str) -> None:
+    """Replace the stored price of each game in `prices` with what Steam reported at `now`."""
+    with conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO prices (appid, country_code, currency, status, final_cents, original_cents,
+                 discount_percent, final_text, original_text, discount_ends_at, discount_hidden, purchase_option,
+                 checked_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (appid, country, currency, facts.status, facts.final_cents, facts.original_cents,
+                 facts.discount_percent, facts.final_text, facts.original_text, facts.discount_ends_at,
+                 int(facts.discount_hidden), facts.purchase_option, now)
+                for appid, facts in prices.items()
+            ],
+        )
+
+
+def save_player_count(conn: sqlite3.Connection, appid: int, players: int | None, *, now: str) -> None:
+    """Add one player snapshot. `players` is None when Steam reported no count for the app."""
+    with conn:
+        conn.execute("INSERT OR REPLACE INTO player_snapshots (appid, captured_at, players) VALUES (?, ?, ?)",
+                     (appid, now, players))
+
+
+def latest_player_times(conn: sqlite3.Connection, appids: list[int]) -> dict[int, str]:
+    """When each of `appids` last got a player snapshot (the sync's due check)."""
+    if not appids:
+        return {}
+    rows = conn.execute(
+        f"""SELECT appid, MAX(captured_at) AS captured_at FROM player_snapshots
+            WHERE appid IN ({','.join('?' * len(appids))}) GROUP BY appid""",
+        appids,
+    )
+    return {row["appid"]: row["captured_at"] for row in rows}
 
 
 def upsert_discovered_apps(conn: sqlite3.Connection, apps: list[dict], *, now: str) -> tuple[int, int]:
@@ -452,12 +666,14 @@ def matching_games(conn: sqlite3.Connection, words: list[str], tags: list[str]) 
     """Return the visible games that match a name search and tag filter, in library order.
 
     Each row holds only what filtering, sorting and ranking need: appid, sort_name,
-    review_positive, review_total, release_date, coming_soon and modes (JSON). With no
-    words and no tags, this is the whole visible catalog, which the ranking is computed over.
+    review_positive, review_total, review_score_desc, release_date, coming_soon, and modes and
+    publishers (JSON). With no words and no tags, this is the whole visible catalog, which the
+    ranking is computed over.
     """
     where, params = _visible_filter(words, tags)
     return conn.execute(
-        f"""SELECT g.appid, g.sort_name, g.review_positive, g.review_total, g.release_date, g.coming_soon, g.modes
+        f"""SELECT g.appid, g.sort_name, g.review_positive, g.review_total, g.review_score_desc, g.release_date,
+                   g.coming_soon, g.modes, g.publishers
             FROM games g WHERE {where} ORDER BY g.sort_name, g.appid""",
         params,
     ).fetchall()
@@ -523,6 +739,73 @@ def catalog_counts(conn: sqlite3.Connection) -> dict[str, int]:
               (SELECT COUNT(*) FROM games WHERE is_curated = 1) AS curated,
               (SELECT COUNT(*) FROM games g WHERE {VISIBLE_GAMES}) AS ready,
               (SELECT COUNT(*) FROM discovered_apps) AS discovered"""
+    ).fetchone()
+    return dict(row)
+
+
+def price_rows(conn: sqlite3.Connection, appids: list[int]) -> dict[int, sqlite3.Row]:
+    """The stored Steam price of each of `appids` that has one, keyed by app id."""
+    if not appids:
+        return {}
+    rows = conn.execute(f"SELECT * FROM prices WHERE appid IN ({','.join('?' * len(appids))})", appids)
+    return {row["appid"]: row for row in rows}
+
+
+def latest_player_counts(conn: sqlite3.Connection) -> dict[int, sqlite3.Row]:
+    """The newest player snapshot (appid, captured_at, players) of every visible game that has one."""
+    rows = conn.execute(
+        f"""SELECT p.appid, p.captured_at, p.players FROM player_snapshots p
+            JOIN (SELECT appid, MAX(captured_at) AS captured_at FROM player_snapshots GROUP BY appid) newest
+              ON newest.appid = p.appid AND newest.captured_at = p.captured_at
+            JOIN games g ON g.appid = p.appid
+            WHERE {VISIBLE_GAMES}"""
+    )
+    return {row["appid"]: row for row in rows}
+
+
+def _history(conn: sqlite3.Connection, table: str, columns: str, since: str) -> dict[int, list[sqlite3.Row]]:
+    """Snapshots of the visible games captured at or after `since`, oldest first, keyed by app id."""
+    history: dict[int, list[sqlite3.Row]] = defaultdict(list)
+    rows = conn.execute(  # table and columns come from the two fixed calls below, never from input
+        f"""SELECT s.appid, s.captured_at, {columns} FROM {table} s JOIN games g ON g.appid = s.appid
+            WHERE {VISIBLE_GAMES} AND s.captured_at >= ? ORDER BY s.appid, s.captured_at""",
+        (since,),
+    )
+    for row in rows:
+        history[row["appid"]].append(row)
+    return dict(history)
+
+
+def player_history(conn: sqlite3.Connection, since: str) -> dict[int, list[sqlite3.Row]]:
+    """Player snapshots (captured_at, players) of the visible games since `since`, oldest first."""
+    return _history(conn, "player_snapshots", "s.players", since)
+
+
+def review_history(conn: sqlite3.Connection, since: str) -> dict[int, list[sqlite3.Row]]:
+    """Review snapshots (captured_at, total, positive, negative) of the visible games since `since`, oldest first."""
+    return _history(conn, "review_snapshots", "s.total, s.positive, s.negative", since)
+
+
+def snapshot_summary(conn: sqlite3.Connection) -> dict[str, dict]:
+    """For each snapshot kind: games covered, first and last capture, and distinct UTC days with captures."""
+    summary = {}
+    for kind, table in (("players", "player_snapshots"), ("reviews", "review_snapshots")):
+        row = conn.execute(  # the table names come from the fixed tuple above
+            f"""SELECT COUNT(DISTINCT s.appid) AS games, MIN(s.captured_at) AS first, MAX(s.captured_at) AS last,
+                       COUNT(DISTINCT substr(s.captured_at, 1, 10)) AS days
+                FROM {table} s JOIN games g ON g.appid = s.appid WHERE {VISIBLE_GAMES}"""
+        ).fetchone()
+        summary[kind] = dict(row)
+    return summary
+
+
+def price_summary(conn: sqlite3.Connection) -> dict:
+    """Prices stored for the visible games: how many, in which regions, the oldest and newest check, discounts."""
+    row = conn.execute(
+        f"""SELECT COUNT(*) AS games, GROUP_CONCAT(DISTINCT p.country_code) AS regions,
+                   MIN(p.checked_at) AS first, MAX(p.checked_at) AS last,
+                   COALESCE(SUM(p.discount_percent > 0), 0) AS discounted
+            FROM prices p JOIN games g ON g.appid = p.appid WHERE {VISIBLE_GAMES}"""
     ).fetchone()
     return dict(row)
 
@@ -717,3 +1000,366 @@ def finish_candidate_run(conn: sqlite3.Connection, run_id: int, *, status: str, 
 
 def recent_candidate_runs(conn: sqlite3.Connection, limit: int = 5) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM candidate_runs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+
+
+# ---------------------------------------------------------------------- other sources: runs
+
+
+def start_source_run(conn: sqlite3.Connection, source: str, *, now: str) -> int:
+    """Record the start of an IGDB or Wikipedia refresh. A run of the same source left 'running' is marked failed."""
+    abandoned = json.dumps({"errors": ["The run stopped before it finished (the process ended early)."]})
+    with conn:
+        conn.execute("UPDATE source_runs SET status = 'failed', finished_at = ?, summary = ? "
+                     "WHERE source = ? AND status = 'running'", (now, abandoned, source))
+        cursor = conn.execute("INSERT INTO source_runs (source, started_at, status) VALUES (?, ?, 'running')",
+                              (source, now))
+    return cursor.lastrowid
+
+
+def finish_source_run(conn: sqlite3.Connection, run_id: int, *, status: str, summary: dict, now: str) -> None:
+    with conn:
+        conn.execute("UPDATE source_runs SET status = ?, finished_at = ?, summary = ? WHERE id = ?",
+                     (status, now, json.dumps(summary, ensure_ascii=False), run_id))
+
+
+def last_source_run(conn: sqlite3.Connection, source: str, *,
+                    statuses: tuple[str, ...] = ("success", "partial")) -> sqlite3.Row | None:
+    """The newest run of `source` that ended with one of `statuses` (by default: one that saved data)."""
+    marks = ",".join("?" * len(statuses))
+    return conn.execute(f"SELECT * FROM source_runs WHERE source = ? AND status IN ({marks}) ORDER BY id DESC LIMIT 1",
+                        (source, *statuses)).fetchone()
+
+
+def recent_source_runs(conn: sqlite3.Connection, source: str, limit: int = 5) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM source_runs WHERE source = ? ORDER BY id DESC LIMIT ?",
+                        (source, limit)).fetchall()
+
+
+def source_requests_since(conn: sqlite3.Connection, source: str, since: str) -> int:
+    """The requests that the runs of `source` started at or after `since` recorded (summary counts "requests")."""
+    total = 0
+    for row in conn.execute("SELECT summary FROM source_runs WHERE source = ? AND started_at >= ?", (source, since)):
+        counts = json.loads(row["summary"]).get("counts", {}) if row["summary"] else {}
+        total += int(counts.get("requests", 0))
+    return total
+
+
+# ---------------------------------------------------------------------- IGDB games (upcoming.py)
+
+IGDB_JSON_COLUMNS = ("platforms", "release_dates", "release_summary", "publishers", "developers", "websites",
+                     "steam_appids")
+IGDB_COLUMNS = ("igdb_id", "name", "slug", "igdb_url", "summary", "game_type", "game_status", "first_release_date",
+                "cover_image_id", *IGDB_JSON_COLUMNS)
+
+
+def igdb_game_rows(conn: sqlite3.Connection, igdb_ids: list[int] | None = None) -> dict[int, sqlite3.Row]:
+    """Stored IGDB game records keyed by IGDB id: all of them, or those in `igdb_ids`."""
+    if igdb_ids is None:
+        rows = conn.execute("SELECT * FROM igdb_games")
+    elif not igdb_ids:
+        return {}
+    else:
+        rows = conn.execute(f"SELECT * FROM igdb_games WHERE igdb_id IN ({','.join('?' * len(igdb_ids))})",
+                            list(igdb_ids))
+    return {row["igdb_id"]: row for row in rows}
+
+
+def save_igdb_games(conn: sqlite3.Connection, records: list[dict], matches: dict, changes: list[tuple],
+                    *, now: str) -> None:
+    """Insert or update IGDB records, their Steam matches and the release-date changes noticed now.
+
+    `matches` maps IGDB ids to upcoming.SteamMatch; a record without one keeps its stored match.
+    `changes` holds (igdb_id, upcoming.DateChange) pairs.
+    """
+    columns = ", ".join(IGDB_COLUMNS)
+    updates = ", ".join(f"{column} = excluded.{column}" for column in IGDB_COLUMNS if column != "igdb_id")
+    with conn:
+        for record in records:
+            values = [json.dumps(record[column], ensure_ascii=False) if column in IGDB_JSON_COLUMNS else record[column]
+                      for column in IGDB_COLUMNS]
+            conn.execute(  # the column names come from the constants above, never from input
+                f"""INSERT INTO igdb_games ({columns}, first_seen_at, checked_at)
+                    VALUES ({', '.join('?' * len(IGDB_COLUMNS))}, ?, ?)
+                    ON CONFLICT (igdb_id) DO UPDATE SET {updates}, checked_at = excluded.checked_at""",
+                [*values, now, now],
+            )
+            match = matches.get(record["igdb_id"])
+            if match is not None:
+                conn.execute("""UPDATE igdb_games SET steam_match = ?, steam_appid = ?, steam_match_reason = ?,
+                                  steam_checked_at = ? WHERE igdb_id = ?""",
+                             (match.status, match.appid, match.reason, now, record["igdb_id"]))
+        conn.executemany(
+            "INSERT OR REPLACE INTO release_changes (igdb_id, platform, before, after, kind, noticed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(igdb_id, change.platform, change.before, change.after, change.kind, now) for igdb_id, change in changes],
+        )
+
+
+def release_changes(conn: sqlite3.Connection, igdb_ids: list[int], since: str) -> dict[int, list[sqlite3.Row]]:
+    """Release-date changes noticed at or after `since` for these games, newest first."""
+    if not igdb_ids:
+        return {}
+    found: dict[int, list[sqlite3.Row]] = defaultdict(list)
+    rows = conn.execute(
+        f"""SELECT * FROM release_changes WHERE noticed_at >= ? AND igdb_id IN ({','.join('?' * len(igdb_ids))})
+            ORDER BY noticed_at DESC, platform""",
+        [since, *igdb_ids],
+    )
+    for row in rows:
+        found[row["igdb_id"]].append(row)
+    return dict(found)
+
+
+def save_popularity_snapshot(conn: sqlite3.Connection, signal: str, entries: list, *, now: str) -> None:
+    """Save one dated snapshot of a signal's tracked upcoming games (upcoming.SignalEntry objects)."""
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO popularity_snapshots (signal, igdb_id, captured_at, position, value, calculated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [(signal, entry.igdb_id, now, entry.position, entry.value,
+              entry.calculated_at.isoformat(timespec="seconds") if entry.calculated_at else None) for entry in entries],
+        )
+
+
+def latest_popularity(conn: sqlite3.Connection, signal: str) -> list[sqlite3.Row]:
+    """The newest snapshot of a signal, best position first."""
+    return conn.execute(
+        """SELECT * FROM popularity_snapshots WHERE signal = ? AND captured_at =
+             (SELECT MAX(captured_at) FROM popularity_snapshots WHERE signal = ?) ORDER BY position""",
+        (signal, signal),
+    ).fetchall()
+
+
+def popularity_history(conn: sqlite3.Connection, signal: str, since: str) -> dict[int, list[sqlite3.Row]]:
+    """A signal's snapshots (captured_at, position) since `since`, oldest first, keyed by IGDB id."""
+    history: dict[int, list[sqlite3.Row]] = defaultdict(list)
+    rows = conn.execute("SELECT igdb_id, captured_at, position FROM popularity_snapshots "
+                        "WHERE signal = ? AND captured_at >= ? ORDER BY igdb_id, captured_at", (signal, since))
+    for row in rows:
+        history[row["igdb_id"]].append(row)
+    return dict(history)
+
+
+def popularity_snapshot_rows(conn: sqlite3.Connection, signal: str) -> list[sqlite3.Row]:
+    """Every saved row of a signal (igdb_id, captured_at, position, calculated_at), oldest snapshot first."""
+    return conn.execute("SELECT igdb_id, captured_at, position, calculated_at FROM popularity_snapshots "
+                        "WHERE signal = ? ORDER BY captured_at, position", (signal,)).fetchall()
+
+
+def popularity_summary(conn: sqlite3.Connection) -> dict[str, dict]:
+    """For each signal: games covered, first and last snapshot, and distinct UTC days with snapshots."""
+    summary = {}
+    for row in conn.execute("""SELECT signal, COUNT(DISTINCT igdb_id) AS games, MIN(captured_at) AS first,
+                                      MAX(captured_at) AS last, COUNT(DISTINCT substr(captured_at, 1, 10)) AS days
+                               FROM popularity_snapshots GROUP BY signal"""):
+        summary[row["signal"]] = dict(row)
+    return summary
+
+
+def save_steam_igdb_links(conn: sqlite3.Connection, links: dict[int, tuple[str, int | None]], *, now: str) -> None:
+    """Replace the IGDB link of each catalog app in `links` ((status, igdb_id) per app id)."""
+    with conn:
+        conn.executemany("INSERT OR REPLACE INTO steam_igdb_links (appid, igdb_id, status, checked_at) "
+                         "VALUES (?, ?, ?, ?)",
+                         [(appid, igdb_id, status, now) for appid, (status, igdb_id) in links.items()])
+
+
+def steam_igdb_link(conn: sqlite3.Connection, appid: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM steam_igdb_links WHERE appid = ?", (appid,)).fetchone()
+
+
+def igdb_ids_for_appid(conn: sqlite3.Connection, appid: int) -> list[int]:
+    """The IGDB ids known to be the same game as Steam app `appid`: its catalog link and verified matches."""
+    rows = conn.execute(
+        """SELECT igdb_id FROM steam_igdb_links WHERE appid = ? AND status = 'linked'
+           UNION SELECT igdb_id FROM igdb_games WHERE steam_appid = ? AND steam_match = 'verified'
+           ORDER BY igdb_id""",
+        (appid, appid),
+    )
+    return [row["igdb_id"] for row in rows]
+
+
+def igdb_game_for_appid(conn: sqlite3.Connection, appid: int) -> sqlite3.Row | None:
+    """The stored IGDB record whose verified Steam match is `appid`, if any (lowest IGDB id first)."""
+    return conn.execute("SELECT * FROM igdb_games WHERE steam_appid = ? AND steam_match = 'verified' "
+                        "ORDER BY igdb_id LIMIT 1", (appid,)).fetchone()
+
+
+def catalog_links_by_igdb(conn: sqlite3.Connection, appids) -> dict[int, int]:
+    """IGDB id -> catalog app, for IGDB games that exactly one of `appids` is linked to.
+
+    A link means IGDB's own Steam record of the app names this one IGDB game (steam_igdb_links). An IGDB
+    game linked to two catalog apps (two Steam editions, say) is left out, so neither is chosen.
+    """
+    wanted = set(appids)
+    found: dict[int, set[int]] = defaultdict(set)
+    for row in conn.execute("SELECT appid, igdb_id FROM steam_igdb_links WHERE status = 'linked'"):
+        if row["appid"] in wanted:
+            found[row["igdb_id"]].add(row["appid"])
+    return {igdb_id: next(iter(apps)) for igdb_id, apps in found.items() if len(apps) == 1}
+
+
+# ---------------------------------------------------------------------- Twitch top games (upcoming.py refresh)
+
+
+def save_twitch_top_games(conn: sqlite3.Connection, categories: list, *, now: str) -> None:
+    """Replace the stored Twitch list with a new answer (twitch.TopCategory objects, in Twitch's order)."""
+    with conn:
+        conn.execute("DELETE FROM twitch_top_games")
+        conn.executemany(
+            "INSERT INTO twitch_top_games (position, category_id, name, igdb_id, checked_at) VALUES (?, ?, ?, ?, ?)",
+            [(item.position, item.category_id, item.name, item.igdb_id, now) for item in categories],
+        )
+
+
+def twitch_top_games(conn: sqlite3.Connection, since: str) -> list[sqlite3.Row]:
+    """The stored Twitch list in Twitch's order, only when it was checked at or after `since`."""
+    return conn.execute("SELECT * FROM twitch_top_games WHERE checked_at >= ? ORDER BY position", (since,)).fetchall()
+
+
+def purge_twitch_top_games(conn: sqlite3.Connection, older_than: str) -> int:
+    """Delete a Twitch list checked before `older_than` (Twitch allows caching its data for 24 hours)."""
+    with conn:
+        return conn.execute("DELETE FROM twitch_top_games WHERE checked_at < ?", (older_than,)).rowcount
+
+
+# ---------------------------------------------------------------------- Twitch cache (twitch.py)
+
+
+def twitch_live_row(conn: sqlite3.Connection, game_key: str) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM twitch_live WHERE game_key = ?", (game_key,)).fetchone()
+
+
+def save_twitch_live(conn: sqlite3.Connection, game_key: str, *, status: str, checked_at: str,
+                     category_id: str | None = None, category_name: str | None = None, streams: list | None = None,
+                     fetched_at: str | None = None, retry_at: str | None = None, error: str | None = None) -> None:
+    """Store the outcome of one successful Twitch check (it replaces the game's previous one)."""
+    with conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO twitch_live (game_key, status, category_id, category_name, streams, fetched_at,
+                                                 checked_at, retry_at, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (game_key, status, category_id, category_name, json.dumps(streams or [], ensure_ascii=False), fetched_at,
+             checked_at, retry_at, error),
+        )
+
+
+def record_twitch_problem(conn: sqlite3.Connection, game_key: str, *, status: str, checked_at: str,
+                          retry_at: str | None, error: str) -> None:
+    """Record a failed Twitch check. The game's last good answer, if any, stays next to the error."""
+    with conn:
+        updated = conn.execute("UPDATE twitch_live SET status = ?, checked_at = ?, retry_at = ?, error = ? "
+                               "WHERE game_key = ?", (status, checked_at, retry_at, error, game_key)).rowcount
+        if not updated:
+            conn.execute("INSERT INTO twitch_live (game_key, status, streams, checked_at, retry_at, error) "
+                         "VALUES (?, ?, '[]', ?, ?, ?)", (game_key, status, checked_at, retry_at, error))
+
+
+def purge_twitch_cache(conn: sqlite3.Connection, older_than: str) -> int:
+    """Delete Twitch answers last checked before `older_than`, and older answers kept next to newer errors."""
+    with conn:
+        deleted = conn.execute("DELETE FROM twitch_live WHERE checked_at < ?", (older_than,)).rowcount
+        conn.execute("UPDATE twitch_live SET streams = '[]', category_id = NULL, category_name = NULL, fetched_at = NULL "
+                     "WHERE fetched_at IS NOT NULL AND fetched_at < ?", (older_than,))
+    return deleted
+
+
+# ---------------------------------------------------------------------- critic scores (critics.py)
+
+
+def critic_article_rows(conn: sqlite3.Connection, keys: list[str] | None = None) -> dict[str, sqlite3.Row]:
+    if keys is None:
+        rows = conn.execute("SELECT * FROM critic_articles")
+    elif not keys:
+        return {}
+    else:
+        rows = conn.execute(f"SELECT * FROM critic_articles WHERE game_key IN ({','.join('?' * len(keys))})",
+                            list(keys))
+    return {row["game_key"]: row for row in rows}
+
+
+def save_critics(conn: sqlite3.Connection, game_key: str, article: dict, scores: list[dict] | None, *,
+                 now: str) -> None:
+    """Replace a game's article match and, when `scores` is not None, its scores."""
+    with conn:
+        conn.execute(
+            """INSERT INTO critic_articles (game_key, status, reason, wikidata_ids, article_title, article_section,
+                 revision_id, revision_at, table_status, checked_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (game_key) DO UPDATE SET status = excluded.status, reason = excluded.reason,
+                 wikidata_ids = excluded.wikidata_ids, article_title = excluded.article_title,
+                 article_section = excluded.article_section, revision_id = excluded.revision_id,
+                 revision_at = excluded.revision_at, table_status = excluded.table_status,
+                 checked_at = excluded.checked_at""",
+            (game_key, article["status"], article.get("reason"), json.dumps(article.get("wikidata_ids") or []),
+             article.get("article_title"), article.get("article_section"), article.get("revision_id"),
+             article.get("revision_at"), article.get("table_status"), now),
+        )
+        if scores is not None:
+            conn.execute("DELETE FROM critic_scores WHERE game_key = ?", (game_key,))
+            conn.executemany(
+                """INSERT INTO critic_scores (game_key, position, table_title, outlet_code, outlet, kind, score, label,
+                     review_url, status, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [(game_key, position, score.get("table_title"), score.get("outlet_code"), score["outlet"],
+                  score["kind"], score.get("score"), score.get("label"), score.get("review_url"), score["status"],
+                  score.get("reason"))
+                 for position, score in enumerate(scores, 1)],
+            )
+
+
+def critic_scores(conn: sqlite3.Connection, game_key: str) -> list[sqlite3.Row]:
+    return conn.execute("SELECT * FROM critic_scores WHERE game_key = ? ORDER BY position", (game_key,)).fetchall()
+
+
+def critic_summary(conn: sqlite3.Connection) -> dict:
+    """Counts for `status`: article matches by status, and scores shown or waiting for review."""
+    matches = {row["status"]: row["n"] for row in
+               conn.execute("SELECT status, COUNT(*) AS n FROM critic_articles GROUP BY status")}
+    scores = {row["status"]: row["n"] for row in
+              conn.execute("""SELECT s.status, COUNT(*) AS n FROM critic_scores s
+                              JOIN critic_articles a ON a.game_key = s.game_key AND a.status = 'verified'
+                              GROUP BY s.status""")}
+    last = conn.execute("SELECT MAX(checked_at) AS last FROM critic_articles").fetchone()["last"]
+    return {"matches": matches, "scores": scores, "last": last}
+
+
+# ---------------------------------------------------------------------- sales estimates (gamalytic.py)
+
+
+def save_sales_estimates(conn: sqlite3.Connection, estimates: dict[int, int | None], *, source: str,
+                         collected_at: str, source_cached_at: str | None) -> None:
+    """Add one collection: a row per game in `estimates`, whose value is None when the source gave no estimate."""
+    with conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO sales_estimates (appid, collected_at, source, copies_sold, source_cached_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [(appid, collected_at, source, copies, source_cached_at) for appid, copies in estimates.items()],
+        )
+
+
+def latest_sales_estimates(conn: sqlite3.Connection, appids: list[int]) -> dict[int, sqlite3.Row]:
+    """The newest collection of each of `appids` that was ever asked about, keyed by app id.
+
+    copies_sold is NULL when the source gave no estimate in that collection: an older estimate is not used then.
+    """
+    if not appids:
+        return {}
+    rows = conn.execute(
+        f"""SELECT s.* FROM sales_estimates s
+            JOIN (SELECT appid, MAX(collected_at) AS collected_at FROM sales_estimates
+                  WHERE appid IN ({','.join('?' * len(appids))}) GROUP BY appid) newest
+              ON newest.appid = s.appid AND newest.collected_at = s.collected_at""",
+        list(appids),
+    )
+    return {row["appid"]: row for row in rows}
+
+
+def sales_estimate_summary(conn: sqlite3.Connection) -> dict:
+    """Visible games ever estimated, and the collections (count, first, last), for `status` and the dashboard."""
+    row = conn.execute(
+        f"""SELECT COUNT(DISTINCT CASE WHEN s.copies_sold IS NOT NULL THEN s.appid END) AS games,
+                   COUNT(DISTINCT s.collected_at) AS collections, MIN(s.collected_at) AS first,
+                   MAX(s.collected_at) AS last
+            FROM sales_estimates s JOIN games g ON g.appid = s.appid WHERE {VISIBLE_GAMES}"""
+    ).fetchone()
+    return dict(row)

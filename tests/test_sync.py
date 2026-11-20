@@ -1,6 +1,7 @@
 """Sync command: incremental refresh, no duplicates, preserved data when Steam fails."""
 
 import hashlib
+from dataclasses import replace
 import json
 
 import pytest
@@ -9,7 +10,7 @@ from game_librarian import __main__ as cli
 from game_librarian import store
 from game_librarian.curated import CuratedGame, load_curated
 from game_librarian.sync import SyncOptions, run_sync
-from tests.conftest import write_csv
+from tests.conftest import purchase_item, write_csv
 
 GAMES = [CuratedGame(10, "Test Quest", ""), CuratedGame(20, "Other Game", ""), CuratedGame(30, "Third Game", "")]
 
@@ -272,3 +273,116 @@ def test_an_interrupted_run_is_marked_failed_when_the_next_run_starts(conn, fake
     runs = store.recent_sync_runs(conn, limit=2)
     assert [run["status"] for run in runs] == ["success", "failed"]
     assert "stopped before it finished" in store.run_problem(runs[1])
+
+
+# ---------------------------------------------------------------------- prices, player and review snapshots
+
+
+def priced_sync(conn, fake_steam, clock, country="US", **options):
+    """Like sync(), for one store region."""
+    with fake_steam.client() as client:
+        return run_sync(conn, client, GAMES, SyncOptions(**options), country=country, log=lambda message: None,
+                        now=clock)
+
+
+def test_prices_are_saved_for_the_store_region_with_discounts_free_and_unsold_games(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    fake_steam.prices[10] = purchase_item("Test Quest", 4000, discount=25, ends=1_796_234_400)
+    fake_steam.prices[20] = {"is_free": True}
+    fake_steam.prices[30] = {}  # shown by Steam, but no purchase option (like GTA V Legacy in the US store)
+    fake_steam.currency = "GBP"
+    report = priced_sync(conn, fake_steam, clock, country="GB")
+
+    assert report.status() == "success"
+    rows = store.price_rows(conn, [10, 20, 30])
+    assert (rows[10]["status"], rows[10]["final_cents"], rows[10]["original_cents"], rows[10]["discount_percent"]) \
+        == ("priced", 3000, 4000, 25)
+    assert (rows[10]["country_code"], rows[10]["currency"], rows[10]["final_text"]) == ("GB", "GBP", "$30.00")
+    assert rows[10]["discount_ends_at"] == "2026-12-02T18:00:00+00:00"
+    assert (rows[20]["status"], rows[20]["final_cents"]) == ("free", None)
+    assert rows[30]["status"] == "not_sold"  # never stored as free
+    price_calls = [json.loads(params["input_json"]) for path, params in fake_steam.requests
+                   if "GetItems" in path and not json.loads(params["input_json"])["data_request"]]
+    assert len(price_calls) == 1 and price_calls[0]["context"]["country_code"] == "GB"
+    assert sum(1 for _, params in fake_steam.requests if params.get("filters") == "price_overview") == 1
+    assert (report.counts["prices_refreshed"], report.counts["prices_discounted"]) == (3, 1)
+
+
+def test_prices_refresh_by_age_or_region_and_a_failed_check_keeps_the_old_price(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    fake_steam.prices.pop(30)  # Steam returns no store item for it in this region
+    priced_sync(conn, fake_steam, clock)
+    assert store.price_rows(conn, [30])[30]["status"] == "unavailable"
+    first_check = store.price_rows(conn, [10])[10]["checked_at"]
+
+    clock.advance(hours=1)
+    assert priced_sync(conn, fake_steam, clock).counts["prices_skipped_fresh"] == 3  # checked an hour ago
+    assert priced_sync(conn, fake_steam, clock, country="CA").counts["prices_refreshed"] == 3  # another region
+
+    clock.advance(hours=4)
+    fake_steam.failing_paths.add("IStoreBrowseService")
+    report = priced_sync(conn, fake_steam, clock, skip_players=True, skip_reviews=True)
+    assert report.status() == "failed" and "prices for 3 apps" in report.errors[0]
+    row = store.price_rows(conn, [10])[10]
+    assert row["country_code"] == "CA" and row["checked_at"] > first_check  # the last good check stays, and ages
+
+
+def test_player_counts_become_dated_snapshots_and_a_missing_count_is_not_a_failure(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    fake_steam.players.update({10: 5_000, 20: 0})  # 30: Steam answers 404, as it does for apps without a count
+    report = sync(conn, fake_steam, clock)
+    assert report.status() == "success" and report.failures == 0
+    assert (report.counts["players_counted"], report.counts["players_unavailable"]) == (2, 1)
+    latest = {appid: row["players"] for appid, row in store.latest_player_counts(conn).items()}
+    assert latest == {10: 5_000, 20: 0, 30: None}
+
+    clock.advance(hours=1)
+    assert sync(conn, fake_steam, clock).counts["players_skipped_fresh"] == 3  # not due yet
+    clock.advance(hours=4)
+    fake_steam.players[10] = 7_500
+    sync(conn, fake_steam, clock)
+    history = store.player_history(conn, "2026-01-01T00:00:00+00:00")
+    assert [row["players"] for row in history[10]] == [5_000, 7_500]  # history grows; nothing is overwritten
+
+
+def test_skip_options_leave_prices_and_players_alone(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    report = sync(conn, fake_steam, clock, skip_prices=True, skip_players=True)
+    assert fake_steam.count("GetNumberOfCurrentPlayers") == 0
+    assert store.price_rows(conn, [10, 20, 30]) == {} and store.latest_player_counts(conn) == {}
+    assert report.counts["prices_skipped_by_option"] == report.counts["players_skipped_by_option"] == 3
+
+
+def test_steam_failing_during_player_counts_stops_the_run_after_three_failures(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    sync(conn, fake_steam, clock, skip_players=True)
+    fake_steam.failing_paths.add("GetNumberOfCurrentPlayers")
+    report = sync(conn, fake_steam, clock)
+    assert report.status() == "failed" and report.stopped_early
+    assert store.latest_player_counts(conn) == {}
+
+
+def test_each_review_refresh_adds_a_review_snapshot_but_never_a_zero_total(conn, fake_steam, clock):
+    add_three_games(fake_steam)
+    fake_steam.add_game(40, "Quiet Game", positive=0, negative=0, totals=(0, 0, None))
+    games = GAMES + [CuratedGame(40, "Quiet Game", "")]
+    sync(conn, fake_steam, clock, games=games)
+    clock.advance(hours=25)
+    fake_steam.reviews[10]["totals"] = (950, 100, "Very Positive")
+    sync(conn, fake_steam, clock, games=games)
+    history = store.review_history(conn, "2026-01-01T00:00:00+00:00")
+    assert [(row["total"], row["positive"]) for row in history[10]] == [(1_000, 900), (1_050, 950)]
+    assert 40 not in history  # Steam's empty answer is stored as zeros, which are not a real total
+
+
+def test_the_sync_command_reads_prices_for_the_configured_store_region(settings, fake_steam, monkeypatch):
+    write_csv(settings.curated_dir / "games.csv", [{"steam_appid": "10", "title": "Test Quest", "note": ""}])
+    fake_steam.add_game(10, "Test Quest")
+    monkeypatch.setattr(cli, "load_settings", lambda: replace(settings, steam_country="JP"))
+    monkeypatch.setattr(cli, "SteamClient", lambda api_key=None: fake_steam.client(api_key))
+    assert cli.main(["sync"]) == 0
+    conn = store.connect(settings.db_path)
+    try:
+        assert store.price_rows(conn, [10])[10]["country_code"] == "JP"
+    finally:
+        conn.close()

@@ -28,6 +28,9 @@
   --band-4: #256abf;
   --band-5: #184f95;
   --band-none: #898781;
+  /* Positive and negative Steam reviews: the blue/red diverging poles, validated as a pair on --surface. */
+  --review-positive: #3987e5;
+  --review-negative: #e66767;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
   --sidebar-width: 264px;
@@ -98,6 +101,7 @@ h1, h2, h3, h4 { font-weight: 800; line-height: 1.2; }
   border-bottom: 1px solid var(--border);
 }
 .wordmark { color: var(--text); font-size: 0.95rem; font-weight: 900; letter-spacing: 0.18em; text-decoration: none; }
+.site-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .nav-link {
   display: inline-block;
   padding: 6px 14px;
@@ -112,15 +116,33 @@ h1, h2, h3, h4 { font-weight: 800; line-height: 1.2; }
 .hero { padding: 32px 0 24px; }
 .hero h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.6rem); font-weight: 900; letter-spacing: -0.03em; line-height: 1; }
 .hero-sub { max-width: 62ch; margin: 10px 0 0; color: var(--text-2); font-size: 1.05rem; }
+/* The footer spans the page: its rule runs edge to edge, and its credit blocks sit side by side in the page's
+   own width (columns of at least 220px, so lines stay short), one under another on a phone. */
 .site-footer {
-  max-width: 1440px;
-  margin: 48px auto 0;
-  padding: 20px 24px 32px;
+  margin: 40px 0 0;
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
-.site-footer p { max-width: 110ch; margin: 0 0 8px; }
+.footer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 28px;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px 24px 22px;
+}
+.footer-grid p { margin: 0; }
+.footer-label {
+  display: block;
+  margin: 0 0 2px;
+  color: var(--text-2);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
 
 /* ---------------------------------------------------------------- catalog layout and sidebar */
 
@@ -182,7 +204,18 @@ select { margin-bottom: 8px; }
 .option-count { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
 .hint { margin: 6px 0 8px; color: var(--muted); font-size: 0.76rem; }
 .sub-label { display: block; margin: 2px 0 4px; color: var(--text-2); font-size: 0.78rem; }
-.filter-actions { display: flex; align-items: center; gap: 14px; }
+.filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.pending-note { flex: 1 0 100%; margin: 0; color: var(--warn-text); font-size: 0.8rem; font-weight: 700; }
+.pending-note:empty { display: none; }
+/* While tag changes wait for Apply filters, the button stays in view at the bottom of the filters. */
+.filter-actions.has-pending {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--border-strong);
+  background: var(--surface);
+}
 .catalog-status { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
 .catalog-status p { margin: 0 0 6px; }
 .status-success { color: var(--positive); }
@@ -231,13 +264,25 @@ select { margin-bottom: 8px; }
 .collection-link:hover { border-color: var(--text); color: var(--text); }
 .collection-link[aria-current="page"] { border-color: var(--text); background: var(--surface-raised); color: var(--text); font-weight: 700; }
 .results-header { margin-bottom: 16px; }
-.results-title { display: flex; align-items: center; gap: 10px; position: relative; }
+.results-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; position: relative; }
 .results-title h2 { margin: 0; font-size: 1.75rem; font-weight: 900; letter-spacing: -0.01em; }
 .results-scope { max-width: 95ch; margin: 6px 0 0; color: var(--text-2); font-size: 0.9rem; }
 .results-scope strong { color: var(--text); }
 .results-meta { margin: 6px 0 0; color: var(--muted); font-size: 0.88rem; }
 .info-tip { position: relative; }
+/* "How the ranking works": an "i" mark and a visible label; the summary's text is its accessible name. */
 .info-tip summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 700;
+  list-style: none;
+  cursor: pointer;
+}
+.info-tip summary::-webkit-details-marker { display: none; }
+.info-icon {
   display: grid;
   place-items: center;
   width: 24px;
@@ -249,11 +294,9 @@ select { margin-bottom: 8px; }
   font-weight: 800;
   font-style: italic;
   font-family: Georgia, serif;
-  list-style: none;
-  cursor: pointer;
 }
-.info-tip summary::-webkit-details-marker { display: none; }
-.info-tip summary:hover, .info-tip[open] summary { border-color: var(--text); }
+.info-tip summary:hover, .info-tip[open] summary { color: var(--text); }
+.info-tip summary:hover .info-icon, .info-tip[open] .info-icon { border-color: var(--text); }
 .info-panel {
   position: absolute;
   z-index: 10;
@@ -270,6 +313,8 @@ select { margin-bottom: 8px; }
 }
 .info-panel h3 { margin: 0 0 8px; font-size: 1rem; }
 .info-panel p { margin: 0 0 8px; color: var(--text-2); }
+.info-panel .rank-groups { margin: 0 0 10px; padding-left: 22px; color: var(--text-2); }
+.info-panel .rank-groups li { margin: 0 0 2px; }
 .info-panel strong { color: var(--text); }
 .active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
 .chip {
@@ -331,6 +376,7 @@ select { margin-bottom: 8px; }
   vertical-align: middle;
 }
 .card-release { color: var(--muted); font-size: 0.8rem; }
+.card-rank-basis { color: var(--text-2); font-size: 0.78rem; font-weight: 700; }
 .card-title { margin: 0; font-size: 1.1rem; font-weight: 800; overflow-wrap: anywhere; }
 .label-list { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; list-style: none; }
 .label {
@@ -345,7 +391,6 @@ select { margin-bottom: 8px; }
   text-transform: uppercase;
 }
 a.label:hover { background: var(--text); color: var(--bg); }
-.label.is-unclassified { border-color: var(--border-strong); color: var(--muted); }
 .tag-chips { display: flex; flex-wrap: wrap; gap: 2px 0; padding: 0; color: var(--text-2); font-size: 0.78rem; list-style: none; }
 .tag-chips li:not(:last-child)::after { content: "·"; margin: 0 7px; color: var(--muted); }
 .tag-chips.is-links { gap: 6px; }
@@ -530,8 +575,10 @@ details.more > summary { color: var(--text); font-weight: 700; cursor: pointer; 
 .media-figure figcaption { margin-top: 8px; color: var(--muted); font-size: 0.78rem; }
 .clip-fallback { display: block; margin-top: 4px; }
 .game-page { padding-top: 20px; }
-.wishlist-about { max-width: 95ch; margin: 0 0 20px; }
+.wishlist-about { max-width: 95ch; margin: 0 0 20px; padding: 12px 16px; }
+.wishlist-summary { margin: 0 0 6px; color: var(--text-2); font-size: 0.9rem; }
 .wishlist-about ul { margin: 0; padding-left: 20px; color: var(--text-2); font-size: 0.9rem; }
+.wishlist-about .about-list { margin: 0; }
 .wishlist-message { margin: 0 0 10px; font-weight: 700; }
 .wishlist-message:focus { outline: none; }
 .wishlist-list { display: flex; flex-direction: column; gap: 6px; max-width: 95ch; margin: 0 0 20px; padding: 0; list-style: none; }
@@ -579,8 +626,15 @@ details.more > summary { color: var(--text); font-weight: 700; cursor: pointer; 
 .dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .chart-card { min-width: 0; margin: 0; padding: 16px 18px 18px; border: 1px solid var(--border); background: var(--surface); }
 .chart-card.is-wide { grid-column: 1 / -1; }
+/* Trending games dashboard: one block per Trending section, each with its own heading and scope badge. */
+.dash-block { margin: 0 0 22px; }
+.dash-block > .trend-head { margin: 0 0 10px; }
+.dash-section-title { margin: 0; font-size: 1.35rem; font-weight: 900; }
+.dash-block-note { margin: 16px 0 0; }
+.strip-row.strip-row-plain { grid-template-columns: minmax(0, 1fr); }
 .chart-title { margin: 0; font-size: 1.05rem; font-weight: 800; }
 h3.chart-title { margin-top: 16px; font-size: 0.95rem; }
+h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
 .chart-sub { max-width: 95ch; margin: 4px 0 12px; color: var(--text-2); font-size: 0.84rem; }
 .chart-sub strong { color: var(--text); }
 .chart-empty { margin: 12px 0 0; color: var(--muted); font-size: 0.9rem; }
@@ -702,7 +756,457 @@ h3.chart-title { margin-top: 16px; font-size: 0.95rem; }
   .column:nth-child(even) .column-label { visibility: hidden; } /* every other year label fits a phone */
 }
 
+/* ---------------------------------------------------------------- prices and sale badges */
+
+/* A compact, inverted badge: it must stand out on a card without competing with the cover art. */
+.sale-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.card-sale { margin: 0; }
+.price-block .price-line { margin: 0 0 4px; font-size: 1.02rem; }
+.price-block .price-line strong { font-size: 1.15rem; }
+.price-block .price-line s { margin-left: 4px; }
+.price-block p { margin: 0 0 4px; }
+
+/* ---------------------------------------------------------------- trending */
+
+.trend-scope { max-width: 110ch; margin: 0 0 4px; color: var(--text-2); font-size: 0.9rem; }
+/* A list's (or a section's) short visible description; the full definition folds under "About this list". */
+.list-sub { max-width: 95ch; margin: 0 0 2px; color: var(--text-2); font-size: 0.86rem; }
+.list-meta { margin: 0 0 6px; color: var(--muted); font-size: 0.76rem; }
+.about-list { margin: 0 0 14px; font-size: 0.84rem; }
+.about-list > summary { width: fit-content; color: var(--text-2); font-size: 0.8rem; font-weight: 700; cursor: pointer; }
+.about-list > summary:hover { color: var(--text); }
+.about-list[open] > summary { margin-bottom: 6px; }
+.about-list .trend-facts { margin: 0; }
+.about-section-body p { max-width: 110ch; margin: 0 0 6px; color: var(--text-2); }
+.trend-section { margin: 0 0 22px; padding: 18px; border: 1px solid var(--border); background: var(--surface); scroll-margin-top: 12px; }
+.trend-section h2, .trend-group-head h2 { margin: 0; font-size: 1.4rem; font-weight: 900; }
+.trend-section .section-heading { margin: 0 0 10px; font-size: 1.2rem; font-weight: 900; }
+.trend-section h3:not(.section-heading), .trend-section h4 { margin: 4px 0 10px; font-size: 0.76rem; letter-spacing: 0.12em; text-transform: uppercase; }
+/* A section or list title with its scope badge ("All platforms" / "Steam only") beside it. */
+.trend-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 10px; }
+.trend-head h3:not(.section-heading) { margin: 4px 0; }
+.trend-group { margin: 30px 0 0; scroll-margin-top: 12px; }
+.scope-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.scope-badge.is-steam { border-color: var(--series-1); color: var(--text); }
+.scope-badge.is-local { border-color: var(--focus); color: var(--warn-text); }
+.trend-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 14px; max-width: 120ch; margin: 0 0 16px; font-size: 0.84rem; }
+.trend-facts div { display: contents; }
+.trend-facts dt { color: var(--muted); font-weight: 700; }
+.trend-facts dd { margin: 0; color: var(--text-2); }
+.trend-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
+.trend-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.6rem 120px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.trend-item:hover { border-color: #5a5a5a; }
+.trend-item:has(.trend-link:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.trend-pos { font-size: 1.25rem; font-weight: 900; line-height: 1.1; }
+.trend-thumb { display: block; width: 120px; height: auto; aspect-ratio: 460 / 215; object-fit: cover; background: var(--surface-raised); }
+.trend-text { min-width: 0; }
+.trend-link { color: var(--text); font-weight: 800; text-decoration: none; overflow-wrap: anywhere; }
+.trend-link::after { content: ""; position: absolute; inset: 0; } /* the whole row opens the details */
+.trend-link:focus-visible { outline: none; }
+.trend-figures { margin: 2px 0 4px; color: var(--text-2); font-size: 0.82rem; }
+.trend-figures strong { color: var(--text); }
+.trend-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.trend-columns .trend-list { grid-template-columns: minmax(0, 1fr); }
+.notice-line { max-width: 110ch; margin: 0; padding: 10px 12px; border-left: 3px solid var(--border-strong); background: var(--bg); color: var(--text-2); font-size: 0.88rem; }
+
+/* ---------------------------------------------------------------- data stories */
+
+.story-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0 0 18px; padding: 0; list-style: none; }
+.story-card { position: relative; height: 100%; padding: 20px 22px; border: 1px solid var(--border); background: var(--surface); }
+.story-card:hover { border-color: #5a5a5a; }
+.story-card h2 { margin: 0; font-size: 1.8rem; font-weight: 900; letter-spacing: -0.02em; }
+.story-card p { margin: 6px 0 0; color: var(--text-2); }
+.story-card-link { color: var(--text); text-decoration: none; }
+.story-card-link::after { content: ""; position: absolute; inset: 0; }
+.story-card:has(.story-card-link:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.story-card-link:focus-visible { outline: none; }
+.story-card-span { color: var(--muted); font-weight: 800; letter-spacing: 0.08em; }
+.story-back { margin: 20px 0 0; }
+.story-header { padding: 18px 0 16px; }
+.story-header h1 { margin: 0; font-size: clamp(2.4rem, 6vw, 4.2rem); font-weight: 900; letter-spacing: -0.03em; line-height: 1; }
+.story-kicker { margin: 0 0 6px; color: var(--muted); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }
+.story-chart { margin: 0 0 16px; }
+.story-grid { margin: 0 0 16px; }
+
+/* The release chart: one row per group of roles, a dot per game on a shared year axis. */
+.strip-chart { padding: 0 8px; }
+.strip-row { display: grid; grid-template-columns: minmax(8rem, 13rem) minmax(0, 1fr); gap: 0 14px; align-items: center; }
+.strip-label { margin: 0; color: var(--text-2); font-size: 0.84rem; }
+.strip-track { position: relative; height: 36px; border-bottom: 1px solid var(--border-strong); }
+.strip-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.strip-dot {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: var(--band-none);
+  box-shadow: 0 0 0 2px var(--surface); /* the surface ring keeps neighboring dots apart */
+}
+.strip-dot.is-main { width: 12px; height: 12px; margin: -6px 0 0 -6px; background: var(--series-1); }
+.strip-dot.is-upcoming { background: var(--surface); box-shadow: inset 0 0 0 2px var(--band-none), 0 0 0 2px var(--surface); }
+.strip-dot.is-main.is-upcoming { box-shadow: inset 0 0 0 2px var(--series-1), 0 0 0 2px var(--surface); }
+.strip-dot::before { content: ""; position: absolute; inset: -7px; border-radius: 50%; } /* a 24px pointer target */
+.strip-dot:hover { z-index: 1; filter: brightness(1.35); }
+.strip-axis { position: relative; height: 24px; }
+.strip-tick { position: absolute; top: 6px; transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.gap-rows .bar-line { grid-template-columns: minmax(0, 1fr) 6.2rem; }
+
+.story-timeline { margin: 8px 0 24px; }
+.timeline-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.timeline-head h2 { margin: 0 0 12px; font-size: 1.6rem; font-weight: 900; }
+.timeline-key { margin: 0 0 6px; }
+.decade-title { margin: 18px 0 6px; font-size: 1.1rem; font-weight: 900; }
+/* A year-by-year ledger: the year on the left, that year's games on the right, one compact row each. */
+.tl-year { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0 12px; border-top: 1px solid var(--border); }
+.tl-year-label { margin: 0; padding: 9px 0; font-size: 0.95rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+.entries { margin: 0; padding: 0; list-style: none; }
+.story-entry {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  padding: 8px 0 8px 10px;
+  border-left: 3px solid var(--border-strong);
+}
+.story-entry + .story-entry { border-top: 1px dashed var(--border); }
+.story-entry.is-main { border-left-color: var(--series-1); }
+.story-entry.is-upcoming { border-left-style: dashed; }
+.story-entry p { margin: 0 0 2px; }
+.tl-thumb { margin: 0; }
+/* Images keep their whole picture (contain): a cover or a screenshot is never cropped into something else. */
+.tl-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+}
+.tl-frame img { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; color: var(--muted); font-size: 0.6rem; }
+.tl-frame.is-empty { background: repeating-linear-gradient(135deg, var(--surface-raised) 0 6px, var(--surface) 6px 12px); }
+.tl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.entry-date { min-width: 3.6em; color: var(--muted); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.04em; }
+.entry-flag { padding: 0 6px; border: 1px solid var(--warn-text); color: var(--warn-text); font-size: 0.7rem; letter-spacing: 0.02em; }
+.entry-title { font-size: 1rem; font-weight: 800; }
+.entry-role { color: var(--text-2); font-size: 0.82rem; }
+.role-badge {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.role-badge.is-main { border-color: var(--series-1); color: var(--text); }
+.entry-role .entry-platforms::before { content: "· "; color: var(--muted); }
+.entry-note { color: var(--muted); font-size: 0.8rem; }
+.entry-links { color: var(--muted); font-size: 0.78rem; }
+.story-scope { margin: 0 0 16px; }
+.story-scope > summary { cursor: pointer; }
+.story-scope[open] > summary { margin-bottom: 4px; }
+.card-summary-title { font-size: 1.05rem; font-weight: 800; }
+.story-scope .story-grid { margin: 0; }
+.story-list { margin: 0 0 10px; padding-left: 20px; color: var(--text-2); font-size: 0.86rem; }
+.story-list li { margin: 0 0 6px; }
+.story-list strong { color: var(--text); }
+.source-list { margin: 0 0 12px; padding-left: 22px; font-size: 0.84rem; }
+.source-list li { margin: 0 0 4px; }
+.story-sources { margin: 0 0 16px; }
+.source-details { margin-top: 10px; }
+.source-details > summary {
+  width: fit-content;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.source-details > summary:hover { border-color: var(--text); }
+.source-details[open] > summary { margin-bottom: 4px; }
+.source-details-body h3 { margin-top: 16px; }
+
+/* ---------------------------------------------------------------- dashboard: trending games */
+
+.key.is-positive, .seg.is-positive { background: var(--review-positive); }
+.key.is-negative, .seg.is-negative { background: var(--review-negative); }
+.split-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.split-row p { margin: 0; }
+.split-name { color: var(--text-2); font-size: 0.84rem; overflow-wrap: anywhere; }
+/* A thin segmented bar: two parts of one whole, a 2px surface gap between them, rounded ends. */
+.split-bar { display: flex; gap: 2px; height: 8px; margin: 4px 0 2px; }
+.split-bar .seg { flex-basis: 0; min-width: 2px; }
+.split-bar .seg:first-child { border-radius: 4px 0 0 4px; }
+.split-bar .seg:last-child { border-radius: 0 4px 4px 0; }
+.split-figures { color: var(--text-2); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.spark-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
+.spark-card { padding: 10px 12px; border: 1px solid var(--border); background: var(--bg); }
+.spark-name { margin: 0 0 6px; color: var(--text); font-size: 0.84rem; font-weight: 700; overflow-wrap: anywhere; }
+.spark-frame { position: relative; height: 64px; }
+.sparkline { display: block; width: 100%; height: 100%; overflow: visible; }
+.sparkline polyline { fill: none; stroke: var(--series-1); stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; }
+.spark-end { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--bg); }
+.spark-range { margin: 6px 0 0; }
+
+/* Game charts: every row names a game (its link opens the details), beside a small cover; the cover only helps
+   recognition and never carries a value. */
+.dash-section-sub { max-width: 110ch; margin: -4px 0 12px; color: var(--text-2); font-size: 0.88rem; }
+.chart-meta { margin: 12px 0 0; color: var(--muted); font-size: 0.76rem; overflow-wrap: anywhere; }
+.chart-meta + .table-view { margin-top: 8px; }
+.thumb { display: block; flex: none; width: 36px; aspect-ratio: 264 / 374; overflow: hidden; background: var(--surface-raised); }
+.thumb.is-wide { width: 76px; aspect-ratio: 460 / 215; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; color: transparent; }
+.thumb.is-empty { background: repeating-linear-gradient(135deg, var(--surface-raised) 0 6px, var(--surface) 6px 12px); }
+
+/* Ranked bars: one thin bar per game from a shared baseline, its value printed at the bar's tip. The right
+   padding keeps room for the value of the longest bar. */
+.game-bars { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.game-bar { display: grid; grid-template-columns: 1.4rem auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.gb-rank { color: var(--muted); font-size: 0.85rem; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+.gb-body { min-width: 0; }
+.gb-name, .rt-name, .split-link { color: var(--text); font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; text-decoration-color: var(--border-strong); }
+.gb-context { margin: 1px 0 4px; color: var(--text-2); font-size: 0.74rem; line-height: 1.35; }
+.gb-line { display: flex; align-items: center; min-height: 14px; margin: 4px 0 0; padding-right: 5.5rem; border-left: 1px solid var(--border-strong); }
+.gb-bar { flex: none; height: 12px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--series-1); }
+.gb-value { flex: none; margin-left: 8px; color: var(--text); font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gb-line.is-missing { padding: 0; border: 0; color: var(--muted); font-size: 0.78rem; }
+.game-bar:hover .gb-bar { filter: brightness(1.25); }
+/* Estimated Steam copies sold (local evaluation only): larger covers and bars than the other ranked charts. */
+.sales-chart .thumb { width: 44px; }
+.sales-chart .gb-name { font-size: 0.95rem; }
+.sales-chart .gb-bar { height: 16px; }
+.sales-notes, .method-notes { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 0.82rem; }
+.sales-notes li, .method-notes li { margin: 0 0 6px; }
+.sales-notes strong, .method-notes strong { color: var(--text); }
+.method-notes { max-width: 120ch; margin-top: 4px; }
+
+/* The upcoming release radar: the center is today, each ring a span of time until release, each section a platform
+   family. The grid is an SVG that scales with the square (non-scaling strokes keep 1px lines); the points and labels
+   are HTML placed in percent of it, so they keep their size on every screen. A point is a link to the game's
+   details; "is-active" marks the game pointed at or focused, in every section (app.js). */
+.radar-card { position: relative; } /* the tooltip is placed inside the card */
+.radar-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 28px; align-items: start; }
+.radar { position: relative; width: 100%; max-width: 560px; aspect-ratio: 1; margin: 0 auto; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(57, 135, 229, 0.16), rgba(57, 135, 229, 0.05) 70%, rgba(255, 255, 255, 0.02)); }
+.radar-grid { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.radar-grid circle, .radar-grid line { fill: none; stroke: var(--border-strong); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.radar-grid .radar-soon { fill: rgba(57, 135, 229, 0.14); stroke: none; } /* due within a week */
+.radar-grid .is-year { stroke: var(--muted); } /* the end of the first year: "Later" lies beyond it */
+.radar-ring, .radar-sector { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; border-radius: 2px; background: var(--surface); line-height: 1.35; white-space: nowrap; pointer-events: none; }
+.radar-ring { left: 50%; color: var(--muted); font-size: 0.7rem; }
+.radar-sector { color: var(--text); font-size: 0.76rem; font-weight: 800; }
+.radar-sector.is-end { transform: translate(-100%, -50%); } /* a label on the right stays inside the circle */
+.radar-sector.is-start { transform: translate(0, -50%); }
+.radar-count { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+.radar-dot { position: absolute; z-index: 1; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); }
+.radar-dot::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; } /* a 24px pointer target */
+.radar-dot:hover, .radar-dot.is-active { z-index: 2; background: var(--band-1); transform: scale(1.35); }
+.radar-card.has-active .radar-dot:not(.is-active) { opacity: 0.35; }
+@media (forced-colors: active) { /* high-contrast modes drop background colors: the points keep system colors */
+  .radar-dot { forced-color-adjust: none; background: CanvasText; box-shadow: 0 0 0 2px Canvas; }
+  .radar-dot:hover, .radar-dot.is-active { background: Highlight; }
+}
+.chart-note { margin: 10px 0 0; color: var(--text-2); font-size: 0.84rem; }
+.radar-side > h4.chart-title { margin-top: 0; }
+.radar-groups { display: grid; gap: 8px; margin: 0; }
+.radar-group { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr); gap: 10px; align-items: baseline; padding-top: 8px; border-top: 1px solid var(--border); }
+.radar-group dt { color: var(--text); font-size: 0.8rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.radar-group dd { min-width: 0; margin: 0; }
+.radar-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.radar-chips li { min-width: 0; max-width: 100%; }
+.radar-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 8px 2px 2px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.78rem; font-weight: 700; line-height: 1.25; text-decoration: none; }
+.radar-chip .thumb { width: 18px; }
+.radar-chip-name { min-width: 0; overflow-wrap: anywhere; }
+.radar-chip:hover, .radar-chip.is-active { border-color: var(--band-1); }
+/* The tooltip (app.js): one per card, filled from the game's <template>; it repeats the page's own text. */
+.radar-tip { position: absolute; z-index: 5; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; width: max-content; max-width: min(300px, calc(100% - 16px)); padding: 10px; border: 1px solid var(--border-strong); background: var(--surface-raised); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); }
+.radar-tip .thumb { width: 44px; }
+.radar-tip p { margin: 0; }
+.radar-tip-body { min-width: 0; }
+.radar-tip-name { font-size: 0.9rem; font-weight: 800; overflow-wrap: anywhere; }
+.radar-tip-when { margin: 2px 0 4px !important; color: var(--text); font-size: 0.82rem; font-weight: 700; }
+.radar-tip-platforms { color: var(--text-2); font-size: 0.76rem; }
+.radar-tip-lists { margin-top: 4px !important; color: var(--muted); font-size: 0.72rem; }
+.game-bars.is-columns { display: block; columns: 2 340px; column-gap: 32px; }
+.game-bars.is-columns .game-bar { margin: 0 0 10px; break-inside: avoid; }
+/* Games in both lists (a connected-dot chart): a circle for Steam's place, a diamond for Twitch's, joined by a line.
+   Every row names its game beside a small cover, and the track repeats what the row's text already says. */
+.pair-rows { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.thumb-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center; }
+.thumb-row > div { min-width: 0; }
+.pair-axis { position: relative; height: 16px; }
+.pair-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pair-track { position: relative; height: 16px; margin-top: 4px; border-left: 1px solid var(--border-strong); background: linear-gradient(var(--border-strong), var(--border-strong)) center / 100% 1px no-repeat; }
+.pair-body { min-width: 0; }
+.pair-axis-row { margin: 4px 0 0; }
+.pair-tick.is-first { transform: none; }
+.pair-tick.is-last { transform: translateX(-100%); }
+.pair-line { position: absolute; top: 7px; height: 2px; background: var(--band-none); }
+.pair-dot { position: absolute; top: 3px; width: 10px; height: 10px; margin-left: -5px; box-shadow: 0 0 0 2px var(--surface); }
+.pair-dot.is-steam { border-radius: 50%; background: var(--series-1); }
+.pair-dot.is-twitch { background: var(--series-2); transform: rotate(45deg) scale(0.9); }
+.pair-dot::before { content: ""; position: absolute; inset: -7px; } /* a 24px pointer target */
+.key.pair-key.is-steam { border-radius: 50%; background: var(--series-1); }
+.key.pair-key.is-twitch { background: var(--series-2); transform: rotate(45deg) scale(0.75); }
+.gb-context .key.pair-key { width: 9px; height: 9px; vertical-align: -1px; }
+.split-rows.is-columns { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px 28px; }
+/* Twitch's place beside Steam reviews: the place is a link to the category on Twitch. */
+.split-row.has-place { display: grid; grid-template-columns: 3.4rem auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.sr-place { color: var(--text); font-size: 1.05rem; font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; text-decoration-color: var(--border-strong); }
+.sr-unit { display: block; color: var(--muted); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em; }
+
+/* Tiles of games with places written out, never drawn as bars (the games in both Steam's and Twitch's lists). */
+.rank-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rank-tile { display: flex; gap: 10px; align-items: flex-start; min-width: 0; padding: 8px; border: 1px solid var(--border); background: var(--bg); }
+.rank-tile .thumb { width: 44px; }
+.rt-body { min-width: 0; }
+.rt-name { display: inline-block; margin-top: 2px; font-size: 0.84rem; }
+.rt-watch { display: inline-block; margin-top: 4px; font-size: 0.72rem; }
+.split-row.has-thumb { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
+.split-link { font-size: 0.84rem; }
+
+.steam-facts { margin-top: 16px; }
+.change-gaps { max-width: 120ch; margin: 12px 0 0; color: var(--muted); font-size: 0.82rem; }
+.change-gaps p { margin: 0 0 6px; }
+.change-gaps strong { color: var(--text-2); }
+
+/* The collapsed "Sources and methodology" at the bottom of Trending games. */
+.method-details { margin: 8px 0 0; border: 1px solid var(--border); background: var(--surface); scroll-margin-top: 12px; }
+.method-details > summary { padding: 14px 18px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
+.method-details > summary:hover { color: var(--focus); }
+.method-details[open] > summary { border-bottom: 1px solid var(--border); }
+.method-body { padding: 4px 18px 18px; }
+.method-body > h3.chart-title { margin-top: 22px; }
+.method-body .kpis { margin-top: 10px; }
+
+/* About the data: each topic folds under its name. */
+.about-topic { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.about-topic > summary { color: var(--text); font-size: 0.92rem; font-weight: 800; cursor: pointer; }
+.about-topic[open] > summary { margin-bottom: 4px; }
+.rule-details { margin: 0 0 10px; }
+.rule-details .chart-sub { margin-top: 6px; }
+
+/* ---------------------------------------------------------------- upcoming, live streams, critics */
+
+.upcoming-list .trend-item { grid-template-columns: 1.6rem 64px minmax(0, 1fr); }
+.trend-thumb.is-cover { width: 64px; aspect-ratio: 264 / 374; }
+.trend-meta { margin: 0 0 2px; }
+.trend-change { margin: 2px 0 0; color: var(--text-2); }
+.date-change { margin: 2px 0 0; color: var(--warn-text); }
+/* Platform lines: "Available on …", "Announced for …" (templates/_platforms.html). */
+.trend-platforms { margin: 2px 0 4px; color: var(--text-2); font-size: 0.8rem; }
+.avail { display: block; overflow-wrap: anywhere; }
+.avail-key { color: var(--muted); font-weight: 700; }
+.avail-date { color: var(--muted); }
+.trend-twitch { margin: 2px 0 0; color: var(--text-2); }
+.trend-item .inner-link { position: relative; z-index: 1; } /* above the row's whole-row link */
+.link-row { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.steam-note { max-width: 70ch; }
+.media-figure.is-cover .media-frame { aspect-ratio: 264 / 374; max-width: 264px; }
+
+.live-list { display: grid; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+.live-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.live-channel { font-weight: 800; overflow-wrap: anywhere; }
+.live-viewers { color: var(--text-2); font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.live-title { grid-column: 1 / -1; color: var(--muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+
+.critics-heading { margin: 10px 0 4px; font-size: 0.82rem; }
+.critic-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; margin: 0 0 8px; padding: 0; list-style: none; font-size: 0.86rem; }
+.critic-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 0; border-bottom: 1px solid var(--border); }
+.critic-outlet { color: var(--text-2); }
+.critic-score { color: var(--text); font-weight: 800; font-variant-numeric: tabular-nums; }
+.critic-label { padding: 0 5px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 0.72rem; }
+.critic-table, .critic-source { font-size: 0.74rem; }
+
 /* ---------------------------------------------------------------- smaller screens */
+
+@media (max-width: 1100px) {
+  .trend-list, .trend-columns { grid-template-columns: minmax(0, 1fr); }
+  .spark-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .radar-layout { grid-template-columns: minmax(0, 1fr); } /* "Date TBA or approximate" below the radar */
+}
+
+@media (max-width: 720px) {
+  .site-header { flex-wrap: wrap; }
+  /* The tabs fill whole rows on a phone, with touch targets about 40 px tall. */
+  .site-nav { width: 100%; justify-content: flex-start; }
+  .nav-link { flex: 1 1 auto; padding: 9px 10px; font-size: 0.84rem; text-align: center; }
+  .trend-item { grid-template-columns: 1.4rem 84px minmax(0, 1fr); gap: 10px; }
+  .trend-thumb { width: 84px; }
+  .upcoming-list .trend-item { grid-template-columns: 1.4rem 56px minmax(0, 1fr); }
+  .trend-thumb.is-cover { width: 56px; }
+  .critic-list { grid-template-columns: minmax(0, 1fr); }
+  .trend-facts { grid-template-columns: minmax(0, 1fr); }
+  .trend-section { padding: 14px; }
+  .story-cards { grid-template-columns: minmax(0, 1fr); }
+  .strip-row { grid-template-columns: minmax(0, 1fr); }
+  .strip-label { margin-top: 6px; }
+  .strip-axis-row > span:first-child { display: none; }
+  .spark-grid { grid-template-columns: minmax(0, 1fr); }
+  .radar-ring { font-size: 0.62rem; line-height: 1.15; } /* "1 year" and "Later" sit 13 px apart on a phone */
+  .radar-sector { font-size: 0.7rem; }
+  .radar-dot { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+  .radar-dot::before { inset: -7px; } /* still a 24px pointer target */
+  .radar-group { grid-template-columns: minmax(0, 1fr); gap: 4px; } /* each date above its games */
+  .game-bar { grid-template-columns: 1.1rem auto minmax(0, 1fr); gap: 8px; }
+  .thumb.is-wide { width: 60px; }
+  .gb-line { padding-right: 4.8rem; }
+  .method-details > summary { padding: 12px 14px; }
+  .method-body { padding: 4px 14px 14px; }
+  .tl-year { grid-template-columns: 2.8rem minmax(0, 1fr); gap: 0 8px; }
+  .story-entry { grid-template-columns: 56px minmax(0, 1fr); gap: 10px; padding-left: 8px; }
+  .tl-frame { width: 56px; height: 56px; }
+  /* Wide dashboard tables: one labeled block per row. Their explicit ARIA roles keep them tables for screen
+     readers, which can drop table semantics when the display changes. */
+  .data-table.is-stacked thead tr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .data-table.is-stacked, .data-table.is-stacked tbody, .data-table.is-stacked tr, .data-table.is-stacked td { display: block; }
+  .data-table.is-stacked tr { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .data-table.is-stacked td { padding: 1px 0; border: 0; text-align: left; white-space: normal; }
+  .data-table.is-stacked td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-size: 0.76rem; font-weight: 700; }
+  .data-table.is-stacked td:first-child::before { content: none; }
+  .data-table.is-stacked td:first-child { color: var(--text); font-weight: 700; }
+}
 
 @media (max-width: 1100px) {
   .catalog { grid-template-columns: minmax(0, 1fr); }
@@ -720,7 +1224,7 @@ h3.chart-title { margin-top: 16px; font-size: 0.95rem; }
 @media (max-width: 720px) {
   .page { padding: 0 16px; }
   .site-header { padding: 12px 16px; }
-  .site-footer { padding: 20px 16px 28px; }
+  .footer-grid { gap: 10px; padding: 14px 16px 20px; }
   .filters { display: block; }
   .sidebar { padding: 0; }
   .sidebar-body { padding: 16px; }

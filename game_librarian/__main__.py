@@ -1,4 +1,5 @@
-"""Command line: python -m game_librarian {sync,serve,status,check-curated,export-report,candidates}."""
+"""Command line: python -m game_librarian
+{sync,upcoming,critics,sales-estimates,serve,status,check-curated,export-report,candidates}."""
 
 from __future__ import annotations
 
@@ -7,15 +8,31 @@ import json
 import sys
 from pathlib import Path
 
-from . import candidates, store
+from datetime import datetime, timezone
+
+from . import candidates, critics, gamalytic, store, upcoming
 from .config import DEFAULT_REPORT_DATA_DIR, REPORT_PARAMETERS_FILE, Settings, load_settings
-from .curated import PROMOTED, load_curated
+from .curated import PROMOTED, CuratedData, load_curated
+from .gamalytic import GamalyticClient
 from .igdb import IgdbClient, IgdbError
 from .report_export import export_report, point_report_at
 from .steam import SteamClient
+from .stories import load_stories
 from .sync import SyncOptions, run_sync
+from .twitch import KEEP_FOR as TWITCH_KEEP_FOR, TwitchClient
+from .wikipedia import WikimediaClient, WikimediaError
 
 EXIT_CODES = {"success": 0, "failed": 1, "partial": 2}
+IGDB_HELP = ("IGDB is optional and not configured. To use it, set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET "
+             "(a Twitch application's credentials) in .env; see README.md, \"IGDB (optional)\".")
+CONTACT_HELP = ("Critic scores come from Wikipedia, whose policy asks automated clients for contact information. "
+                "Set GAME_LIBRARIAN_CONTACT in .env to an email address or website you choose; see README.md, "
+                "\"What the critics said\".")
+
+
+def _worst(*codes: int) -> int:
+    """The exit code of several steps: failed (1) over partial (2) over success (0)."""
+    return 1 if 1 in codes else (2 if 2 in codes else 0)
 
 
 def _sync(args: argparse.Namespace, settings: Settings) -> int:
@@ -36,13 +53,18 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
         limit=args.limit,
         skip_discovery=args.skip_discovery,
         skip_reviews=args.skip_reviews,
+        skip_prices=args.skip_prices,
+        skip_players=args.skip_players,
     )
+    if not args.skip_prices:
+        print(f"Prices are read from the Steam {settings.steam_country} store (GAME_LIBRARIAN_STEAM_COUNTRY).")
     conn = store.initialize(settings.db_path)
     try:
         with SteamClient(api_key=settings.steam_api_key) as client:
             report = run_sync(
                 conn, client, curated.games, options,
                 review_language=settings.review_language,
+                country=settings.steam_country,
                 log=lambda message: print(message, flush=True),  # progress shows up live in log files too
             )
     except KeyboardInterrupt:
@@ -51,9 +73,199 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
     finally:
         conn.close()
     status = report.status()
-    print(f"\nSync finished: {status}")
+    print(f"\nSteam sync finished: {status}")
     print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
-    return EXIT_CODES[status]
+    codes = [EXIT_CODES[status]]
+    if args.skip_upcoming:
+        print("\nTrending lists (IGDB, Twitch): skipped (--skip-upcoming).")
+    elif not settings.igdb_configured:
+        print("\nTrending lists (IGDB, Twitch): skipped, IGDB is not configured (see README.md, \"IGDB (optional)\").")
+    else:
+        codes.append(_run_upcoming(settings, curated, force=False))
+    if args.skip_critics:
+        print("\nCritic scores (Wikipedia): skipped (--skip-critics).")
+    elif not settings.contact:
+        print("\nCritic scores (Wikipedia): skipped, GAME_LIBRARIAN_CONTACT is not set (see README.md, "
+              "\"What the critics said\").")
+    else:
+        codes.append(_run_critics(settings, curated, appids=args.appids, limit=args.limit, force=False))
+    if args.skip_sales:
+        print("\nSales estimates (Gamalytic): skipped (--skip-sales).")
+    else:
+        codes.append(_run_sales(settings, force=False))
+    return _worst(*codes)
+
+
+# ---------------------------------------------------------------------- upcoming (IGDB) and critics (Wikipedia)
+
+
+def _run_upcoming(settings: Settings, curated: CuratedData, *, force: bool) -> int:
+    """Refresh the cross-platform Trending lists (IGDB and Twitch) when due (or `force`), and print them."""
+    conn = store.initialize(settings.db_path)
+    try:
+        if not force and not upcoming.refresh_due(conn, datetime.now(timezone.utc)):
+            last = store.last_source_run(conn, upcoming.SOURCE)
+            print(f"\nTrending lists (IGDB, Twitch): refreshed {last['started_at']}, less than "
+                  f"{int(upcoming.REFRESH_AFTER.total_seconds() // 3600)} hours ago; nothing to do (--force refreshes now).")
+            return 0
+        print("\nTrending lists (IGDB, Twitch): refreshing...", flush=True)
+        try:
+            with IgdbClient(settings.igdb_client_id, settings.igdb_client_secret) as client, SteamClient() as steam, \
+                    TwitchClient(settings.igdb_client_id, settings.igdb_client_secret) as twitch_client:
+                report = upcoming.refresh_upcoming(conn, client, steam, curated,
+                                                   catalog_appids=[game.appid for game in curated.games],
+                                                   twitch_client=twitch_client,
+                                                   log=lambda message: print(message, flush=True))
+        except IgdbError as exc:  # messages never contain the credentials or the token
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lists = {signal.key: store.latest_popularity(conn, signal.key) for signal in upcoming.SIGNALS}
+        top_games = store.twitch_top_games(conn, "")
+        rows = store.igdb_game_rows(conn)
+    finally:
+        conn.close()
+    print(f"Trending lists (IGDB, Twitch): {report.status()}")
+    print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
+    today = datetime.now(timezone.utc).date()
+
+    def show(title: str, games: list) -> None:
+        print(f"\n{title}:")
+        for number, row in enumerate(games[:upcoming.LIST_SIZE], 1):
+            available = upcoming.availability(upcoming.stored_dates(row), json.loads(row["platforms"] or "[]"), today)
+            platforms = "; ".join([f"out {group.label} ({', '.join(group.platforms)})"
+                                   + (f" [{group.first.status}]" if group.first.status != upcoming.FULL else "")
+                                   for group in available.available]
+                                  + [f"{group.label} ({', '.join(group.platforms)})" for group in available.announced])
+            steam = f", Steam app {row['steam_appid']}" if row["steam_match"] == "verified" else (
+                f", Steam {row['steam_match']}" if row["steam_match"] == "needs_review" else "")
+            print(f"  {number:>2}. {row['name']} [igdb-{row['igdb_id']}{steam}]: {platforms or 'no platforms listed'}")
+
+    for signal in upcoming.SIGNALS:
+        listed = [rows[entry["igdb_id"]] for entry in lists[signal.key] if entry["igdb_id"] in rows]
+        show(f"{signal.title} (upcoming)", [row for row in listed if upcoming.list_kind(row, today) == upcoming.UPCOMING])
+        if signal.tracks_recent_releases:
+            show(f"Most wanted new releases (first released in the last {upcoming.RECENT_WINDOW.days} days)",
+                 [row for row in listed if upcoming.list_kind(row, today) == upcoming.RECENT])
+    watched = [rows[item["igdb_id"]] for item in top_games
+               if item["igdb_id"] in rows and upcoming.twitch_listable(rows[item["igdb_id"]])]
+    show(f"Most watched on Twitch ({top_games[0]['checked_at'] if top_games else 'no list from the last 24 hours'})",
+         watched)
+    return EXIT_CODES[report.status()]
+
+
+def _upcoming(args: argparse.Namespace, settings: Settings) -> int:
+    if not settings.igdb_configured:
+        print(IGDB_HELP, file=sys.stderr)
+        return 1
+    curated = load_curated(settings.curated_dir)
+    for problem in curated.problems:
+        print(f"warning: curated data: {problem}", file=sys.stderr)
+    return _run_upcoming(settings, curated, force=args.force)
+
+
+def _critic_targets(conn, curated: CuratedData) -> list[critics.CriticTarget]:
+    """Every catalog game, then every released IGDB game that is not a catalog game."""
+    targets = []
+    visible = [row["appid"] for row in store.matching_games(conn, [], [])]
+    catalog = store.game_rows(conn, visible)
+    for appid in visible:
+        row = catalog[appid]
+        targets.append(critics.CriticTarget(str(appid), row["name"] or row["curated_title"], steam_appid=appid))
+    today = datetime.now(timezone.utc).date()
+    catalog_ids = set(catalog)
+    linked = store.catalog_links_by_igdb(conn, catalog_ids)
+    for igdb_id, row in sorted(store.igdb_game_rows(conn).items()):
+        if upcoming.game_key_for(row, catalog_ids, linked).isdigit():
+            continue  # the catalog game stands for it (the same rule as the website's links)
+        state = upcoming.release_state(row["game_type"], row["game_status"], upcoming.stored_dates(row),
+                                       row["first_release_date"], today)
+        if not state.upcoming and row["slug"]:
+            targets.append(critics.CriticTarget(f"igdb-{igdb_id}", row["name"], igdb_slug=row["slug"]))
+    return targets
+
+
+def _run_critics(settings: Settings, curated: CuratedData, *, appids: list[int] | None, limit: int | None,
+                 force: bool) -> int:
+    """Refresh the critic scores of the games that are due (or all with `force`), and print what happened."""
+    conn = store.initialize(settings.db_path)
+    try:
+        targets = _critic_targets(conn, curated)
+        if appids:
+            wanted = {str(appid) for appid in appids}
+            targets = [target for target in targets if target.key in wanted]
+        due = critics.due_targets(conn, targets, datetime.now(timezone.utc), force=force)
+        if limit is not None:
+            due = due[:limit]
+        if not due:
+            print(f"\nCritic scores (Wikipedia): nothing is due; each game is read again after "
+                  f"{critics.MAX_AGE.days} days (--force reads them now).")
+            return 0
+        print(f"\nCritic scores (Wikipedia): reading {len(due)} of {len(targets)} games...", flush=True)
+        try:
+            with WikimediaClient(settings.contact) as client:
+                report = critics.refresh_critics(conn, client, due, curated,
+                                                 log=lambda message: print(message, flush=True))
+        except WikimediaError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        waiting = critics.review_rows(conn)
+    finally:
+        conn.close()
+    print(f"Critic scores (Wikipedia): {report.status()}")
+    print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
+    if waiting:
+        print(f"{len(waiting)} item(s) wait for review: python -m game_librarian critics --review")
+    return EXIT_CODES[report.status()]
+
+
+def _critics(args: argparse.Namespace, settings: Settings) -> int:
+    if args.review:
+        conn = store.initialize(settings.db_path)
+        try:
+            rows = critics.review_rows(conn)
+            articles = store.critic_article_rows(conn)
+        finally:
+            conn.close()
+        for row in rows:
+            title = articles[row["game"]]["article_title"] if row["game"] in articles else None
+            print(f"{row['game']:<14} {row['what']:<28} {row['detail']}" + (f"  [article: {title}]" if title else ""))
+        print(f"{len(rows)} item(s) wait for review. Record decisions in curated/critic_articles.csv "
+              "(game, article, decision use|reject, checked_on, checked_by); see README.md.")
+        return 0
+    if not settings.contact:
+        print(CONTACT_HELP, file=sys.stderr)
+        return 1
+    curated = load_curated(settings.curated_dir)
+    for problem in curated.problems:
+        print(f"warning: curated data: {problem}", file=sys.stderr)
+    return _run_critics(settings, curated, appids=args.appids, limit=args.limit, force=args.force)
+
+
+def _run_sales(settings: Settings, *, force: bool) -> int:
+    """Collect Gamalytic's estimated Steam copies sold for the catalog games that are due (all with `force`)."""
+    conn = store.initialize(settings.db_path)
+    try:
+        appids = [row["appid"] for row in store.matching_games(conn, [], [])]
+        due = gamalytic.due_appids(conn, appids, datetime.now(timezone.utc), force=force)
+        if not due:
+            print(f"\nSales estimates (Gamalytic): nothing is due; each game is asked again after "
+                  f"{gamalytic.MAX_AGE.days} days (--force asks now).")
+            return 0
+        print(f"\nSales estimates (Gamalytic): asking about {len(due)} of {len(appids)} catalog games, "
+              f"{gamalytic.APPIDS_PER_REQUEST} per request (free API, no key)...", flush=True)
+        with GamalyticClient() as client:
+            report = gamalytic.refresh_estimates(conn, client, due, log=lambda message: print(message, flush=True))
+    finally:
+        conn.close()
+    print(f"Sales estimates (Gamalytic): {report.status()}")
+    print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
+    print("Shown only to a browser on this computer (Dashboard > Trending games): Gamalytic's terms do not allow "
+          "sharing its data.")
+    return EXIT_CODES[report.status()]
+
+
+def _sales_estimates(args: argparse.Namespace, settings: Settings) -> int:
+    return _run_sales(settings, force=args.force)
 
 
 def _serve(args: argparse.Namespace, settings: Settings) -> int:
@@ -69,11 +281,53 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
         counts = store.catalog_counts(conn)
         candidate_counts = store.candidate_counts(conn)
         runs = store.recent_sync_runs(conn, limit=args.runs)
+        prices = store.price_summary(conn)
+        snapshots = store.snapshot_summary(conn)
+        upcoming_runs = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
+        upcoming_run = upcoming_runs[0] if upcoming_runs else None
+        igdb_games = len(store.igdb_game_rows(conn))
+        popularity = store.popularity_summary(conn)
+        critic_info = store.critic_summary(conn)
+        sales = store.sales_estimate_summary(conn)
+        twitch_cached = conn.execute("SELECT COUNT(*) FROM twitch_live").fetchone()[0]
+        store.purge_twitch_top_games(conn, (datetime.now(timezone.utc) - TWITCH_KEEP_FOR).isoformat(timespec="seconds"))
+        top_games = store.twitch_top_games(conn, "")
     finally:
         conn.close()
     print(f"Database: {settings.db_path}")
     print(f"Games ready to show: {counts['ready']} of {counts['curated']} catalog games")
     print(f"Apps in the discovery index (not enriched): {counts['discovered']}")
+    if prices["games"]:
+        print(f"Prices: {prices['games']} games, Steam store region {prices['regions']}, checked {prices['first']} to "
+              f"{prices['last']}; {prices['discounted']} discounted when checked")
+    else:
+        print("Prices: none checked yet")
+    for kind, label in (("players", "Player-count snapshots"), ("reviews", "Review snapshots")):
+        info = snapshots[kind]
+        print(f"{label}: " + (f"{info['games']} games, {info['days']} day(s) from {info['first']} to {info['last']}"
+                               if info["games"] else "none yet"))
+    if upcoming_run:
+        print(f"Trending lists (IGDB, Twitch): last refresh {upcoming_run['started_at']} {upcoming_run['status']}; "
+              f"{igdb_games} IGDB games saved" + "".join(
+                  f"; {key}: {info['days']} day(s) of snapshots" for key, info in sorted(popularity.items())))
+    else:
+        print("Trending lists (IGDB, Twitch): " + ("never refreshed (python -m game_librarian upcoming)"
+                                           if settings.igdb_configured else "IGDB not configured"))
+    if critic_info["matches"]:
+        print("Critic scores (Wikipedia): articles " + ", ".join(f"{count} {status}" for status, count in
+                                                                 sorted(critic_info["matches"].items()))
+              + f"; scores shown {critic_info['scores'].get('ok', 0)}, waiting for review "
+              f"{critic_info['scores'].get('needs_review', 0)}; last check {critic_info['last']}")
+    else:
+        print("Critic scores (Wikipedia): " + ("none read yet (python -m game_librarian critics)" if settings.contact
+                                               else "GAME_LIBRARIAN_CONTACT not set"))
+    print("Sales estimates (Gamalytic, shown on this computer only): " + (
+        f"{sales['games']} games with an estimate; {sales['collections']} collection(s) from {sales['first']} to "
+        f"{sales['last']}" if sales["collections"]
+        else "none collected yet (python -m game_librarian sales-estimates)"))
+    print(f"Twitch live streams: {twitch_cached} game(s) in the cache (answers are deleted after 24 hours)")
+    print("Twitch most-watched list: " + (f"{len(top_games)} categories, checked {top_games[0]['checked_at']} "
+                                          "(deleted after 24 hours)" if top_games else "none from the last 24 hours"))
     if candidate_counts:
         print("Candidates: " + ", ".join(f"{count} {status}" for status, count in sorted(candidate_counts.items())))
     if not runs:
@@ -87,6 +341,7 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
 
 def _check_curated(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
+    story_collection = load_stories(settings.curated_dir)
     shown_awards = sum(len(awards) for awards in curated.awards_by_appid.values())
     shown_labels = sum(len(labels) for labels in curated.labels_by_appid.values())
     promoted = sum(1 for game in curated.games if game.catalog_source == PROMOTED)
@@ -94,10 +349,18 @@ def _check_curated(args: argparse.Namespace, settings: Settings) -> int:
     print(f"games.csv: {len(curated.games) - promoted} games; promoted_games.csv: {promoted} games")
     print(f"awards.csv: {len(curated.awards)} rows, {shown_awards} verified and mapped to a Steam app")
     print(f"classifications.csv: {len(curated.classifications)} rows, {shown_labels} verified labels shown")
-    for problem in curated.problems:
+    print(f"publisher_aliases.csv: {len(curated.publisher_alias_rows)} rows, "
+          f"{len(curated.publisher_aliases)} verified aliases used by the publisher filter")
+    print(f"steam_matches.csv: {len(curated.steam_match_decisions)} reviewed Steam matches of IGDB games")
+    print(f"critic_articles.csv: {len(curated.critic_article_decisions)} reviewed Wikipedia article choices")
+    for story in story_collection.stories.values():
+        print(f"stories/{story.slug}.json: {len(story.entries)} games ({len(story.main_entries)} main), "
+              f"checked {story.checked_on}")
+    problems = curated.problems + story_collection.problems
+    for problem in problems:
         print(f"problem: {problem}")
-    print("No problems found." if not curated.problems else f"{len(curated.problems)} problem(s) found.")
-    return 1 if curated.problems else 0
+    print("No problems found." if not problems else f"{len(problems)} problem(s) found.")
+    return 1 if problems else 0
 
 
 def _export_report(args: argparse.Namespace, settings: Settings) -> int:
@@ -363,13 +626,46 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m game_librarian", description="Game Librarian commands.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    sync = commands.add_parser("sync", help="Fetch new and changed Steam data for the curated games.")
+    sync = commands.add_parser("sync", help="Fetch new and changed Steam data for the curated games, then refresh "
+                                            "the upcoming lists, critic scores and sales estimates when they are "
+                                            "configured and due.")
     sync.add_argument("--force", action="store_true", help="Refresh every selected game, even recent ones.")
     sync.add_argument("--appid", type=int, action="append", dest="appids", help="Only this curated app id (repeatable).")
     sync.add_argument("--limit", type=int, help="Only the first N curated games (for a quick test).")
     sync.add_argument("--skip-discovery", action="store_true", help="Do not call the catalog discovery API.")
-    sync.add_argument("--skip-reviews", action="store_true", help="Do not refresh reviews.")
+    sync.add_argument("--skip-reviews", action="store_true", help="Do not refresh reviews (and review snapshots).")
+    sync.add_argument("--skip-prices", action="store_true", help="Do not refresh Steam prices.")
+    sync.add_argument("--skip-players", action="store_true", help="Do not save player-count snapshots.")
+    sync.add_argument("--skip-upcoming", action="store_true",
+                      help="Do not refresh the cross-platform Trending lists from IGDB and Twitch (otherwise once a "
+                           "day).")
+    sync.add_argument("--skip-critics", action="store_true",
+                      help="Do not read critic scores from Wikipedia (otherwise each game once in 30 days).")
+    sync.add_argument("--skip-sales", action="store_true",
+                      help="Do not ask Gamalytic for estimated Steam copies sold (otherwise each game once in 7 days).")
     sync.set_defaults(handler=_sync)
+
+    upcoming_parser = commands.add_parser("upcoming", help="Refresh the cross-platform Trending lists from IGDB and "
+                                                           "Twitch.")
+    upcoming_parser.add_argument("--force", action="store_true",
+                                 help="Refresh now, even if the last refresh is less than 20 hours old.")
+    upcoming_parser.set_defaults(handler=_upcoming)
+
+    critics_parser = commands.add_parser("critics", help="Read critic scores from English Wikipedia review tables.")
+    critics_parser.add_argument("--appid", type=int, action="append", dest="appids",
+                                help="Only this catalog app id (repeatable).")
+    critics_parser.add_argument("--limit", type=int, help="At most this many games in this run.")
+    critics_parser.add_argument("--force", action="store_true", help="Read the articles again even if they are recent.")
+    critics_parser.add_argument("--review", action="store_true",
+                                help="List the article matches and scores that wait for a person (no network).")
+    critics_parser.set_defaults(handler=_critics)
+
+    sales_parser = commands.add_parser("sales-estimates",
+                                       help="Ask Gamalytic's free API for estimated Steam copies sold of the catalog "
+                                            "games (shown on this computer only).")
+    sales_parser.add_argument("--force", action="store_true",
+                              help="Ask about every catalog game now, even those asked in the last 7 days.")
+    sales_parser.set_defaults(handler=_sales_estimates)
 
     serve = commands.add_parser("serve", help="Run the web app.")
     serve.add_argument("--host", default="127.0.0.1")

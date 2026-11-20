@@ -6,7 +6,7 @@ from game_librarian import dashboard
 from game_librarian.report_export import ReportTables
 
 
-def game(appid, positive=None, total=None, *, label="Unclassified", status="No listed award", rank=None,
+def game(appid, positive=None, total=None, *, label="No verified label", status="No listed award", rank=None,
          band="Below 70%"):
     """A games.csv row as collect_tables builds it, with only what the dashboard reads."""
     usable = total is not None
@@ -16,7 +16,7 @@ def game(appid, positive=None, total=None, *, label="Unclassified", status="No l
         "positive_share": positive / total if usable else None,
         "steam_percent_positive": positive * 100 // total if usable else None,
         "positive_band": band if usable else "No usable review data",
-        "four_year_rank": rank, "rank_status": "Ranked" if rank else "Not in the four-year ranking",
+        "four_year_rank": rank, "rank_status": "Ranked" if rank else "Not in the five-year ranking",
         "in_four_year_window": rank is not None, "catalog_source": "Hand-picked",
     }
 
@@ -42,10 +42,10 @@ def test_the_two_rates_weigh_reviews_and_games_differently():
     assert (empty["weighted_rate"], empty["average_rate"]) == (None, None)
 
 
-def test_labels_follow_the_tier_order_with_unclassified_last():
-    labels = ["Unclassified", "Indie", "AA + Indie", "AAA", "AA", "AAA + Indie"]
+def test_labels_follow_the_label_order_with_no_verified_label_last():
+    labels = ["No verified label", "Indie", "AA + Indie", "AAA", "AA", "AAA + Indie"]
     assert sorted(labels, key=dashboard.label_sort_key) == ["AAA", "AAA + Indie", "AA", "AA + Indie", "Indie",
-                                                           "Unclassified"]
+                                                           "No verified label"]
     rows = dashboard.rates_by_label([game(1, 9, 10, label="Indie"), game(2, 1, 10, label="AAA"), game(3, label="AA")])
     assert [(row["label"], row["games"]) for row in rows] == [("AAA", 1), ("Indie", 1)]  # AA has no review data
 
@@ -55,8 +55,8 @@ def test_the_scatter_puts_reviews_on_a_log_scale():
     assert [(point["x"], point["y"]) for point in chart["points"]] == [(0.0, 75.0), (100.0, 0.0)]
     assert [tick["label"] for tick in chart["x_ticks"]] == ["10", "100", "1K", "10K", "100K", "1M"]
     assert [tick["label"] for tick in chart["y_ticks"]] == ["60%", "70%", "80%", "90%", "100%"]  # from the lowest share
-    assert chart["points"][0]["title"] == "Game 1: 10 reviews, 90% positive, #4 in the four-year ranking"
-    assert chart["points"][1]["title"].endswith("60% positive, not in the four-year ranking")
+    assert chart["points"][0]["title"] == "Game 1: 10 reviews, 90% positive, #4 in the five-year ranking"
+    assert chart["points"][1]["title"].endswith("60% positive, not in the five-year ranking")
     low = dashboard.scatter_chart([game(1, 3, 10), game(2, 100, 100)])  # 30%: steps of 20 from 20%
     assert [tick["label"] for tick in low["y_ticks"]] == ["20%", "40%", "60%", "80%", "100%"]
     one = dashboard.scatter_chart([game(1, 1000, 1000)])  # a single game still gets a decade and a 10-point range
@@ -82,6 +82,10 @@ def test_reception_filters_combine_and_unknown_values_are_ignored():
     assert dashboard.reception_page(data, {"award_status": "Winner"})["measures"]["games"] == 1
     unknown = dashboard.reception_page(data, {"tag": "Puzzle", "label": "Legendary", "award_status": "<b>"})
     assert (unknown["measures"]["games"], unknown["filtered"]) == (3, False)
+    # "Unclassified" is the pre-0.8 name of "No verified label": an older link keeps its filter.
+    for value in ("No verified label", "Unclassified"):
+        unlabeled = dashboard.reception_page(data, {"label": value})
+        assert (unlabeled["filters"]["label"], unlabeled["measures"]["games"]) == ("No verified label", 1)
 
 
 def test_award_charts_stack_winners_under_nominees_and_sort_the_entries():

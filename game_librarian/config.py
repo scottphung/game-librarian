@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -13,6 +14,10 @@ PROJECT_DIR = PACKAGE_DIR.parent
 
 DEFAULT_DB_PATH = PROJECT_DIR / "data" / "game_librarian.sqlite3"
 DEFAULT_CURATED_DIR = PROJECT_DIR / "curated"
+# The Steam store region whose prices the sync reads. Steam prices differ by region and currency.
+DEFAULT_STEAM_COUNTRY = "US"
+# A two-letter country code as Steam's store uses it, such as "US" or "GB" (ISO 3166-1 alpha-2).
+COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # The Power BI project and the CSV tables it reads (written by `export-report`).
 REPORTING_DIR = PROJECT_DIR / "reporting"
 DEFAULT_REPORT_DATA_DIR = REPORTING_DIR / "data"
@@ -44,10 +49,21 @@ class Settings:
     # Optional IGDB access (a Twitch application's credentials); without them IGDB is simply not used.
     igdb_client_id: str | None = field(default=None, repr=False)
     igdb_client_secret: str | None = field(default=None, repr=False)
+    steam_country: str = DEFAULT_STEAM_COUNTRY  # the Steam store region prices are read for
+    # Contact information (an email address or website you choose) for the User-Agent that Wikimedia's
+    # policy asks automated clients to send. Without it the critic scores are not refreshed.
+    contact: str | None = field(default=None, repr=False)
 
     @property
     def igdb_configured(self) -> bool:
+        """IGDB and Twitch share these credentials (a Twitch application's client id and secret)."""
         return bool(self.igdb_client_id and self.igdb_client_secret)
+
+
+def steam_country_code(value: str | None) -> str:
+    """A valid two-letter store region from the setting, or the default "US" when it is empty or malformed."""
+    code = (value or "").strip().upper()
+    return code if COUNTRY_CODE.fullmatch(code) else DEFAULT_STEAM_COUNTRY
 
 
 def load_settings() -> Settings:
@@ -60,4 +76,6 @@ def load_settings() -> Settings:
         review_language=values.get("GAME_LIBRARIAN_REVIEW_LANGUAGE", "english"),
         igdb_client_id=values.get("IGDB_CLIENT_ID") or None,
         igdb_client_secret=values.get("IGDB_CLIENT_SECRET") or None,
+        steam_country=steam_country_code(values.get("GAME_LIBRARIAN_STEAM_COUNTRY")),
+        contact=(values.get("GAME_LIBRARIAN_CONTACT") or "").strip() or None,
     )

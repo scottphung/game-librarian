@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}{% if story %}{{ story.title }} | {% endif %}Data Stories | Game Librarian{% endblock %}
+
+{# Where an entry first came out: "in Japan", "worldwide", or nothing when the source names no region. #}
+{% macro region_text(entry) -%}
+  {%- if entry.region == "Worldwide" %} worldwide{% elif entry.region %} in {{ entry.region }}{% endif -%}
+{%- endmacro %}
+
+{% block body %}
+<main class="page story-page" id="main">
+  <p class="story-back"><a class="text-link" href="/stories">← All Data Stories</a></p>
+  {% if not story %}
+  <div class="notice"><h1>Story not found</h1><p>There is no Data Story at this address.</p></div>
+  {% else %}
+  {% set main_count = story.main_entries|length %}
+  <header class="story-header">
+    <p class="story-kicker">Data Story</p>
+    <h1>{{ story.title }}</h1>
+    <p class="hero-sub">{{ story.summary }}</p>
+    <p class="small muted">Facts checked {{ story.checked_on|day }} against the Wikipedia revisions listed under <a class="text-link" href="#all-sources">Sources</a>. Many of these games are not sold on Steam.</p>
+  </header>
+
+  <dl class="kpis">
+    <div class="kpi"><dt>Games in this story</dt><dd>{{ story.entries|length }}</dd><dd class="kpi-note">{{ main_count }} main {{ "game" if main_count == 1 else "games" }}{% if upcoming %}, {{ upcoming|length }} upcoming{% endif %}</dd></div>
+    <div class="kpi"><dt>First release</dt><dd>{{ chart.first }}</dd><dd class="kpi-note">{{ story.entries[0].title }}</dd></div>
+    {% if gap_summary.longest %}
+    <div class="kpi"><dt>Longest wait between main games</dt><dd>{{ gap_summary.longest.short }}</dd><dd class="kpi-note">{{ gap_summary.longest.earlier.title }} → {{ gap_summary.longest.later.title }}</dd></div>
+    <div class="kpi"><dt>Shortest wait</dt><dd>{{ gap_summary.shortest.short }}</dd><dd class="kpi-note">{{ gap_summary.shortest.earlier.title }} → {{ gap_summary.shortest.later.title }}</dd></div>
+    {% endif %}
+    {% if since_latest %}
+    <div class="kpi"><dt>Since the latest main game</dt><dd>{{ since_latest.short }}</dd><dd class="kpi-note">{{ since_latest.text }} since {{ since_latest.entry.title }}, as of {{ story.checked_on|day }}</dd></div>
+    {% endif %}
+  </dl>
+
+  <figure class="chart-card story-chart">
+    <figcaption>
+      <h2 class="chart-title">The journey at a glance</h2>
+      <p class="chart-sub">One dot per game at its first release, {{ chart.first }}–{{ chart.last }}. Blue: main games · gray: other entries · hollow: upcoming. Point at a dot for its name and date.</p>
+    </figcaption>
+    <div class="strip-chart" role="img" aria-label="Release chart of {{ story.entries|length }} games from {{ chart.first }} to {{ chart.last }}; the timeline below lists every game and date.">
+      {% for row in chart.rows %}
+      <div class="strip-row">
+        <p class="strip-label">{{ row.label }} <span class="muted">· {{ row.games }}</span></p>
+        <div class="strip-track">
+          {% for tick in chart.ticks %}<span class="strip-grid" style="left: {{ tick.x }}%"></span>{% endfor %}
+          {% for dot in row.dots %}<span class="strip-dot{% if row.main %} is-main{% endif %}{% if dot.entry.upcoming %} is-upcoming{% endif %}" style="left: {{ dot.x }}%" title="{{ dot.title }}"></span>{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+      <div class="strip-row strip-axis-row" aria-hidden="true">
+        <span></span>
+        <div class="strip-axis">{% for tick in chart.ticks %}<span class="strip-tick" style="left: {{ tick.x }}%">{{ tick.year }}</span>{% endfor %}</div>
+      </div>
+    </div>
+  </figure>
+
+  <div class="dash-grid story-grid">
+    <figure class="chart-card">
+      <figcaption>
+        <h2 class="chart-title">Waiting between main games</h2>
+        <p class="chart-sub">Time from one main game’s first release to the next. Upcoming games are not counted.</p>
+      </figcaption>
+      {% if gaps %}
+      <dl class="bar-rows gap-rows">
+        {% for row in gaps %}
+        <div class="bar-row">
+          <dt>{{ row.gap.earlier.title }} → {{ row.gap.later.title }}</dt>
+          <dd class="bar-line"><span class="bar-track">{% if row.gap.counted %}<span class="bar is-series-1" style="width: {{ row.width }}%" title="{{ row.gap.text }}"></span>{% endif %}</span><span class="bar-value">{{ row.gap.short }}</span></dd>
+        </div>
+        {% endfor %}
+      </dl>
+      <details class="table-view">
+        <summary>Show the numbers</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th scope="col">From</th><th scope="col">To</th><th scope="col">Wait</th><th scope="col" class="num">Days</th></tr></thead>
+            <tbody>
+              {% for row in gaps %}
+              <tr><td>{{ row.gap.earlier.title }} ({{ row.gap.earlier.released.label }})</td><td>{{ row.gap.later.title }} ({{ row.gap.later.released.label }})</td><td>{{ row.gap.text }}</td><td class="num">{{ row.gap.days|number if row.gap.counted else "—" }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% if gap_summary.median_days is not none %}<p class="small muted">Median wait: {{ (gap_summary.median_days / 365.2425)|round(1) }} years ({{ gap_summary.median_days|round|int|number }} days) over {{ gap_summary.counted }} {{ "wait" if gap_summary.counted == 1 else "waits" }}.</p>{% endif %}
+      {% else %}
+      <p class="chart-empty">This story has fewer than two released main games.</p>
+      {% endif %}
+    </figure>
+
+    <figure class="chart-card">
+      <figcaption>
+        <h2 class="chart-title">Where the main games first appeared</h2>
+        <p class="chart-sub">Main games per platform family at first release. A game on two families counts for each; later ports do not count.</p>
+      </figcaption>
+      <dl class="bar-rows">
+        {% for row in families %}
+        <div class="bar-row">
+          <dt>{{ row.family }}</dt>
+          <dd class="bar-line"><span class="bar-track"><span class="bar is-series-1" style="width: {{ row.width }}%" title="{{ row.titles|join(', ') }}"></span></span><span class="bar-value">{{ row.games }}</span></dd>
+        </div>
+        {% endfor %}
+      </dl>
+      <details class="table-view">
+        <summary>Show each main game's first platforms</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th scope="col">Main game</th><th scope="col">First release</th><th scope="col">Platforms</th></tr></thead>
+            <tbody>
+              {% for entry in story.main_entries %}
+              <tr><td>{{ entry.title }}</td><td>{{ entry.released.label }}{% if entry.upcoming %} (upcoming){% endif %}</td><td>{{ entry.platforms|join(", ") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </figure>
+  </div>
+
+  <section class="story-timeline" aria-labelledby="timeline-title">
+    <div class="timeline-head">
+      <h2 id="timeline-title">Timeline</h2>
+      <nav class="view-switch" aria-label="Timeline entries">
+        <a class="view-link" href="/stories/{{ story.slug }}#timeline-title"{% if not main_only %} aria-current="page"{% endif %}>All {{ story.entries|length }} games</a>
+        <a class="view-link" href="/stories/{{ story.slug }}?show=main#timeline-title"{% if main_only %} aria-current="page"{% endif %}>Main games only</a>
+      </nav>
+    </div>
+    <p class="small muted timeline-key">One row per game at its first release. Blue marks main games. Images are cover art from IGDB.com, not gameplay; a gray box means no suitable image.</p>
+    {% for decade in timeline %}
+    <section class="decade" aria-labelledby="decade-{{ decade.decade }}">
+      <h3 class="decade-title" id="decade-{{ decade.decade }}">{{ decade.decade }} <span class="muted">· {{ decade.entries|length }} {{ "game" if decade.entries|length == 1 else "games" }}</span></h3>
+      {% for group in decade.years %}
+      <div class="tl-year">
+        <p class="tl-year-label">{{ group.year }}</p>
+        <ol class="entries" role="list">
+          {% for entry in group.entries %}
+          {% set image = images[entry.title] %}
+          <li class="story-entry{% if entry.is_main %} is-main{% endif %}{% if entry.upcoming %} is-upcoming{% endif %}">
+            {# The image's credit is the IGDB link beside the Wikipedia link below, and the list under "Show all sources". #}
+            <div class="tl-thumb">
+              {% if image %}
+              <span class="tl-frame"><img src="{{ image.url }}" srcset="{{ image.url_2x }} 2x" alt="{{ image.alt }}" width="72" height="72" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-image-fallback></span>
+              {% else %}
+              <span class="tl-frame is-empty"><span class="visually-hidden">No suitable image</span></span>
+              {% endif %}
+            </div>
+            <div class="tl-body">
+              <p class="tl-head"><time class="entry-date" datetime="{{ entry.released.iso }}"><span class="visually-hidden">{{ entry.released.label }}</span><span aria-hidden="true">{{ entry.released.label_in_year or entry.released.year }}</span></time>
+                <span class="entry-title">{{ entry.title }}</span>{% if entry.upcoming %} <span class="entry-flag">Upcoming: announced date</span>{% endif %}</p>
+              <p class="entry-role"><span class="role-badge{% if entry.is_main %} is-main{% endif %}">{{ entry.role_label }}</span>{% if entry.of %} of {{ entry.of|listing }}{% endif %}
+                <span class="entry-platforms">{{ "Announced for" if entry.upcoming else "First released" ~ region_text(entry) ~ " on" }} {{ entry.platforms|listing }}</span></p>
+              {% if entry.note %}<p class="entry-note">{{ entry.note }}</p>{% endif %}
+              {% if image and image.note %}<p class="entry-note">{{ image.kind }}: {{ image.note }}</p>{% endif %}
+              <p class="entry-links">
+                <a class="text-link" href="{{ entry.source.url }}" target="_blank" rel="noopener">Wikipedia<span class="visually-hidden">: source article “{{ entry.source.title }}”, revision of {{ entry.source.revision_time|datetime }} (opens in a new tab)</span></a>
+                {%- if image %} · <a class="text-link" href="{{ image.credit_url }}" target="_blank" rel="noopener">IGDB<span class="visually-hidden">.com: the game’s record, source of its cover art (opens in a new tab)</span></a>{% endif %}
+                {%- if entry.catalog_appid and entry.catalog_appid in in_catalog %} · <a class="text-link" href="/games/{{ entry.catalog_appid }}">In the Game Librarian catalog</a>{% if entry.catalog_note %} <span class="muted">({{ entry.catalog_note }})</span>{% endif %}{% endif %}
+              </p>
+            </div>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </section>
+
+  <details class="chart-card story-scope" id="scope">
+    <summary class="card-summary-title">What this story includes and leaves out</summary>
+    <div class="dash-grid story-grid">
+      <div>
+        <h3 class="chart-title">What it includes</h3>
+        <ul class="story-list">{% for line in story.includes %}<li>{{ line }}</li>{% endfor %}</ul>
+      </div>
+      <div>
+        <h3 class="chart-title">What it leaves out</h3>
+        <ul class="story-list">{% for line in story.excludes %}<li>{{ line }}</li>{% endfor %}</ul>
+      </div>
+    </div>
+  </details>
+
+  {% set sources = story.sources %}
+  <section class="chart-card story-sources" id="sources" aria-labelledby="sources-title">
+    <h2 class="chart-title" id="sources-title">Sources and method</h2>
+    <p class="chart-sub">Facts from {{ sources|length }} Wikipedia article revisions read on {{ story.checked_on|day }}; Wikipedia’s text is under CC BY-SA 4.0, and none of it is copied here.
+      {%- set c = image_counts %} Images: cover art from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a> for {{ c.covers }} of {{ story.entries|length }} games
+      {%- if c.missing %} ({{ c.missing }} without a suitable image){% endif %}; each game links to its IGDB record.</p>
+    <details class="source-details" id="all-sources">
+      <summary>Show all sources</summary>
+      <div class="source-details-body">
+        {% if story.notes %}
+        <h3 class="chart-title">Notes on this story</h3>
+        <ul class="story-list">{% for note in story.notes %}<li>{{ note }}</li>{% endfor %}</ul>
+        {% endif %}
+
+        <h3 class="chart-title" id="method-title">Method</h3>
+        <ul class="story-list">
+          <li><strong>First release:</strong> the earliest date in the game's Wikipedia infobox, in any region. When the article gives only a month or a year, the story shows only that.</li>
+          <li><strong>Platforms:</strong> the platforms of that first release only. Later ports and re-releases are left out, so a game appears once.</li>
+          <li><strong>Roles</strong> follow the grouping in Wikipedia's navigation template for the series: main games, and the games listed with them.</li>
+          <li><strong>Waits between main games:</strong> whole years, months and days from one main game's first release to the next, counted only when both dates name an exact day. An upcoming game is never counted.</li>
+          <li><strong>Platform families</strong> group platforms by maker (Nintendo, PlayStation, Xbox, PC, Mobile).</li>
+          <li><strong>Time since the latest main game</strong> runs to the day the facts were checked, {{ story.checked_on|day }}.</li>
+        </ul>
+
+        <h3 class="chart-title">Sources</h3>
+        <p class="chart-sub">Each link opens the exact Wikipedia revision that was read on {{ story.checked_on|day }}. Wikipedia can be wrong or change later; the revision links show what these facts are based on.</p>
+        <ol class="source-list">
+          {% for source in sources %}
+          <li><a class="text-link" href="{{ source.url }}" target="_blank" rel="noopener">Wikipedia: “{{ source.title }}”</a> <span class="muted">· revision of {{ source.revision_time|datetime }}{% if source.used_for %} · {{ source.used_for }}{% endif %}</span></li>
+          {% endfor %}
+        </ol>
+
+        <h3 class="chart-title">Images</h3>
+        <ul class="story-list">
+          <li><strong>Cover art</strong> is the box or store artwork of the game’s record on IGDB.com, loaded from IGDB’s image server. Each record was checked against the game’s title, first release date and platforms before it was used; the IGDB link beside each game’s Wikipedia link, and the list below, open that record. A cover can show another region’s title or a later edition; such a cover says so. IGDB’s API is free for non-commercial use under the Twitch Developer Services Agreement, with credit to IGDB.com. The artwork belongs to its publisher: it is shown to identify the game, not licensed for reuse.</li>
+          <li><strong>No gameplay screenshots.</strong> No source offers one whose content and rights are both known. IGDB’s screenshots are uploaded by its contributors without a stated origin. Steam’s store screenshots exist only for the few games sold on Steam today, show that edition and can show other modes (the first one for Grand Theft Auto V Legacy shows a Grand Theft Auto Online hangar). Wikipedia’s covers and screenshots are non-free files used under fair use for Wikipedia’s own articles.</li>
+          <li>No image is copied, stored or edited. A gray box marks a game without a checked IGDB record, or an image IGDB no longer serves.</li>
+        </ul>
+
+        <h3 class="chart-title">Image credits</h3>
+        <p class="chart-sub">Cover art of each game, from its record on IGDB.com, checked {{ story.checked_on|day }}.</p>
+        <ol class="source-list image-credits">
+          {% for entry in story.entries %}{% set image = images[entry.title] %}
+          <li>{{ entry.title }}: {% if image %}<a class="text-link" href="{{ image.credit_url }}" target="_blank" rel="noopener">{{ image.kind }} · {{ image.credit }}</a>{% if image.note %} <span class="muted">· {{ image.note }}</span>{% endif %}{% else %}<span class="muted">no suitable image</span>{% endif %}</li>
+          {% endfor %}
+        </ol>
+
+        <h3 class="chart-title">Attribution and license</h3>
+        <p class="chart-sub">Facts compiled from the Wikipedia articles above. Wikipedia's text is available under the Creative Commons Attribution-ShareAlike 4.0 License. This page copies no Wikipedia text or images: it lists dates and platforms read from the articles, with notes and charts made for Game Librarian. Game names, cover art and screenshots belong to their owners; this page is not affiliated with them.</p>
+      </div>
+    </details>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

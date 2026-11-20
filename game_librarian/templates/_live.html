@@ -1,0 +1,52 @@
+{# "Watch it live": live Twitch streams in the game's Twitch category (twitch.py), rendered from the stored
+   answer only. When a newer check is due, app.js replaces this section with /games/{key}/live, which asks
+   Twitch on the server; no credential or token ever reaches the browser. #}
+{% macro live_section(live, heading_id) -%}
+<section class="details-section live-block" aria-labelledby="{{ heading_id }}-live" data-live
+  {%- if live.needs_check %} data-live-refresh="/games/{{ live.key }}/live?heading={{ heading_id }}"{% endif %}>
+  <h3 id="{{ heading_id }}-live">Watch it live</h3>
+  {%- set checked -%}
+    {%- if live.state in ("error", "rate_limited") -%}
+      {%- if live.previous %}Answer from Twitch of <time datetime="{{ live.fetched_at.isoformat() }}">{{ live.fetched_at|datetime }}</time>{% endif -%}
+    {%- elif live.checked_at %}Checked <time datetime="{{ live.checked_at.isoformat() }}">{{ live.checked_at|datetime }}</time>{% endif -%}
+  {%- endset %}
+  {% if live.state == "not_configured" %}
+    <p class="muted small">Live streams need Twitch access, which this site does not have: set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET (a Twitch application's credentials) and restart it.</p>
+  {% elif live.state == "no_igdb" %}
+    <p class="muted small">No Twitch category can be matched: a category is found only through the game's IGDB id, and this game has none yet (run <code>python -m game_librarian upcoming</code>), or IGDB lists several games for its Steam app.</p>
+  {% elif live.state == "pending" %}
+    <p class="muted small" data-live-status role="status">Checking Twitch for live streams…<noscript> Live streams load with JavaScript.</noscript></p>
+  {% elif live.state == "no_category" %}
+    <p class="muted small">Twitch has no category linked to this game's IGDB record, so there are no streams to list. {{ checked }}.</p>
+  {% elif live.state == "ambiguous" %}
+    <p class="muted small">Twitch links more than one category to this game's IGDB record, so none is chosen. {{ checked }}.</p>
+  {% else %}
+    {% if live.state == "rate_limited" %}
+      <p class="data-note">Twitch's request limit was reached, so live streams could not be checked{% if live.retry_at %} until <time datetime="{{ live.retry_at.isoformat() }}">{{ live.retry_at|datetime }}</time>{% endif %}.{% if live.previous %} Showing the streams from the previous check, which may have ended.{% endif %}</p>
+    {% elif live.state == "error" %}
+      <p class="data-note">Twitch could not be reached just now.{% if live.previous %} Showing the streams from the previous check, which may have ended.{% else %} Try again in a few minutes.{% endif %}</p>
+    {% elif live.state == "empty" %}
+      <p class="small">Nobody is streaming this game's Twitch category right now.</p>
+    {% endif %}
+    {% if live.streams %}
+    <ul class="live-list" role="list">
+      {% for stream in live.streams %}
+      <li class="live-item">
+        <a class="live-channel text-link" href="{{ stream.url }}" target="_blank" rel="noopener">{{ stream.user_name }}<span class="visually-hidden"> on Twitch (opens in a new tab)</span></a>
+        <span class="live-viewers">{{ stream.viewers|number }} {{ "viewer" if stream.viewers == 1 else "viewers" }}</span>
+        <span class="live-title">{{ stream.title or "No stream title" }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if live.category %}
+    <p class="small muted">
+      {% if live.streams %}The most watched live streams in the{% else %}The{% endif %} Twitch category “{{ live.category }}”, as the broadcasters chose it.
+      {% if live.upcoming %}This game is not released yet, so streams in its category may show trailers, news or discussion rather than gameplay.{% endif %}
+      {% if checked %}{{ checked }}{% if live.stale %}: they may have ended{% endif %}.{% endif %}
+      <a class="text-link" href="{{ live.category_url }}" target="_blank" rel="noopener">All streams on Twitch<span class="visually-hidden"> (opens in a new tab)</span></a>
+    </p>
+    {% endif %}
+  {% endif %}
+</section>
+{%- endmacro %}

@@ -3,7 +3,7 @@
 
 {% block dashboard %}
 {% set m = dash.measures %}
-<form class="dash-filters" method="get" action="/dashboard" aria-label="Player reception filters">
+<form class="dash-filters" method="get" action="/dashboard/reception" aria-label="Player reception filters">
   <div class="dash-filter">
     <label class="field-label" for="f-tag">Tag or genre</label>
     <select id="f-tag" name="tag" data-autosubmit>
@@ -33,7 +33,7 @@
   </div>
   <div class="dash-filter-actions">
     <button class="button button-primary" type="submit">Apply</button>
-    {% if dash.filtered %}<a class="text-link" href="/dashboard">Clear filters</a>{% endif %}
+    {% if dash.filtered %}<a class="text-link" href="/dashboard/reception">Clear filters</a>{% endif %}
   </div>
 </form>
 <p class="dash-scope">{{ m.games|number }} of {{ dash.catalog_games|number }} catalog {{ "game" if dash.catalog_games == 1 else "games" }} {{ "match the filters" if dash.filtered else "in total" }}.</p>
@@ -69,7 +69,7 @@
       <summary>Show the numbers</summary>
       <div class="table-scroll">
         <table class="data-table">
-          <thead><tr><th scope="col">Game</th><th scope="col" class="num">Total reviews</th><th scope="col" class="num">Positive</th><th scope="col">Four-year rank</th></tr></thead>
+          <thead><tr><th scope="col">Game</th><th scope="col" class="num">Total reviews</th><th scope="col" class="num">Positive</th><th scope="col">Five-year rank</th></tr></thead>
           <tbody>
             {% for point in dash.scatter.points %}
             <tr><td>{{ point.game.title }}</td><td class="num">{{ point.game.total_reviews|number }}</td><td class="num">{{ point.game.steam_percent_positive }}%</td><td>{{ "#" ~ point.game.four_year_rank if point.game.four_year_rank else point.game.rank_status }}</td></tr>
@@ -86,7 +86,7 @@
   <figure class="chart-card">
     <figcaption>
       <h2 class="chart-title">Positive rate by production label</h2>
-      <p class="chart-sub">Pooled reviews against the average of games, from 0% to 100%. A label needs game-specific evidence; most games are Unclassified.</p>
+      <p class="chart-sub">Pooled reviews against the average of games, from 0% to 100%. A label needs game-specific evidence; most games have no verified label.</p>
     </figcaption>
     {% if dash.by_label %}
     <ul class="legend">
@@ -110,15 +110,21 @@
   </figure>
 
   <section class="chart-card is-wide" aria-labelledby="ranking-title">
-    <h2 class="chart-title" id="ranking-title">Four-year ranking: tier, then positive reviews</h2>
-    <p class="chart-sub">Games released {{ window.start|day }} – {{ window.end|day }}, ranked exactly as in the catalog: AAA first, then AA, then Indie and Unclassified together; more positive Steam reviews rank higher within a tier. Filters hide games but never renumber them.</p>
+    <h2 class="chart-title" id="ranking-title">Five-year ranking: awards, then Steam reception</h2>
+    <p class="chart-sub">Games released {{ window.start|day }} – {{ window.end|day }}, ranked as in the catalog. An editorial order, not a quality score; filters hide games but never renumber them.</p>
+    <details class="table-view rule-details">
+      <summary>How the ranking works</summary>
+      <p class="chart-sub">Award group first, then more verified wins, then more verified nominations, then Steam reception ({{ dash.reliable_reviews|number }}+ reviews first, highest positive share first). Award coverage is incomplete, so “No award recorded” does not mean a game never received an award. All the rules: <a class="text-link" href="/dashboard/about">About the data</a>.</p>
+    </details>
     {% if dash.ranking %}
     <div class="table-scroll is-tall">
       <table class="data-table">
-        <thead><tr><th scope="col" class="num">Rank</th><th scope="col">Game</th><th scope="col">Tier</th><th scope="col" class="num">Positive reviews</th><th scope="col" class="num">% positive</th><th scope="col" class="num">Total reviews</th></tr></thead>
+        <thead><tr><th scope="col" class="num">Rank</th><th scope="col">Game</th><th scope="col">Award group</th><th scope="col" class="num">Wins</th><th scope="col" class="num">Nominations</th><th scope="col" class="num">% positive</th><th scope="col" class="num">Total reviews</th></tr></thead>
         <tbody>
           {% for game in dash.ranking %}
-          <tr><td class="num">{{ game.four_year_rank }}</td><td><a class="text-link" href="/games/{{ game.appid }}">{{ game.title }}</a></td><td>{{ game.ranking_tier_name }}</td><td class="num">{{ game.positive_reviews|number }}</td><td class="num">{{ game.steam_percent_positive }}%</td><td class="num">{{ game.total_reviews|number }}</td></tr>
+          <tr><td class="num">{{ game.four_year_rank }}</td><td><a class="text-link" href="/games/{{ game.appid }}">{{ game.title }}</a></td><td>{{ game.ranking_tier_name }}{% if game.ranking_tier_original_release %} <span class="muted">(for the original release)</span>{% endif %}</td><td class="num">{{ game.award_wins }}</td><td class="num">{{ game.award_nominations }}</td>
+            {%- if game.has_review_data %}<td class="num">{{ game.steam_percent_positive }}%</td><td class="num">{{ game.total_reviews|number }}</td>
+            {%- else %}<td class="num muted">No data</td><td class="num muted">No data</td>{% endif %}</tr>
           {% endfor %}
         </tbody>
       </table>
@@ -145,9 +151,13 @@
 
   <aside class="chart-card" aria-labelledby="measures-title">
     <h2 class="chart-title" id="measures-title">Two ways to measure reception</h2>
-    <p class="chart-sub"><strong>Review-weighted positive rate:</strong> all positive reviews ÷ all reviews of the selected games, so games with many reviews dominate.</p>
-    <p class="chart-sub"><strong>Average game positive rate:</strong> the mean of each game's own positive share, so every game counts once.</p>
-    <p class="chart-sub">Reviews are Steam's review summaries: Steam purchasers, all languages. A game counts once, however many tags or awards it has. Definitions: <a class="text-link" href="/dashboard/about">About the data</a>.</p>
+    <p class="chart-sub">Pooled reviews, or every game counted once. Reviews are Steam’s review summaries: Steam purchasers, all languages.</p>
+    <details class="table-view rule-details">
+      <summary>Definitions</summary>
+      <p class="chart-sub"><strong>Review-weighted positive rate:</strong> all positive reviews ÷ all reviews of the selected games, so games with many reviews dominate.</p>
+      <p class="chart-sub"><strong>Average game positive rate:</strong> the mean of each game's own positive share, so every game counts once.</p>
+      <p class="chart-sub">A game counts once, however many tags or awards it has. More: <a class="text-link" href="/dashboard/about">About the data</a>.</p>
+    </details>
   </aside>
 </div>
 {% endblock %}

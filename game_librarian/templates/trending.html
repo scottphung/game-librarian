@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% from "_platforms.html" import availability_lines, scope_badge %}
+{% block title %}Trending | Game Librarian{% endblock %}
+
+{# A Steam activity list. `kind` picks the figures each row shows; every name opens the details. #}
+{% macro trend_list(items, kind, label) -%}
+<ol class="trend-list" aria-label="{{ label }}">
+  {% for item in items %}
+  {% set g = item.game %}
+  <li class="trend-item">
+    <span class="trend-pos" aria-hidden="true">{{ loop.index }}</span>
+    {% if item.image_url %}<img class="trend-thumb" src="{{ item.image_url }}" alt="" width="460" height="215" loading="lazy" decoding="async" referrerpolicy="no-referrer">{% else %}<span class="trend-thumb is-missing"></span>{% endif %}
+    <div class="trend-text">
+    <a class="trend-link" href="{{ item.details_url }}" data-details="{{ item.appid }}">{{ item.name }}</a>
+    <p class="trend-figures">
+      {%- if kind == "players" %}<strong>{{ g.players|number }}</strong> {{ "player" if g.players == 1 else "players" }} in game on Steam <span class="muted">at {{ g.players_at|datetime }}</span>
+      {%- elif kind == "reception" %}<strong>{{ g.review_label }}</strong> · {{ g.percent }}% of {{ g.total|number }} Steam reviews <span class="muted">· released on Steam {{ item.release }}</span>
+      {%- elif kind == "player-change" %}<strong>{{ item.change.difference|signed }}</strong> players in game on Steam <span class="muted">({{ item.change.before|number }} at {{ item.change.before_at|datetime }} → {{ item.change.after|number }} at {{ item.change.after_at|datetime }})</span>
+      {%- elif kind == "review-change" %}<strong>{{ item.change.difference|signed }}</strong> Steam reviews{% if item.change.positive_added is not none %} ({{ item.change.positive_added|number }} positive){% endif %} <span class="muted">({{ item.change.before_at|date }} → {{ item.change.after_at|date }})</span>
+      {%- endif -%}
+    </p>
+    <p class="trend-platforms">
+      {%- if item.availability and item.availability.known %}{{ availability_lines(item.availability, 2) }}
+      {%- elif item.steam_platforms %}<span class="avail"><span class="avail-key">Steam version for</span> {{ item.steam_platforms|join(", ") }}</span><span class="avail muted">Other platforms: not known yet (no IGDB record)</span>
+      {%- else %}<span class="avail muted">Platforms: not known</span>{% endif -%}
+    </p>
+    {% if item.sale %}<span class="sale-badge">{{ item.sale.label }}<span class="visually-hidden"> (Steam {{ item.sale.region }} store, price checked {{ item.sale.checked_at|datetime }})</span></span>{% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{%- endmacro %}
+
+{# A cross-platform list of IGDB games (web._igdb_item). Platform lines come from IGDB's per-platform dates. #}
+{% macro igdb_list(games, label, twitch=false) -%}
+<ol class="trend-list upcoming-list" aria-label="{{ label }}">
+  {% for item in games %}
+  <li class="trend-item">
+    <span class="trend-pos" aria-hidden="true">{{ loop.index }}</span>
+    {% if item.image_url %}<img class="trend-thumb is-cover" src="{{ item.image_url }}" alt="" width="264" height="374" loading="lazy" decoding="async" referrerpolicy="no-referrer">{% else %}<span class="trend-thumb is-cover is-missing"></span>{% endif %}
+    <div class="trend-text">
+      <a class="trend-link" href="{{ item.details_url }}" data-details="{{ item.key }}">{{ item.name }}</a>
+      <p class="trend-platforms">{{ availability_lines(item.availability, 2) }}</p>
+      {% if item.publisher or item.steam_verified %}
+      <p class="trend-meta small muted">
+        {%- if item.publisher %}{{ item.publisher }}{% endif %}
+        {%- if item.steam_verified %}{% if item.publisher %} · {% endif %}On Steam{% endif %}
+      </p>
+      {% endif %}
+      {% if twitch %}
+      <p class="small trend-twitch">
+        Twitch's list: #{{ item.twitch_position }}{% if item.name_differs %} as “{{ item.twitch_name }}”{% endif %} ·
+        <a class="text-link inner-link" href="{{ item.twitch_url }}" target="_blank" rel="noopener">Watch on Twitch<span class="visually-hidden"> (opens in a new tab)</span></a>
+      </p>
+      {% endif %}
+      {% if item.change %}{% set c = item.change %}
+      <p class="small trend-change">
+        {%- if c.places > 0 %}Up {{ c.places }} {{ "place" if c.places == 1 else "places" }}{% elif c.places < 0 %}Down {{ -c.places }} {{ "place" if c.places == -1 else "places" }}{% else %}Same place{% endif %}
+        since {{ c.before_at|date }} <span class="muted">(position {{ c.before }} → {{ c.after }} in IGDB's order)</span>
+      </p>
+      {% endif %}
+      {% if item.date_change %}{% set d = item.date_change.change %}
+      <p class="small date-change">IGDB's date for {{ d.platform }}: {{ d.words }} ({{ d.before or "none" }} → {{ d.after or "none" }}) <span class="muted">noticed {{ item.date_change.noticed_at|date }}</span></p>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{%- endmacro %}
+
+{# A list's short subtitle and source/update line, then its full definition behind "About this list" (a native
+   <details>: keyboard and no-JavaScript friendly). The caller fills the definition list (Signal, Coverage, ...). #}
+{% macro list_intro(subtitle, meta) -%}
+<p class="list-sub">{{ subtitle }}</p>
+<p class="list-meta">{{ meta }}</p>
+<details class="about-list">
+  <summary>About this list</summary>
+  <dl class="trend-facts">{{ caller() }}</dl>
+</details>
+{%- endmacro %}
+
+{# A section's longer explanation, folded under its short visible line. #}
+{% macro about_section() -%}
+<details class="about-list about-section">
+  <summary>About this section</summary>
+  <div class="about-section-body">{{ caller() }}</div>
+</details>
+{%- endmacro %}
+
+{# When IGDB calculated a PopScore list and when it was saved here. #}
+{% macro popscore_updated(data) -%}
+  {%- if data and data.calculated_at %}IGDB calculated the values {{ data.calculated_at[1]|datetime }}; saved here {{ data.captured_at|datetime }}.
+  {%- elif data and data.captured_at %}Saved here {{ data.captured_at|datetime }}.
+  {%- else %}Not refreshed yet.{% endif -%}
+{%- endmacro %}
+
+{# Why a PopScore list shows no position changes yet. #}
+{% macro change_note(data) -%}
+  {% if data and data.captured_at and not data.has_changes %}
+    {% if data.history.has_window %}
+      <p class="small muted">No listed game has two snapshots {{ change_window_days }} to {{ max_baseline_days }} days apart, so no position change is shown.</p>
+    {% else %}
+      <p class="small muted">Position changes appear once this list has snapshots {{ change_window_days }} to {{ max_baseline_days }} days apart{% if data.history.changes_possible_from %} (the first could appear after {{ data.history.changes_possible_from|date }}, if the refresh runs daily){% endif %}. Nothing is estimated before then.</p>
+    {% endif %}
+  {% endif %}
+{%- endmacro %}
+
+{# One Upcoming & Anticipated list: one PopScore signal, its definition, and the upcoming games in its order. #}
+{% macro upcoming_column(data) -%}
+{% set s = data.signal %}
+<section class="upcoming-column" aria-labelledby="upcoming-{{ s.key }}-title">
+  <div class="trend-head"><h3 id="upcoming-{{ s.key }}-title">{{ s.title }}</h3>{{ scope_badge("steam" if s.key == "steam_wishlists" else "all") }}</div>
+  {% set subtitle %}{% if s.key == "want_to_play" %}What IGDB.com users most want to play. A relative order, not a count.{% else %}Steam’s most-wishlisted upcoming games. Positions only, not wishlist counts.{% endif %}{% endset %}
+  {% set meta %}Source: IGDB.com{% if s.key != "want_to_play" %} (from Steam){% endif %} · {% if data and data.captured_at %}updated {{ data.captured_at|datetime }}{% else %}not refreshed yet{% endif %}{% endset %}
+  {% call list_intro(subtitle, meta) %}
+    {% if s.key == "want_to_play" %}
+    <div><dt>Signal</dt><dd>IGDB PopScore “Want to Play”: how often IGDB.com users add a game to their Want to Play list, compared with other games. IGDB gives a relative share, not a count, and does not say over which period, so only the order is used.</dd></div>
+    <div><dt>Coverage</dt><dd>{{ s.platforms_note }} The {{ s.depth|number }} games with the highest values are scanned, and only upcoming ones are listed.</dd></div>
+    {% else %}
+    <div><dt>Signal</dt><dd>Steam's most-wishlisted upcoming games, in the order IGDB PopScore records them (“Most Wishlisted Upcoming”). The values step down evenly from one game to the next, so they stand for list positions, not wishlist counts. Valve publishes no wishlist counts.</dd></div>
+    <div><dt>Coverage</dt><dd>{{ s.platforms_note }} The first {{ s.depth|number }} positions are scanned.</dd></div>
+    {% endif %}
+    <div><dt>Source</dt><dd>IGDB.com API: PopScore popularity type {{ s.popularity_type }}, with release dates, platforms and publishers from IGDB.</dd></div>
+    <div><dt>Updated</dt><dd>{{ popscore_updated(data) }}</dd></div>
+  {% endcall %}
+  {% if data.games %}{{ igdb_list(data.games, s.title) }}
+  {% elif data.captured_at %}<p class="notice-line">None of the games saved by the last refresh is still upcoming.</p>{% endif %}
+  {{ change_note(data) }}
+</section>
+{%- endmacro %}
+
+{# "Most wanted new releases": the Want to Play games first released in the last RECENT_WINDOW. #}
+{% macro recent_column(data) -%}
+<section class="upcoming-column" aria-labelledby="recent-title">
+  <div class="trend-head"><h3 id="recent-title">Most wanted new releases</h3>{{ scope_badge("all") }}</div>
+  {% set subtitle %}What IGDB.com users most want to play among games first released {{ recent_window[0]|day }} – {{ recent_window[1]|day }}.{% endset %}
+  {% set meta %}Source: IGDB.com · {% if data and data.captured_at %}updated {{ data.captured_at|datetime }}{% else %}not refreshed yet{% endif %}{% endset %}
+  {% call list_intro(subtitle, meta) %}
+    <div><dt>Rule</dt><dd>A first full release, on any platform and in any region, from {{ recent_window[0]|day }} to today, {{ recent_window[1]|day }} (the last {{ recent_days }} days), by IGDB's release dates. A month, quarter or year counts only once that whole period is over, and only if it began in the window: no day is guessed. Platforms whose own release is still ahead are listed as announced.</dd></div>
+    <div><dt>Signal</dt><dd>IGDB PopScore “Want to Play”, the same signal as Most wanted on IGDB above: how often IGDB.com users add a game to their Want to Play list, compared with other games. A relative share, not a count; IGDB does not say over which period, so only the order is used.</dd></div>
+    <div><dt>Coverage</dt><dd>All platforms, including console-only games. The {{ data.signal.depth|number }} games with the highest values are scanned.</dd></div>
+    <div><dt>Source</dt><dd>IGDB.com API: PopScore popularity type 2, with release dates, platforms and publishers from IGDB.</dd></div>
+    <div><dt>Updated</dt><dd>{{ popscore_updated(data) }}</dd></div>
+  {% endcall %}
+  {% if data.games %}{{ igdb_list(data.games, "Most wanted new releases") }}
+  {% elif data.captured_at %}<p class="notice-line">No game in the newest snapshot ({{ data.captured_at|datetime }}) was first released in the last {{ recent_days }} days. Snapshots saved before version 0.7 hold upcoming games only: run <code>python -m game_librarian upcoming --force</code> to add recent releases.</p>
+  {% else %}<p class="notice-line">Not refreshed yet. Run <code>python -m game_librarian upcoming</code>.</p>{% endif %}
+  {{ change_note(data) }}
+</section>
+{%- endmacro %}
+
+{# "Most watched on Twitch": Twitch's own order of categories by current viewers, matched to IGDB games. #}
+{% macro twitch_column(data) -%}
+<section class="upcoming-column" aria-labelledby="twitch-title">
+  <div class="trend-head"><h3 id="twitch-title">Most watched on Twitch</h3>{{ scope_badge("all") }}</div>
+  {% set meta %}Source: Twitch · {% if data.checked_at %}asked {{ data.checked_at|datetime }}, kept {{ data.keep_hours }} hours{% else %}no list from the last {{ data.keep_hours }} hours{% endif %}{% endset %}
+  {% call list_intro("Twitch categories with the most viewers at one moment. Order only, no viewer numbers.", meta) %}
+    <div><dt>Signal</dt><dd>Twitch's own list of the categories with the most viewers at the moment it was asked (“Get Top Games”). Twitch gives the order only, with no viewer numbers. One moment, not a trend: the order changes through the day.</dd></div>
+    <div><dt>Coverage</dt><dd>Games on any platform that people stream. Twitch's first {{ data.depth }} categories are read{% if data.categories %}. Left out at this check: {{ data.left_out.no_igdb_game }} that Twitch links to no game (such as Just Chatting){% if data.left_out.other_kind %}, {{ data.left_out.other_kind }} that IGDB lists as DLC, bundles or other kinds{% endif %}{% if data.left_out.not_read %}, {{ data.left_out.not_read }} whose IGDB record was not read yet{% endif %}{% endif %}. A category can stand for a whole series and point to its first game.</dd></div>
+    <div><dt>Source</dt><dd>Twitch API, matched to games by the IGDB id Twitch gives each category; platforms and dates from IGDB.com.</dd></div>
+    <div><dt>Updated</dt><dd>{% if data.checked_at %}Twitch was asked {{ data.checked_at|datetime }}.{% else %}No Twitch list from the last {{ data.keep_hours }} hours.{% endif %} Twitch's terms allow keeping its data for {{ data.keep_hours }} hours, so an older list is deleted, and no history is kept.</dd></div>
+  {% endcall %}
+  {% if data.games %}{{ igdb_list(data.games, "Most watched on Twitch", twitch=true) }}
+  {% elif data.checked_at %}<p class="notice-line">None of the categories Twitch listed is a game that IGDB knows.</p>
+  {% else %}<p class="notice-line">No Twitch list is saved from the last {{ data.keep_hours }} hours. Run <code>python -m game_librarian upcoming</code> (it refreshes once every 20 hours; add <code>--force</code> to ask again now).</p>{% endif %}
+</section>
+{%- endmacro %}
+
+{% macro history_note(status, what) -%}
+  {% if not status.first %}
+    <p class="notice-line">No {{ what }} snapshots have been saved yet. Run <code>python -m game_librarian sync</code>; each run saves one.</p>
+  {% else %}
+    <p class="notice-line">Not available yet: {{ what }} snapshots exist from {{ status.first|datetime }} to {{ status.last|datetime }} ({{ status.days }} {{ "day" if status.days == 1 else "days" }} with snapshots). A change needs two snapshots of the same game {{ change_window_days }} to {{ max_baseline_days }} days apart, so the first one can appear after {{ status.changes_possible_from|datetime }} if <code>sync</code> keeps running at least once a day. Nothing is estimated in between.</p>
+  {% endif %}
+{%- endmacro %}
+
+{% block body %}
+<main class="page trending-page" id="main">
+  <section class="hero" aria-labelledby="trending-title">
+    <h1 id="trending-title">Trending.</h1>
+    <p class="hero-sub">Games people are looking forward to, playing and watching, on every platform. Each list follows one signal; no game is picked by hand, and no signals are combined.</p>
+  </section>
+
+  <nav class="view-switch trend-jump" aria-label="Sections on this page">
+    <a class="view-link" href="#upcoming">Upcoming &amp; Anticipated</a>
+    <a class="view-link" href="#now">Trending now &amp; recently released</a>
+    <a class="view-link" href="#steam">Steam activity</a>
+  </nav>
+
+  {% if igdb.last_run and igdb.last_run.status in ("failed", "partial") and igdb.last_problem %}
+    <p class="data-note">The last refresh of the cross-platform lists ({{ igdb.last_run.started_at|datetime }}) {{ "failed" if igdb.last_run.status == "failed" else "was partial" }}: {{ igdb.last_problem }} The lists saved before are shown, each with its own update time.</p>
+  {% endif %}
+
+  <section class="trend-section" id="upcoming" aria-labelledby="upcoming-title">
+    <div class="trend-head"><h2 id="upcoming-title">Upcoming &amp; Anticipated</h2>{{ scope_badge("all") }}</div>
+    <p class="trend-scope">Games not out yet on any platform, including games that are not on Steam. Two separate signals, never combined.</p>
+    {% call about_section() %}
+      <p>A game counts as upcoming until its first full release: alpha, beta, early access and advanced access do not end it. Release dates are shown only as precisely as IGDB gives them (a day, a month, a quarter, a year, or to be announced), per platform.</p>
+      <p>The two lists measure different things and are never combined. Open a game for its details and to save it to your Game Librarian wishlist.</p>
+    {% endcall %}
+    {% if upcoming.has_data %}
+      <div class="trend-columns">
+        {% for data in upcoming.lists %}{{ upcoming_column(data) }}{% endfor %}
+      </div>
+      <p class="small muted">Data from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a>. A Steam link appears only when the match is verified. IGDB's date changes are listed for {{ igdb.date_changes_days }} days; a change can be a delay or a correction.</p>
+    {% elif igdb.configured %}
+      <p class="notice-line">The upcoming lists have not been refreshed yet. Run <code>python -m game_librarian upcoming</code> (or <code>sync</code>, which runs it once a day).</p>
+    {% else %}
+      <p class="notice-line">The upcoming lists come from IGDB, which this site cannot reach yet: set <code>IGDB_CLIENT_ID</code> and <code>IGDB_CLIENT_SECRET</code> (a free Twitch application's credentials; see the README), then run <code>python -m game_librarian upcoming</code>.</p>
+    {% endif %}
+  </section>
+
+  <section class="trend-section" id="now" aria-labelledby="now-title">
+    <div class="trend-head"><h2 id="now-title">Trending now &amp; recently released</h2>{{ scope_badge("all") }}</div>
+    <p class="trend-scope">Games out on at least one platform, by two separate signals: interest in new releases on IGDB, and viewing on Twitch. Attention at one moment, not a change over time.</p>
+    {% call about_section() %}
+      <p>Both lists include console-only games and games without a Steam page. The first shows what IGDB.com users want to play among the games first released in the last {{ recent_days }} days; the second, what Twitch viewers watch at the moment Twitch was asked.</p>
+      <p>A game that has just come out moves here from Upcoming &amp; Anticipated with the same signal, so it stays on this page on its release day. “Trending” means attention at one moment, not a change over time.</p>
+    {% endcall %}
+    {% if igdb.configured %}
+      <div class="trend-columns">
+        {{ recent_column(recent) }}
+        {{ twitch_column(twitch_top) }}
+      </div>
+      <p class="small muted">Platforms and release dates from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a>; viewing order from <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>. Neither list is a count of players or a sales figure.</p>
+    {% else %}
+      <p class="notice-line">These lists come from IGDB and Twitch, which this site cannot reach yet: set <code>IGDB_CLIENT_ID</code> and <code>IGDB_CLIENT_SECRET</code> (a free Twitch application's credentials; see the README), then run <code>python -m game_librarian upcoming</code>.</p>
+    {% endif %}
+  </section>
+
+  <div class="trend-group" id="steam">
+    <div class="trend-head trend-group-head"><h2 id="steam-title">Steam activity</h2>{{ scope_badge("steam") }}</div>
+    <p class="trend-scope">
+      Steam alone, for the {{ counts.ready|number }} catalog games with Steam data: players on consoles, in other PC stores or offline are not counted, and nothing here is a sales figure.
+      {% if sync.last_saved %}Data from the sync of {{ sync.last_saved.started_at|datetime }}.{% else %}No sync has saved data yet: run <code>python -m game_librarian sync</code>.{% endif %}
+    </p>
+    {% call about_section() %}
+      <p>These lists measure Steam alone, for the games in the Game Librarian catalog, not all of Steam. Steam counts the players and reviews of its own version only, so no number here is all of a game's players. The platform lines still show every platform IGDB lists.</p>
+      <p>Steam's Top Sellers chart is not collected, and nothing here is a sales figure.</p>
+    {% endcall %}
+
+    <section class="trend-section" id="popular" aria-labelledby="popular-title">
+      <h3 class="section-heading" id="popular-title">Popular on Steam right now</h3>
+      {% set meta %}Source: Steam Web API · {% if popular_times %}snapshots {{ popular_times[0]|datetime }}{% if popular_times[1] != popular_times[0] %} – {{ popular_times[1]|datetime }}{% endif %}{% else %}no player counts saved yet{% endif %}{% endset %}
+      {% call list_intro("Players in game on Steam at each game’s newest snapshot, most first.", meta) %}
+        <div><dt>Signal</dt><dd>Players in game on Steam, most first. Players who play while not connected to Steam are not counted.</dd></div>
+        <div><dt>Time window</dt><dd>One moment per game: the newest player snapshot. Counts rise and fall with the time of day and the day of the week, so this is a snapshot, not a trend.</dd></div>
+        <div><dt>Source</dt><dd>Steam Web API, <code>ISteamUserStats/GetNumberOfCurrentPlayers</code> (documented by Valve), read by each sync.</dd></div>
+        <div><dt>Updated</dt><dd>{% if popular_times %}Snapshots taken {{ popular_times[0]|datetime }}{% if popular_times[1] != popular_times[0] %} – {{ popular_times[1]|datetime }}{% endif %}.{% else %}No player counts saved yet.{% endif %}</dd></div>
+      {% endcall %}
+      {% if popular %}
+        {{ trend_list(popular, "players", "Most players in game on Steam") }}
+        {% if popular_total > size %}<p class="small"><a class="text-link" href="/?view=all&amp;sort=players">All {{ popular_total|number }} games with players on Steam, most first</a></p>{% endif %}
+      {% elif players_status.first %}
+        <p class="notice-line">No catalog game had players in game at its newest snapshot, or Steam reported no count for it.</p>
+      {% else %}
+        <p class="notice-line">Player counts have not been collected yet. They are saved by <code>python -m game_librarian sync</code> (one request per game).</p>
+      {% endif %}
+    </section>
+
+    <section class="trend-section" id="this-year" aria-labelledby="this-year-title">
+      <h3 class="section-heading" id="this-year-title">Released in {{ this_year_window[0].year }} with strong Steam reception</h3>
+      {% set subtitle %}Released on Steam since {{ this_year_window[0]|day }}, rated {{ strong_labels|join(" or ") }}; best reception first.{% endset %}
+      {% set meta %}Source: Steam store and reviews · {% if reviews_status.last %}reviews refreshed up to {{ reviews_status.last|datetime }}{% else %}no review summary saved yet{% endif %}{% endset %}
+      {% call list_intro(subtitle, meta) %}
+        <div><dt>Rule</dt><dd>An exact Steam release date from {{ this_year_window[0]|day }} to today, {{ this_year_window[1]|day }}, and a Steam review summary of {{ strong_labels|join(" or ") }}. Steam dates a game that left Early Access by its full release.</dd></div>
+        <div><dt>Order</dt><dd>Best player reception: games with at least {{ reliable_reviews|number }} Steam reviews first, highest positive share first.</dd></div>
+        <div><dt>Source</dt><dd>Steam store release dates and Steam's review summaries (all languages, Steam purchasers).</dd></div>
+        <div><dt>Updated</dt><dd>{% if reviews_status.last %}Review summaries refreshed up to {{ reviews_status.last|datetime }}.{% else %}No review summary saved yet.{% endif %}</dd></div>
+      {% endcall %}
+      {% if this_year %}
+        {{ trend_list(this_year, "reception", "Well received on Steam, released this year") }}
+        {% if this_year_total > size %}<p class="small muted">Showing {{ size }} of {{ this_year_total }} games.</p>{% endif %}
+      {% else %}
+        <p class="notice-line">No catalog game released in {{ this_year_window[0].year }} meets this rule with the data stored now.</p>
+      {% endif %}
+    </section>
+
+    {# The id stays "four-years" (from when the window was four years), so existing links keep working. #}
+    <section class="trend-section" id="four-years" aria-labelledby="four-years-title">
+      <h3 class="section-heading" id="four-years-title">Released since {{ four_years_window[0].year }} with strong Steam reception</h3>
+      {% set subtitle %}Released on Steam {{ four_years_window[0]|day }} – {{ four_years_window[1]|day }}, rated {{ strong_labels|join(" or ") }}; best reception first.{% endset %}
+      {% set meta %}Source: Steam store and reviews · {% if reviews_status.last %}reviews refreshed up to {{ reviews_status.last|datetime }}{% else %}no review summary saved yet{% endif %}{% endset %}
+      {% call list_intro(subtitle, meta) %}
+        <div><dt>Rule</dt><dd>An exact Steam release date from {{ four_years_window[0]|day }} to today, {{ four_years_window[1]|day }} (the window of the five-year ranking), and a Steam review summary of {{ strong_labels|join(" or ") }}.</dd></div>
+        <div><dt>Order</dt><dd>Best player reception, as above. Production labels play no part.</dd></div>
+        <div><dt>Source</dt><dd>Steam store release dates and Steam's review summaries.</dd></div>
+        <div><dt>Updated</dt><dd>{% if reviews_status.last %}Review summaries refreshed up to {{ reviews_status.last|datetime }}.{% else %}No review summary saved yet.{% endif %}</dd></div>
+      {% endcall %}
+      {% if four_years %}
+        {{ trend_list(four_years, "reception", "Well received on Steam, released since " ~ four_years_window[0].year) }}
+        <p class="small"><a class="text-link" href="{{ four_years_url }}">All {{ four_years_total|number }} {{ "game" if four_years_total == 1 else "games" }} in Discover</a></p>
+      {% else %}
+        <p class="notice-line">No catalog game released since {{ four_years_window[0].year }} meets this rule with the data stored now.</p>
+      {% endif %}
+    </section>
+
+    <section class="trend-section" id="changes" aria-labelledby="changes-title">
+      <h3 class="section-heading" id="changes-title">Recent changes on Steam</h3>
+      {% call list_intro("Rises since a snapshot " ~ change_window_days ~ " to " ~ max_baseline_days ~ " days earlier. Increases only.", "Source: this site’s own Steam snapshots") %}
+        <div><dt>Signal</dt><dd>The difference between a game's newest snapshot and its newest snapshot taken {{ change_window_days }} to {{ max_baseline_days }} days earlier. Only increases are listed.</dd></div>
+        <div><dt>Source</dt><dd>Dated snapshots that this project's own syncs saved: Steam player counts, and Steam review totals (all languages, Steam purchasers).</dd></div>
+        <div><dt>Limits</dt><dd>Two player counts taken at different times of day can differ for that reason alone; each row shows both times. Review totals only grow with new reviews, but Steam can also remove reviews.</dd></div>
+      {% endcall %}
+      <div class="trend-columns">
+        <section aria-labelledby="review-changes-title">
+          <h4 id="review-changes-title">Most new Steam reviews</h4>
+          {% if review_changes %}{{ trend_list(review_changes, "review-change", "Most new Steam reviews") }}
+          {% elif reviews_status.has_window %}<p class="notice-line">No catalog game has two review snapshots {{ change_window_days }} to {{ max_baseline_days }} days apart with new reviews.</p>
+          {% else %}{{ history_note(reviews_status, "review") }}{% endif %}
+        </section>
+        <section aria-labelledby="player-changes-title">
+          <h4 id="player-changes-title">Most added players on Steam</h4>
+          {% if player_changes %}{{ trend_list(player_changes, "player-change", "Most added players on Steam") }}
+          {% elif players_status.has_window %}<p class="notice-line">No catalog game has two player snapshots {{ change_window_days }} to {{ max_baseline_days }} days apart with more players in the newer one.</p>
+          {% else %}{{ history_note(players_status, "player") }}{% endif %}
+        </section>
+      </div>
+    </section>
+  </div>
+</main>
+{% include "_dialog.html" %}
+{% endblock %}

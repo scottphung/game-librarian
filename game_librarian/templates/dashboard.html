@@ -1,23 +1,26 @@
 {% extends "base.html" %}
-{# The frame of the three dashboard pages: heading, page tabs and the data's date. Each page fills the "dashboard" block. #}
+{# The frame of the dashboard pages: heading, page tabs and the data's date. Each page fills the "dashboard" block.
+   Trending games is the first tab and the default page (/dashboard); Player reception moved to /dashboard/reception
+   in 0.10, and web.py redirects the old addresses. #}
 {% block title %}{% block page_title %}{% endblock %} | Dashboard | Game Librarian{% endblock %}
 
 {% block body %}
 <main class="page dashboard" id="main">
   <header class="dashboard-header">
     <h1>Dashboard</h1>
-    <p class="hero-sub">Player reception and award coverage across the catalog, calculated from the data of the last sync.</p>
+    <p class="hero-sub">Trending games compared one by one, plus player reception and awards across the catalog.</p>
   </header>
 
   <nav class="view-switch" aria-label="Dashboard pages">
-    <a class="view-link" href="/dashboard"{% if section == "reception" %} aria-current="page"{% endif %}>Player reception</a>
+    <a class="view-link" href="/dashboard"{% if section == "trending" %} aria-current="page"{% endif %}>Trending games</a>
+    <a class="view-link" href="/dashboard/reception"{% if section == "reception" %} aria-current="page"{% endif %}>Player reception</a>
     <a class="view-link" href="/dashboard/awards"{% if section == "awards" %} aria-current="page"{% endif %}>Awards</a>
     <a class="view-link" href="/dashboard/about"{% if section == "about" %} aria-current="page"{% endif %}>About the data</a>
   </nav>
 
   <p class="dash-meta">
     {% if last_sync %}Data from the Steam sync of {{ last_sync.started_at|datetime }}{% if last_sync.status == "partial" %} (partial){% endif %}.{% else %}No sync has saved data yet: run <code>python -m game_librarian sync</code>.{% endif %}
-    Four-year ranking window: released {{ window.start|day }} – {{ window.end|day }}.
+    {% if section != "trending" %}Five-year ranking window: released {{ window.start|day }} – {{ window.end|day }}.{% endif %}
   </p>
 
   {% block dashboard %}{% endblock %}

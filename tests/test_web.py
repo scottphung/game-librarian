@@ -1,4 +1,4 @@
-"""Web app: catalog cards, the four-year ranking, views, search, filters, sorting, pagination, details, dashboard."""
+"""Web app: catalog cards, the five-year ranking, views, search, filters, sorting, pagination, details, dashboard."""
 
 import csv
 import json
@@ -19,7 +19,7 @@ from game_librarian.sync import SyncOptions, run_sync
 from game_librarian.web import PAGE_SIZE, create_app
 from tests.conftest import review, write_csv
 
-TODAY = date(2026, 11, 9)  # the four-year window is 9 Nov 2022 – 9 Nov 2026
+TODAY = date(2026, 11, 9)  # the five-year window is 1 Jan 2021 – 9 Nov 2026
 AWARD = {
     "organization": "The Game Awards", "year": "2023", "category": "Game of the Year", "result": "winner",
     "award_title": "Game 01", "steam_appid": "101", "steam_mapping": "same", "mapping_note": "",
@@ -34,7 +34,7 @@ GAME_COUNT = 14  # more than one page of PAGE_SIZE cards
 
 
 def make_app(settings):
-    """The web app with a fixed date, so the four-year window never depends on when the tests run."""
+    """The web app with a fixed date, so the five-year window never depends on when the tests run."""
     return create_app(settings, today=lambda: TODAY)
 
 
@@ -49,11 +49,13 @@ def run_test_sync(settings, fake_steam, clock, games, **options):
 
 @pytest.fixture
 def games(settings, fake_steam, clock):
-    """Fourteen synced games, all released 1 Jan 2024 (inside the window). Game n has 100 × n positive reviews.
+    """Fourteen synced games, all released 1 Jan 2024 (inside the window). Game n has 100 × n positive of
+    1,000 + 50 × n reviews, so a higher n has a higher positive share.
 
-    Game 01 is verified AAA and Game 02 verified AA and Indie, so the four-year ranking is
-    Game 01, Game 02, then Game 14 down to Game 03 (Unclassified, most positive reviews first).
-    Odd games are tagged RPG + Action, even games RPG + Indie.
+    Game 01 (verified AAA) won The Game Awards' Game of the Year and Game 02 (verified AA and Indie) was
+    nominated for an independent-game award (for the original release), so the five-year ranking is
+    Game 01, Game 02, then Game 14 down to Game 03 (no award recorded, best Steam reception first;
+    Game 03's award row is not verified). Odd games are tagged RPG + Action, even games RPG + Indie.
     """
     curated_games = []
     for number in range(1, GAME_COUNT + 1):
@@ -171,8 +173,9 @@ def test_the_goty_collection_lists_verified_top_award_wins_with_global_ranks(cli
     assert shown_appids(html) == [101]  # 102 was only nominated, in another category; 103's row is unverified
     assert "<h2>Game of the Year winners</h2>" in html
     assert "Games with a verified win in an organization's top category" in text_of(html)
-    assert "it is not recalculated for this collection" in text_of(html)
-    assert card_rank(html, 101) == "#1 in the four-year ranking"  # the same number as everywhere else
+    assert "A number (#) is the game’s five-year rank among all catalog games, not its place in this collection." \
+        in text_of(html)
+    assert card_rank(html, 101) == "#1 in the five-year ranking"  # the same number as everywhere else
     assert '<input type="hidden" name="view" value="goty">' in html
     assert '<a class="collection-link" href="/?view=goty" aria-current="page">' in html
 
@@ -289,14 +292,14 @@ def test_promoted_games_are_counted_in_the_catalog_status(client, settings):
 
 # appid, name, Steam release-date text, coming soon, positive reviews, verified label
 DATED_GAMES = [
-    (301, "Cutoff Day", "Nov 9, 2022", False, 5_000, None),  # in: exactly the first day of the window
-    (302, "Day Before Cutoff", "Nov 8, 2022", False, 900_000, "AAA"),  # out: one day too old
+    (301, "Cutoff Day", "Jan 1, 2021", False, 5_000, None),  # in: exactly the first day of the window
+    (302, "Day Before Cutoff", "Dec 31, 2020", False, 900_000, "AAA"),  # out: one day too old
     (303, "Released Today", "9 Nov, 2026", False, 3_000, None),  # in: today, in Steam's day-first format
     (304, "Tomorrow", "Nov 10, 2026", False, 1_000, None),  # out: a future date
     (305, "Soon", "Coming soon", True, 0, None),  # out: not released yet
     (306, "Quarter Only", "Q4 2025", False, 2_000, None),  # out: no exact release date
     (307, "Classic", "Apr 18, 2011", False, 800_000, "AA"),  # out: older
-    (308, "Recent AA", "Mar 2, 2025", False, 100, "AA"),  # in: the AA tier beats games with more reviews
+    (308, "Recent AA", "Mar 2, 2025", False, 100, "AA"),  # in: its label does not lift it; under 500 reviews
 ]
 
 
@@ -327,7 +330,7 @@ def card_html(html: str, appid: int) -> str:
 
 
 def card_rank(html: str, appid: int) -> str:
-    """The visible rank line of one card: '#3', '#3 in the four-year ranking', 'Unranked', ..."""
+    """The visible rank line of one card: '#3', '#3 in the five-year ranking', 'Unranked', ..."""
     rank = re.search(r'<p class="card-rank">(.*?)</p>', card_html(html, appid), re.S).group(1)
     return text_of(re.sub(r'<span class="visually-hidden">.*?</span>', "", rank))
 
@@ -369,19 +372,21 @@ def test_header_shows_the_wordmark_discover_and_a_dashboard_link(client):
     assert "Power BI Dashboard" not in html
 
 
-# ---------------------------------------------------------------------- cards and the four-year ranking
+# ---------------------------------------------------------------------- cards and the five-year ranking
 
 
 def test_card_shows_rank_image_title_label_release_tags_summary_reviews_awards_and_steam_link(client):
     card = card_html(client.get("/").text, 101)
     assert card_rank(card, 101) == "#1"
+    assert "Award group: The Game Awards GOTY · 1 win" in text_of(card)  # why it is first
+    assert 'title="Award group: The Game Awards — Game of the Year winner"' in card
     assert 'src="https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/101/library_600x900.jpg?t=1"' in card
     assert 'id="card-title-101">Game 01</h3>' in card
     assert '<li class="label">AAA</li>' in card
     assert '<p class="card-release">Released 1 Jan 2024</p>' in card
     assert "<li>RPG</li>" in card and "<li>Action</li>" in card
     assert "Game 01 is a test game about testing &amp; more." in card  # the first sentence of the short description
-    # The positive count decides the rank; the share (rounded down like Steam) and the total stay visible.
+    # The positive count, the share (rounded down like Steam) and the total are all visible.
     assert "100 positive · 9% of 1,050 Steam reviews" in text_of(card)
     assert "The Game Awards 2023 · Game of the Year · Winner" in text_of(card)
     assert 'href="https://store.steampowered.com/app/101/"' in card and "View on Steam" in card
@@ -389,36 +394,39 @@ def test_card_shows_rank_image_title_label_release_tags_summary_reviews_awards_a
     assert "nofollow" not in card  # the Steam Web API terms forbid nofollow links to Valve
 
 
-def test_labels_are_verified_or_unclassified_and_edition_awards_say_so(client):
+def test_only_verified_labels_show_a_badge_and_edition_awards_say_so(client):
     html = client.get("/?sort=name").text
     both = card_html(html, 102)
     assert '<li class="label">AA</li>' in both and '<li class="label">Indie</li>' in both
     assert "Best Independent Game · Nominee · for the original release" in text_of(both)
     for appid in (103, 104):  # needs_review AAA label and award; rejected Indie label
         card = card_html(html, appid)
-        assert '<li class="label is-unclassified">Unclassified</li>' in card
+        assert "label-list" not in card and "Unclassified" not in card  # no badge without a verified label
         assert "award-list" not in card
 
 
-def test_games_are_ranked_by_tier_then_positive_reviews(client):
+def test_games_are_ranked_by_award_group_then_steam_reception(client):
     html = client.get("/").text
     assert shown_appids(html) == [101, 102, 114, 113, 112, 111, 110, 109, 108, 107, 106, 105]
-    assert card_rank(html, 101) == "#1"  # AAA, although it has the fewest positive reviews (100)
-    assert card_rank(html, 102) == "#2"  # AA (and Indie): the AA tier is next, with 200 positive reviews
-    assert card_rank(html, 114) == "#3"  # the Unclassified game with the most positive reviews (1,400)
+    assert card_rank(html, 101) == "#1"  # Game of the Year at The Game Awards, although only 9% positive
+    assert card_rank(html, 102) == "#2"  # a verified nomination (for the original release), 18% positive
+    assert card_rank(html, 114) == "#3"  # no award recorded: the best positive share (82% of 1,700 reviews)
+    assert "Award group: Nominated, no win (for the original release) · 1 nomination" in text_of(card_html(html, 102))
+    assert "Award group: No award recorded · ranked by Steam reception" in text_of(card_html(html, 114))
     assert "<h2>Top-ranked games</h2>" in html
     assert "Showing 1–12 of 14 games · 14 of 14 games in the window are ranked." in text_of(html)
     second = client.get("/?page=2").text
     assert shown_appids(second) == [104, 103] and card_rank(second, 103) == "#14"
 
 
-def test_search_and_filters_keep_each_games_four_year_rank(client):
+def test_search_and_filters_keep_each_games_five_year_rank(client):
     html = client.get("/", params={"q": "game 07"}).text
     assert shown_appids(html) == [107]
-    assert card_rank(html, 107) == "#10"  # its place in the whole four-year ranking, not #1 of the results
+    assert card_rank(html, 107) == "#10"  # its place in the whole five-year ranking, not #1 of the results
     indie = client.get("/", params=[("tag", "Indie")]).text
     assert [card_rank(indie, appid) for appid in shown_appids(indie)] == ["#2", "#3", "#5", "#7", "#9", "#11", "#13"]
-    assert card_rank(client.get("/", params={"label": "Unclassified"}).text, 114) == "#3"
+    assert card_rank(client.get("/", params={"label": "No verified label"}).text, 114) == "#3"
+    assert card_rank(client.get("/", params={"label": "Unclassified"}).text, 114) == "#3"  # a pre-0.8 link
     assert card_rank(client.get("/", params={"award": "Best Independent Game"}).text, 102) == "#2"
     assert card_rank(client.get("/", params={"sort": "name"}).text, 105) == "#12"  # another order, same rank
 
@@ -426,23 +434,49 @@ def test_search_and_filters_keep_each_games_four_year_rank(client):
 def test_the_window_and_the_ranking_rules_are_explained_on_the_page(client):
     html = client.get("/").text
     scope = text_of(re.search(r'<p class="results-scope">.*?</p>', html, re.S).group(0))
-    assert scope.startswith("Games released 9 Nov 2022 – 9 Nov 2026: the last four years, up to today.")
-    assert "are in All games" in scope and 'href="/?view=all">All games</a>' in html
+    assert scope == ("Games released in the last five full years and this year so far: 1 Jan 2021 – 9 Nov 2026. "
+                     "Ranked by awards and player reception.")
     tip = re.search(r'<details class="info-tip">.*?</details>', html, re.S).group(0)
-    assert 'aria-label="How the ranking works"' in tip
+    # A visible label names the control (the "i" mark is hidden from screen readers), and works without JavaScript.
+    assert re.search(r'<summary><span class="info-icon" aria-hidden="true">i</span>'
+                     r'<span class="info-text">How the ranking works</span></summary>', tip)
+    assert 'href="/?view=all">All games</a>' in tip  # the link the short text no longer carries
+    groups = re.search(r'<ol class="rank-groups">(.*?)</ol>', tip, re.S).group(1)
+    # The groups come from ranking.py; the fixture has verified Game Awards wins and a nomination only.
+    assert [text_of(item) for item in re.findall(r"<li>(.*?)</li>", groups, re.S)] == [
+        "The Game Awards — Game of the Year winner",
+        "BAFTA Games Awards — Best Game winner (no verified results recorded yet)",
+        "D.I.C.E. Awards — Game of the Year winner (no verified results recorded yet)",
+        "Game Developers Choice Awards — Game of the Year winner (no verified results recorded yet)",
+        "The Steam Awards — Game of the Year winner (no verified results recorded yet)",
+        "Other verified award winner (no verified results recorded yet)",
+        "Verified nominations, no win",
+        "No award recorded",
+    ]
     text = text_of(tip)
     for phrase in (
-        "Only games released in the last four years: from 9 Nov 2022 to today, 9 Nov 2026.",
-        "The window moves forward every day.",
-        "Verified AAA games come first, then verified AA games, then Indie and Unclassified games together.",
-        "Within each tier, the game with more positive Steam reviews ranks higher.",
-        "an AAA game can rank above an AA game, and an AA game above an Indie or Unclassified game, "
-        "even when it has fewer positive reviews.",
-        "go to the title A–Z, then the Steam app ID.",
-        "It is a discovery order, not a judgment of quality.",
-        "games released earlier in the window, because they have had more time to collect reviews.",
-        "Production labels and awards come from this project’s hand-curated data",
-        "Awards are not part of the rank.",
+        "Only games released from 1 Jan 2021 to today, 9 Nov 2026: the five full years before 2026, plus 2026 so far.",
+        "Older games, games not released yet and games without an exact release date on Steam are not ranked; you "
+        "find them under All games.",
+        "The window moves forward every 1 January.",
+        "A game’s highest-priority verified award result puts it in one of these groups. Every game in a group "
+        "ranks above every game in a later group, whatever its reviews",
+        "Within a group, more distinct verified wins rank higher; with equal wins, more distinct verified "
+        "nominations. A nomination never counts as a win, and a result recorded twice counts once.",
+        "each card names its group and counts; its first listed award is the one that sets the group.",
+        "Steam reception breaks the remaining ties, as in Best player reception: games with at least 500 Steam "
+        "reviews first, highest positive share first, then more reviews; then games with fewer reviews, in the "
+        "same order; then games without a usable review summary.",
+        "Last come the title A–Z and the Steam app ID, so every rank is distinct.",
+        "Missing, zero or inconsistent review counts are never read as zero reviews or 0% positive.",
+        "A game with a verified award keeps its award-based place without them",
+        "A game with no award recorded and no usable review summary is Unranked: it has no number and is listed "
+        "after the ranked games.",
+        "This is Game Librarian’s editorial discovery ranking, not an objective measure of game quality.",
+        "Award coverage is incomplete: the curated data covers selected organizations, categories and years, so "
+        "“No award recorded” does not mean a game has never received an award.",
+        "counts for the edition Steam sells and is marked “for the original release”.",
+        "Production labels (AAA, AA, Indie) do not affect the rank",
         "Searching and filtering never change a game’s rank, and neither do the other sort orders or the "
         "collections: a number is always the game’s place among all catalog games in the window.",
         "Best player reception lists games with at least 500 Steam reviews first, highest positive share first, "
@@ -451,7 +485,8 @@ def test_the_window_and_the_ranking_rules_are_explained_on_the_page(client):
         "date follow A–Z.",
     ):
         assert phrase in text, phrase
-    assert "adjusted score" not in html.lower() and "500 ×" not in html  # the old formula is gone
+    assert "tier" not in text.lower() and "Awards are not part of the rank" not in text  # the old rules are gone
+    assert "adjusted score" not in html.lower() and "500 ×" not in html  # so is the older formula
 
 
 def test_games_without_a_usable_review_summary_are_unranked_and_listed_last(settings, fake_steam, clock):
@@ -473,27 +508,29 @@ def test_games_without_a_usable_review_summary_are_unranked_and_listed_last(sett
     assert "2 of 4 games in the window are ranked" in text_of(html)
 
 
-# ---------------------------------------------------------------------- the four-year window and All games
+# ---------------------------------------------------------------------- the five-year window and All games
 
 
 def test_top_ranked_view_shows_only_games_released_in_the_window(dated):
     html = dated.get("/").text
-    assert shown_appids(html) == [308, 301, 303]  # on the cutoff day, today, and the AA game first
-    assert [card_rank(html, appid) for appid in (308, 301, 303)] == ["#1", "#2", "#3"]
+    # On the cutoff day (98% of 5,100 reviews), today (97% of 3,100), then the AA game: its label does not lift
+    # it, and with 200 reviews it follows the games with at least 500.
+    assert shown_appids(html) == [301, 303, 308]
+    assert [card_rank(html, appid) for appid in (301, 303, 308)] == ["#1", "#2", "#3"]
     assert "Showing 1–3 of 3 games · 3 of 3 games in the window are ranked." in text_of(html)
-    assert "Released 9 Nov 2022" in card_html(html, 301) and "Released 9 Nov 2026" in card_html(html, 303)
+    assert "Released 1 Jan 2021" in card_html(html, 301) and "Released 9 Nov 2026" in card_html(html, 303)
 
 
 def test_all_games_view_lists_older_and_undated_games_without_a_number(dated):
     html = dated.get("/", params={"view": "all"}).text
     assert "<h2>All games</h2>" in html
     assert shown_appids(html) == [307, 301, 302, 306, 308, 303, 305, 304]  # A–Z: no ranking order is implied
-    assert card_rank(html, 308) == "#1 in the four-year ranking"
+    assert card_rank(html, 301) == "#1 in the five-year ranking" and card_rank(html, 308) == "#3 in the five-year ranking"
     for appid in (302, 304, 305, 306, 307):
-        assert card_rank(html, appid) == "Not in the four-year ranking"
-    assert ("A number (#) is a game’s place in the four-year ranking of games released 9 Nov 2022 – 9 Nov 2026; "
-            "other games have no number.") in text_of(html)
-    assert "Showing 1–8 of 8 games · 3 of 8 catalog games are in the four-year ranking." in text_of(html)
+        assert card_rank(html, appid) == "Not in the five-year ranking"
+    assert ("A number (#) is a five-year rank (released 1 Jan 2021 – 9 Nov 2026); other games have none."
+            in text_of(html))
+    assert "Showing 1–8 of 8 games · 3 of 8 catalog games are in the five-year ranking." in text_of(html)
     assert "Released 18 Apr 2011" in card_html(html, 307)
     assert "Release: Coming soon" in card_html(html, 305) and "Released Q4 2025" in card_html(html, 306)
     assert "Release: 10 Nov 2026" in card_html(html, 304)  # a date after today is not "Released"
@@ -502,49 +539,50 @@ def test_all_games_view_lists_older_and_undated_games_without_a_number(dated):
 
 def test_all_games_sorted_by_rank_lists_ranked_games_first_then_the_rest_a_to_z(dated):
     html = dated.get("/", params={"view": "all", "sort": "rank"}).text
-    assert shown_appids(html) == [308, 301, 303, 307, 302, 306, 305, 304]
+    assert shown_appids(html) == [301, 303, 308, 307, 302, 306, 305, 304]  # 307 won an award, but in 2011
     assert "Ranked games come first; the others follow A–Z." in text_of(html)
 
 
-def test_details_say_why_a_game_is_outside_the_four_year_ranking(dated):
+def test_details_say_why_a_game_is_outside_the_five_year_ranking(dated):
     reasons = {
-        302: "Released before the four-year window.",
+        302: "Released before the five-year window.",
         304: "Its release date is after today.",
         305: "Not released yet: Steam lists it as coming soon.",
         306: "Steam gives no exact release date (“Q4 2025”).",
     }
     for appid, reason in reasons.items():
         panel = text_of(dated.get(f"/games/{appid}/panel").text)
-        assert f"Not in the four-year ranking · {reason}" in panel, appid
-    assert "Four-year rank #1 · AA tier" in text_of(dated.get("/games/308/panel").text)
+        assert f"Not in the five-year ranking · {reason}" in panel, appid
+    assert "Five-year rank #3 · No award recorded · ranked by Steam reception" in text_of(
+        dated.get("/games/308/panel").text)
     assert '<a href="/?tag=RPG&amp;view=all"' in dated.get("/games/307/panel").text  # the tag list includes this game
 
 
 def test_search_and_filters_point_to_matching_games_outside_the_window(dated):
     html = dated.get("/", params={"q": "classic"}).text
     assert shown_appids(html) == []
-    assert "No games match “classic” with the selected filters in the four-year ranking." in text_of(html)
+    assert "No games match “classic” with the selected filters in the five-year ranking." in text_of(html)
     assert 'href="/?q=classic&amp;view=all">Show 1 matching game in All games</a>' in html
     found = dated.get("/", params={"q": "classic", "view": "all"}).text
-    assert shown_appids(found) == [307] and card_rank(found, 307) == "Not in the four-year ranking"
+    assert shown_appids(found) == [307] and card_rank(found, 307) == "Not in the five-year ranking"
     assert shown_appids(dated.get("/", params={"award": "any", "view": "all"}).text) == [307]
     recent = dated.get("/", params={"q": "cutoff"}).text  # "Cutoff Day" is in the window, "Day Before Cutoff" is not
     assert shown_appids(recent) == [301]
-    assert 'href="/?q=cutoff&amp;view=all">1 more matching game is outside the four-year ranking</a>' in recent
+    assert 'href="/?q=cutoff&amp;view=all">1 more matching game is outside the five-year ranking</a>' in recent
 
 
 def test_a_catalog_without_recent_games_points_to_all_games(settings, fake_steam, clock):
     fake_steam.add_game(700, "Old Game", release_date={"coming_soon": False, "date": "Apr 18, 2011"})
     run_test_sync(settings, fake_steam, clock, [CuratedGame(700, "Old Game", "")])
     html = TestClient(make_app(settings)).get("/").text
-    assert "No games in the four-year window" in html and 'href="/?view=all">Show all games</a>' in html
+    assert "No games in the five-year window" in html and 'href="/?view=all">Show all games</a>' in html
 
 
 def test_view_tabs_keep_the_search_and_filters_and_count_their_games(dated):
     html = dated.get("/", params={"q": "cutoff"}).text
     tabs = view_switch(html)
     assert 'href="/?q=cutoff" aria-current="page"' in tabs and 'href="/?q=cutoff&amp;view=all"' in tabs
-    assert text_of(tabs) == "Top-ranked · last four years 1 game All games 2 games"
+    assert text_of(tabs) == "Top-ranked · since 2021 1 game All games 2 games"
 
 
 def test_switching_views_keeps_only_a_deliberately_chosen_sort(client):
@@ -563,7 +601,7 @@ def test_all_games_view_keeps_its_view_in_pagination_forms_and_details(client):
     assert '<input type="hidden" name="view" value="all">' in html
     assert 'href="/?view=all&amp;page=2" rel="next"' in html
     second = client.get("/?view=all&page=2").text
-    assert shown_appids(second) == [113, 114] and card_rank(second, 113) == "#4 in the four-year ranking"
+    assert shown_appids(second) == [113, 114] and card_rank(second, 113) == "#4 in the five-year ranking"
     assert 'href="/games/113?view=all&amp;page=2"' in second
     back = client.get("/games/113?view=all&page=2").text
     assert '<a class="text-link" href="/?view=all&amp;page=2#game-113">← Back to results</a>' in back
@@ -587,12 +625,17 @@ def test_tag_filters_require_every_selected_tag_and_count_current_results(client
     assert 'value="Action"' not in html  # no game in these results has the Action tag
 
 
-def test_label_filter_matches_any_selected_label_including_unclassified(client):
+def test_label_filter_matches_any_selected_label_including_no_verified_label(client):
     indie = client.get("/", params={"label": "Indie"}).text
     assert shown_appids(indie) == [102]
-    mixed = client.get("/", params=[("label", "AAA"), ("label", "Unclassified")]).text
+    mixed = client.get("/", params=[("label", "AAA"), ("label", "No verified label")]).text
     assert 102 not in shown_appids(mixed) and shown_appids(mixed)[0] == 101
-    assert re.search(r'<span class="option-name">Unclassified</span>\s*<span class="option-count">12</span>', mixed)
+    assert re.search(r'<span class="option-name">No verified label</span>\s*<span class="option-count">12</span>', mixed)
+    assert 'name="label" value="No verified label" checked' in mixed and "Unclassified" not in mixed
+    # "Unclassified" was the choice's name before 0.8: an older link still selects it and shows the same games.
+    legacy = client.get("/", params=[("label", "AAA"), ("label", "Unclassified")]).text
+    assert shown_appids(legacy) == shown_appids(mixed)
+    assert 'name="label" value="No verified label" checked' in legacy and "label=No+verified+label" in legacy
     assert client.get("/", params={"label": "Platinum"}).text.count('<article class="card"') == PAGE_SIZE  # ignored
 
 
@@ -601,8 +644,8 @@ def test_filter_counts_follow_the_view(dated):
         return re.search(rf'<span class="option-name">{name}</span>\s*<span class="option-count">(\d+)</span>', html).group(1)
 
     top, everything = dated.get("/").text, dated.get("/", params={"view": "all"}).text
-    assert (count(top, "AA"), count(top, "AAA"), count(top, "Unclassified")) == ("1", "0", "2")
-    assert (count(everything, "AA"), count(everything, "AAA"), count(everything, "Unclassified")) == ("2", "1", "5")
+    assert (count(top, "AA"), count(top, "AAA"), count(top, "No verified label")) == ("1", "0", "2")
+    assert (count(everything, "AA"), count(everything, "AAA"), count(everything, "No verified label")) == ("2", "1", "5")
     assert ">Any listed award (0)</option>" in top and ">Any listed award (1)</option>" in everything
 
 
@@ -621,14 +664,14 @@ def test_sort_options_reorder_the_results(client):
     assert shown_appids(client.get("/", params={"sort": "most-positive"}).text)[0] == 114  # 1,400 positive reviews
     assert shown_appids(client.get("/", params={"sort": "reception"}).text)[0] == 114  # 82% of 1,700
     assert '<option value="name" selected>Name (A–Z)</option>' in client.get("/?sort=name").text
-    assert '<option value="rank" selected>Production tier, then positive reviews</option>' in client.get("/").text
+    assert '<option value="rank" selected>Five-year rank (awards, then reception)</option>' in client.get("/").text
     for key in ("most-positive", "reception", "newest"):
         assert f'<option value="{key}"' in client.get("/").text
     assert shown_appids(client.get("/", params={"sort": "bogus"}).text)[0] == 101  # falls back to rank
 
 
 def test_pagination_keeps_search_filters_and_sort(client):
-    params = [("q", "game"), ("tag", "RPG"), ("label", "Unclassified"), ("sort", "name")]
+    params = [("q", "game"), ("tag", "RPG"), ("label", "No verified label"), ("sort", "name")]
     single = client.get("/", params=params).text
     assert "Showing 1–12 of 12 games" in single and 'rel="next"' not in single  # one page: no pagination
     paged = client.get("/", params=[("q", "game"), ("tag", "RPG"), ("sort", "name")]).text
@@ -669,7 +712,7 @@ def test_details_panel_shows_everything_about_one_game(client):
     assert response.status_code == 200
     html = response.text
     assert 'id="dialog-heading" tabindex="-1">Game 01</h2>' in html
-    assert "Four-year rank #1 · AAA tier" in text_of(html)
+    assert "Five-year rank #1 · The Game Awards — Game of the Year winner · 1 win" in text_of(html)
     assert re.search(r'<a class="label" href="https://example.invalid/budget"[^>]*>AAA', html)
     assert '<a href="/?tag=RPG"' in html and '<a href="/?tag=Action"' in html
     assert "<dt>Developer</dt><dd>Test Studio</dd>" in html and "<dd>1 Jan 2024</dd>" in html
@@ -739,40 +782,41 @@ def kpis(html: str) -> dict[str, str]:
 
 
 def ranking_titles(html: str) -> list[tuple[str, str]]:
-    """(rank, game) for each row of the dashboard's four-year ranking table."""
+    """(rank, game) for each row of the dashboard's five-year ranking table."""
     return re.findall(r'<tr><td class="num">(\d+)</td><td><a class="text-link" href="/games/\d+">([^<]+)</a>', html)
 
 
 def test_dashboard_shows_player_reception_as_html_without_power_bi(client):
-    html = client.get("/dashboard").text
+    html = client.get("/dashboard/reception").text
     assert "<title>Player reception | Dashboard | Game Librarian</title>" in html
-    assert re.search(r'href="/dashboard" aria-current="page">Player reception</a>', html)
+    assert re.search(r'href="/dashboard/reception" aria-current="page">Player reception</a>', html)
     assert "<iframe" not in html and "GAME_LIBRARIAN_DASHBOARD_URL" not in html
     assert "14 of 14 catalog games in total." in html
+    assert "Five-year ranking window: released 1 Jan 2021 – 9 Nov 2026." in text_of(html)
     # 14 games: 10,500 positive of 19,250 reviews pooled (Game n: 100 × n positive of 1,000 + 50 × n).
     assert kpis(html) == {"Games with review data": "14", "Total Steam reviews": "19.2K",
                           "Review-weighted positive rate": "54.5%", "Average game positive rate": "51.3%"}
     assert html.count('class="dot"') == 14
-    assert 'title="Game 14: 1,700 reviews, 82% positive, #3 in the four-year ranking"' in html
+    assert 'title="Game 14: 1,700 reviews, 82% positive, #3 in the five-year ranking"' in html
     expected = [("1", "Game 01"), ("2", "Game 02")] + [(str(rank), f"Game {17 - rank:02d}") for rank in range(3, 15)]
-    assert ranking_titles(html) == expected  # AAA, AA, then the most positive reviews
+    assert ranking_titles(html) == expected  # the winner, the nominee, then the best Steam reception
     bands = dict(re.findall(r'<dt>([^<]+)</dt>\s*<dd class="bar-line">.*?<span class="bar-value">(\d+)</span>', html, re.S))
     assert bands == {"95–100%": "0", "90–94%": "0", "80–89%": "1", "70–79%": "3", "Below 70%": "10",
                      "No usable review data": "0"}
     labels = re.findall(r'<dt>([^<]+?) <span class="muted">· (\d+) games?</span></dt>', html)
-    assert labels == [("AAA", "1"), ("AA + Indie", "1"), ("Unclassified", "12")]
+    assert labels == [("AAA", "1"), ("AA + Indie", "1"), ("No verified label", "12")]
 
 
 def test_dashboard_filters_keep_ranks_and_ignore_unknown_values(client):
-    html = client.get("/dashboard?tag=Indie").text  # the even games
+    html = client.get("/dashboard/reception?tag=Indie").text  # the even games
     assert "7 of 14 catalog games match the filters." in html
     assert '<option value="Indie" selected>Indie (7)</option>' in html
     assert ranking_titles(html) == [("2", "Game 02"), ("3", "Game 14"), ("5", "Game 12"), ("7", "Game 10"),
                                     ("9", "Game 08"), ("11", "Game 06"), ("13", "Game 04")]
-    assert '<a class="text-link" href="/dashboard">Clear filters</a>' in html
-    assert ranking_titles(client.get("/dashboard?label=AAA").text) == [("1", "Game 01")]
-    assert ranking_titles(client.get("/dashboard?award_status=Nominee").text) == [("2", "Game 02")]
-    unknown = client.get("/dashboard?tag=Nope&label=Legendary&award_status=Champion").text
+    assert '<a class="text-link" href="/dashboard/reception">Clear filters</a>' in html
+    assert ranking_titles(client.get("/dashboard/reception?label=AAA").text) == [("1", "Game 01")]
+    assert ranking_titles(client.get("/dashboard/reception?award_status=Nominee").text) == [("2", "Game 02")]
+    unknown = client.get("/dashboard/reception?tag=Nope&label=Legendary&award_status=Champion").text
     assert "14 of 14 catalog games in total." in unknown and "Clear filters" not in unknown
 
 
@@ -801,7 +845,10 @@ def test_dashboard_awards_page_lists_verified_entries_with_their_sources(client)
 def test_dashboard_about_page_describes_the_loaded_data(client):
     html = unescape(client.get("/dashboard/about").text)
     assert "<title>About the data | Dashboard | Game Librarian</title>" in html
-    assert "It covers the 14 catalog games (14 hand-picked, 0 promoted from reviewed candidates)" in html
+    assert "They cover the 14 catalog games (14 hand-picked, 0 promoted from reviewed candidates)" in html
+    assert "it is on the website only, not in the Power BI report" in html  # Trending games is not in Power BI
+    assert ("The website ranks the five full years before 2026 plus 2026 so far. The Power BI report keeps its own "
+            "window, the four years up to the export day, so its ranks can differ.") in html
     assert "<dt>Award rows left out (not verified)</dt><dd>1</dd>" in html
     coverage = re.findall(r"<tr><td>([^<]+)</td><td>([^<]+)</td><td class=\"num\">(\d+)</td><td class=\"num\">(\d+)</td></tr>", html)
     assert coverage == [("The Game Awards · Best Independent Game", "2024", "1", "0"),
@@ -819,7 +866,7 @@ def test_dashboard_numbers_match_the_power_bi_export(client, settings, tmp_path)
     total = sum(int(row["total_reviews"]) for row in games)
     average = sum(float(row["positive_share"]) for row in games) / len(games)
     in_catalog = sum(row["catalog_status"] == "In catalog" for row in awards)
-    assert kpis(client.get("/dashboard").text) == {
+    assert kpis(client.get("/dashboard/reception").text) == {
         "Games with review data": str(len(games)), "Total Steam reviews": compact_number(total),
         "Review-weighted positive rate": format_rate(positive / total), "Average game positive rate": format_rate(average)}
     assert kpis(client.get("/dashboard/awards").text) == {
@@ -831,7 +878,7 @@ def test_dashboard_numbers_match_the_power_bi_export(client, settings, tmp_path)
 
 def test_dashboard_pages_explain_an_empty_catalog(settings):
     app = TestClient(make_app(settings))
-    reception = app.get("/dashboard").text
+    reception = app.get("/dashboard/reception").text
     assert "No sync has saved data yet" in reception and "0 of 0 catalog games in total." in reception
     assert kpis(reception)["Review-weighted positive rate"] == "No data"
     assert "No game with review data matches the filters." in reception and "No ranked game matches" in reception
@@ -849,16 +896,16 @@ def test_pages_render_without_any_network_access(client, monkeypatch):
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", refuse)
     monkeypatch.setattr(SteamClient, "get_json", refuse)
     for url in ("/", "/?q=game&tag=RPG&page=2", "/?view=all&sort=rank", "/games/101/panel", "/games/101", "/dashboard",
-                "/dashboard?tag=RPG", "/dashboard/awards?year=2023", "/dashboard/about"):
+                "/dashboard/reception", "/dashboard?tag=RPG", "/dashboard/awards?year=2023", "/dashboard/about"):
         assert client.get(url).status_code == 200, url
 
 
 def test_the_window_follows_the_date_each_request_is_served(settings, games):
-    days = iter([date(2026, 11, 9), date(2028, 1, 2)])  # 1 Jan 2024 leaves the window on 2 Jan 2028
+    days = iter([date(2029, 12, 31), date(2030, 1, 1)])  # 1 Jan 2024 leaves the window on 1 Jan 2030
     app = TestClient(create_app(settings, today=lambda: next(days)))
     assert len(shown_appids(app.get("/").text)) == PAGE_SIZE
     later = app.get("/").text
-    assert shown_appids(later) == [] and "2 Jan 2024 – 2 Jan 2028" in later
+    assert shown_appids(later) == [] and "1 Jan 2025 – 1 Jan 2030" in later
 
 
 def test_failed_sync_is_reported_while_saved_data_is_still_shown(client, settings, fake_steam, clock, games):
@@ -879,7 +926,7 @@ def test_game_text_is_escaped(settings, fake_steam, clock):
     fake_steam.add_game(500, "<script>alert(1)</script> Quest")
     run_test_sync(settings, fake_steam, clock, [CuratedGame(500, "Script Quest", "")])
     app = TestClient(make_app(settings))
-    for url in ("/", "/games/500/panel", "/dashboard"):  # the dashboard shows the name in a dot's title and a table
+    for url in ("/", "/games/500/panel", "/dashboard/reception"):  # a dot's title and a table show the name
         html = app.get(url).text
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt; Quest" in html
@@ -892,4 +939,5 @@ def test_reviews_unavailable_states_are_explained(settings, fake_steam, clock):
     assert "No Steam reviews yet" in card_html(app.get("/").text, 600)
     panel = app.get("/games/600/panel").text
     assert "No Steam user reviews yet." in panel and '<li class="excerpt">' not in panel
-    assert "<strong>Unranked</strong> · This game has no Steam reviews yet." in panel
+    assert ("<strong>Unranked</strong> · No award recorded and no usable Steam review summary. "
+            "This game has no Steam reviews yet.") in panel

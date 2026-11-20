@@ -105,18 +105,26 @@ def test_games_carry_the_four_year_rank_reception_labels_and_award_status(export
     games = {row["appid"]: row for row in read(out_dir / "games.csv")}
     quest, other, quiet = games["10"], games["20"], games["30"]
     assert (quest["four_year_rank"], quest["rank_status"], quest["rank_note"]) == ("1", "Ranked", "")
-    assert (quest["ranking_tier"], quest["ranking_tier_name"], quest["in_four_year_window"]) == ("2", "AA", "true")
-    assert (quest["positive_reviews"], quest["total_reviews"]) == ("900", "1000")  # the rank's sort key, and the total
+    # The ranking tier is the award group (1-8): The Game Awards' Game of the Year, won by this Steam app itself.
+    assert (quest["ranking_tier"], quest["ranking_tier_name"], quest["ranking_tier_original_release"]) == (
+        "1", "The Game Awards — Game of the Year winner", "false")
+    assert quest["in_four_year_window"] == "true"
+    assert (quest["positive_reviews"], quest["total_reviews"]) == ("900", "1000")
     assert (quest["positive_share"], quest["steam_percent_positive"], quest["positive_band"]) == ("0.900000", "90", "90–94%")
     assert quest["production_label"] == "AA + Indie" and quest["award_status"] == "Winner"
-    assert (quest["award_entries"], quest["award_wins"]) == ("2", "1")
+    assert (quest["award_entries"], quest["award_wins"], quest["award_nominations"]) == ("2", "1", "1")
     assert (quest["release_date"], quest["release_date_exact"], quest["release_year"]) == ("1 Jan, 2024", "2024-01-01", "2024")
-    assert other["award_status"] == "Nominee" and other["production_label"] == "Unclassified"
-    assert (other["four_year_rank"], other["in_four_year_window"], other["ranking_tier_name"]) == ("", "false", "Indie and Unclassified")
+    assert other["award_status"] == "Nominee" and other["production_label"] == "No verified label"
+    assert (other["four_year_rank"], other["in_four_year_window"]) == ("", "false")
+    # Its only award is a nomination that went to the original release of the edition Steam sells.
+    assert (other["ranking_tier"], other["ranking_tier_name"], other["ranking_tier_original_release"]) == (
+        "7", "Verified nominations, no win", "true")
     assert (other["rank_status"], other["rank_note"]) == ("Not in the four-year ranking", "Released before the four-year window.")
     assert other["positive_reviews"] == "30"  # review data stays in the export for every game
     assert (quiet["four_year_rank"], quiet["rank_status"], quiet["in_four_year_window"]) == ("", "Unranked", "true")
-    assert quiet["has_review_data"] == "false" and quiet["total_reviews"] == "" and quiet["rank_note"]
+    assert (quiet["ranking_tier"], quiet["ranking_tier_name"]) == ("8", "No award recorded")
+    assert quiet["has_review_data"] == "false" and quiet["total_reviews"] == ""
+    assert quiet["rank_note"] == "No award recorded and no usable Steam review summary. This game has no Steam reviews yet."
     assert quest["reviews_updated_at"] == "2026-11-09 12:00:00"
     assert "adjusted_score" not in quest and "catalog_rank" not in quest
 
@@ -157,6 +165,7 @@ def test_sources_and_awards_from_several_organizations_never_double_count_a_game
     assert len(read(out_dir / "games.csv")) == 3  # one row per game, however many awards
     quest = games["10"]
     assert (quest["award_entries"], quest["award_wins"], quest["top_award_wins"]) == ("4", "3", "2")
+    assert (quest["award_nominations"], quest["ranking_tier"]) == ("1", "1")
     assert (quest["catalog_source"], games["30"]["catalog_source"]) == ("Hand-picked", "Promoted candidate")
     assert sum(int(row["total_reviews"] or 0) for row in games.values()) == 1100  # unchanged by the extra awards
     awards = read(out_dir / "awards.csv")

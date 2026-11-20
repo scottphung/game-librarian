@@ -1,0 +1,160 @@
+{
+  "slug": "grand-theft-auto",
+  "title": "Grand Theft Auto",
+  "summary": "Grand Theft Auto from 1997 to 2026: when each main game, expansion and other game was first released, on which platforms, and how long players waited between main games.",
+  "checked_on": "2026-11-19",
+  "checked_by": "Claude (AI assistant)",
+  "includes": [
+    "The eight main games that Wikipedia's Grand Theft Auto navigation template lists, from Grand Theft Auto (1997) to Grand Theft Auto VI (2026).",
+    "The expansions listed there (London 1969, The Lost and Damned, The Ballad of Gay Tony), plus London 1961, a free expansion described in the London 1969 article.",
+    "The template's other games: four games first released on handhelds, and The Trilogy – The Definitive Edition, a remaster of three main games.",
+    "Grand Theft Auto Online, which the template lists with Grand Theft Auto V."
+  ],
+  "excludes": [
+    "Later ports and re-releases. Each game appears once, at its first release, with the platforms of that first release only.",
+    "Other compilations, such as Grand Theft Auto: Director's Cut.",
+    "Updates to Grand Theft Auto Online.",
+    "Sales, revenue, critic scores and player counts. This story covers release history only."
+  ],
+  "notes": [
+    "Grand Theft Auto VI was released on the day these facts were checked, and its Wikipedia article was being edited that day. Its date and platforms match the article revision linked below."
+  ],
+  "series_sources": [
+    {"title": "Template:Grand Theft Auto", "revision": 1386496386, "revision_time": "2026-11-18T21:49:40Z", "used_for": "Which games are main games, expansions and other games."},
+    {"title": "Grand Theft Auto", "revision": 1386555743, "revision_time": "2026-11-19T04:02:53Z", "used_for": "The series overview."}
+  ],
+  "entries": [
+    {
+      "title": "Grand Theft Auto", "role": "main", "of": [], "status": "released",
+      "first_release": "1997-11-28", "first_release_region": "Europe", "platforms": ["MS-DOS", "Windows"],
+      "note": "North America followed in March 1998; PlayStation and Game Boy Color versions came later.",
+      "source": {"title": "Grand Theft Auto (video game)", "revision": 1386547200, "revision_time": "2026-11-19T03:08:28Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 980, "image_id": "co2lb0", "igdb_url": "https://www.igdb.com/games/grand-theft-auto", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: London 1969", "role": "expansion", "of": ["Grand Theft Auto"], "status": "released",
+      "first_release": "1999-04-30", "first_release_region": "", "platforms": ["MS-DOS", "Windows", "PlayStation"],
+      "note": "A mission pack for the first game, released for PC and PlayStation on the same day.",
+      "source": {"title": "Grand Theft Auto: London 1969", "revision": 1386546383, "revision_time": "2026-11-19T03:03:58Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 8235, "image_id": "co2lb1", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-london-1969", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: London 1961", "role": "expansion", "of": ["Grand Theft Auto: London 1969"], "status": "released",
+      "first_release": "1999-07-01", "first_release_region": "", "platforms": ["PC"],
+      "note": "A free download for PC, released through the website of Grand Theft Auto 2.",
+      "source": {"title": "Grand Theft Auto: London 1969", "revision": 1386546383, "revision_time": "2026-11-19T03:03:58Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 13233, "image_id": "co7hon", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-london-1961", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto 2", "role": "main", "of": [], "status": "released",
+      "first_release": "1999-10-22", "first_release_region": "", "platforms": ["PlayStation", "Windows"],
+      "note": "Dreamcast and Game Boy Color versions followed in 2000.",
+      "source": {"title": "Grand Theft Auto 2", "revision": 1386546407, "revision_time": "2026-11-19T03:04:04Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 819, "image_id": "co2lb2", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-2", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto III", "role": "main", "of": [], "status": "released",
+      "first_release": "2001-10-23", "first_release_region": "North America", "platforms": ["PlayStation 2"],
+      "note": "Windows (2002) and Xbox (2003) versions followed.",
+      "source": {"title": "Grand Theft Auto III", "revision": 1386546432, "revision_time": "2026-11-19T03:04:10Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 730, "image_id": "co2lb8", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-iii", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: Vice City", "role": "main", "of": [], "status": "released",
+      "first_release": "2002-10-29", "first_release_region": "North America", "platforms": ["PlayStation 2"],
+      "note": "",
+      "source": {"title": "Grand Theft Auto: Vice City", "revision": 1386546388, "revision_time": "2026-11-19T03:03:58Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 733, "image_id": "co2lbb", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-vice-city", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto Advance", "role": "other", "of": [], "status": "released",
+      "first_release": "2004-10-26", "first_release_region": "North America", "platforms": ["Game Boy Advance"],
+      "note": "Released in North America on the same day as San Andreas.",
+      "source": {"title": "Grand Theft Auto Advance", "revision": 1386356751, "revision_time": "2026-11-18T02:52:48Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3266, "image_id": "co2lbf", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-advance", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: San Andreas", "role": "main", "of": [], "status": "released",
+      "first_release": "2004-10-26", "first_release_region": "North America", "platforms": ["PlayStation 2"],
+      "note": "",
+      "source": {"title": "Grand Theft Auto: San Andreas", "revision": 1386546532, "revision_time": "2026-11-19T03:04:44Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 732, "image_id": "co2lb9", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-san-andreas", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: Liberty City Stories", "role": "other", "of": [], "status": "released",
+      "first_release": "2005-10-25", "first_release_region": "North America", "platforms": ["PlayStation Portable"],
+      "note": "A PlayStation 2 version followed in 2006.",
+      "source": {"title": "Grand Theft Auto: Liberty City Stories", "revision": 1386548232, "revision_time": "2026-11-19T03:13:46Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3263, "image_id": "co2lbg", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-liberty-city-stories", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: Vice City Stories", "role": "other", "of": [], "status": "released",
+      "first_release": "2006-10-31", "first_release_region": "North America", "platforms": ["PlayStation Portable"],
+      "note": "A PlayStation 2 version followed in 2007.",
+      "source": {"title": "Grand Theft Auto: Vice City Stories", "revision": 1386548052, "revision_time": "2026-11-19T03:12:47Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3262, "image_id": "co2lc8", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-vice-city-stories", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto IV", "role": "main", "of": [], "status": "released",
+      "first_release": "2008-04-29", "first_release_region": "Worldwide", "platforms": ["PlayStation 3", "Xbox 360"],
+      "note": "Windows followed in December 2008.",
+      "source": {"title": "Grand Theft Auto IV", "revision": 1386547884, "revision_time": "2026-11-19T03:11:49Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 731, "image_id": "co2lbv", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-iv", "checked_on": "2026-11-19"},
+      "catalog_appid": 12210,
+      "catalog_note": "On Steam as Grand Theft Auto IV: The Complete Edition, which bundles the game with its two episodes."
+    },
+    {
+      "title": "Grand Theft Auto IV: The Lost and Damned", "role": "expansion", "of": ["Grand Theft Auto IV"], "status": "released",
+      "first_release": "2009-02-17", "first_release_region": "Worldwide", "platforms": ["Xbox 360"],
+      "note": "PlayStation 3 and Windows versions followed in April 2010.",
+      "source": {"title": "Grand Theft Auto IV: The Lost and Damned", "revision": 1383145649, "revision_time": "2026-11-01T05:52:45Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3265, "image_id": "co1th2", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-iv-the-lost-and-damned", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: Chinatown Wars", "role": "other", "of": [], "status": "released",
+      "first_release": "2009-03-17", "first_release_region": "North America", "platforms": ["Nintendo DS"],
+      "note": "Later released for PlayStation Portable and mobile devices.",
+      "source": {"title": "Grand Theft Auto: Chinatown Wars", "revision": 1386548228, "revision_time": "2026-11-19T03:13:44Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3270, "image_id": "co2lba", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-chinatown-wars", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: The Ballad of Gay Tony", "role": "expansion", "of": ["Grand Theft Auto IV"], "status": "released",
+      "first_release": "2009-10-29", "first_release_region": "Worldwide", "platforms": ["Xbox 360"],
+      "note": "PlayStation 3 and Windows versions followed in April 2010.",
+      "source": {"title": "Grand Theft Auto: The Ballad of Gay Tony", "revision": 1360468637, "revision_time": "2026-06-21T17:29:34Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 3174, "image_id": "co28od", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-iv-the-ballad-of-gay-tony", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto V", "role": "main", "of": [], "status": "released",
+      "first_release": "2013-09-17", "first_release_region": "", "platforms": ["PlayStation 3", "Xbox 360"],
+      "note": "Re-released for PlayStation 4 and Xbox One (2014), Windows (2015), and PlayStation 5 and Xbox Series X/S (2022).",
+      "source": {"title": "Grand Theft Auto V", "revision": 1386547590, "revision_time": "2026-11-19T03:10:09Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 1020, "image_id": "co2lbd", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-v", "checked_on": "2026-11-19"},
+      "catalog_appid": 271590,
+      "catalog_note": "On Steam as Grand Theft Auto V Legacy."
+    },
+    {
+      "title": "Grand Theft Auto Online", "role": "online", "of": ["Grand Theft Auto V"], "status": "released",
+      "first_release": "2013-10-01", "first_release_region": "", "platforms": ["PlayStation 3", "Xbox 360"],
+      "note": "The online multiplayer part of Grand Theft Auto V, launched two weeks after it.",
+      "source": {"title": "Grand Theft Auto Online", "revision": 1386547696, "revision_time": "2026-11-19T03:10:44Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 134710, "image_id": "co4rq1", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-online", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto: The Trilogy – The Definitive Edition", "role": "remaster",
+      "of": ["Grand Theft Auto III", "Grand Theft Auto: Vice City", "Grand Theft Auto: San Andreas"], "status": "released",
+      "first_release": "2021-11-11", "first_release_region": "",
+      "platforms": ["Nintendo Switch", "PlayStation 4", "PlayStation 5", "Windows", "Xbox One", "Xbox Series X/S"],
+      "note": "Remastered versions of III, Vice City and San Andreas.",
+      "source": {"title": "Grand Theft Auto: The Trilogy – The Definitive Edition", "revision": 1386547993, "revision_time": "2026-11-19T03:12:27Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 53070, "image_id": "co65yx", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-the-trilogy-the-definitive-edition--1", "checked_on": "2026-11-19"}
+    },
+    {
+      "title": "Grand Theft Auto VI", "role": "main", "of": [], "status": "released",
+      "first_release": "2026-11-19", "first_release_region": "", "platforms": ["PlayStation 5", "Xbox Series X/S"],
+      "note": "Released on 19 November 2026, the day this story was checked.",
+      "source": {"title": "Grand Theft Auto VI", "revision": 1386579947, "revision_time": "2026-11-19T07:10:45Z"},
+      "image": {"source": "IGDB", "kind": "cover", "igdb_id": 52189, "image_id": "cocv1v", "igdb_url": "https://www.igdb.com/games/grand-theft-auto-vi", "checked_on": "2026-11-19"}
+    }
+  ]
+}

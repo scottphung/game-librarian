@@ -100,6 +100,32 @@ def test_only_verified_rows_are_displayed(tmp_path):
     assert data.labels_for(10) == {}
 
 
+def test_a_repeated_verified_award_result_is_reported_and_counted_once(tmp_path):
+    write_csv(tmp_path / "games.csv", [{"steam_appid": "10", "title": "Test Quest"}])
+    write_csv(tmp_path / "awards.csv", [
+        AWARD_ROW,  # line 2
+        {**AWARD_ROW, "source_url": "https://example.invalid/another-source"},  # line 3: the same result again
+        {**AWARD_ROW, "organization": "the game  awards", "category": "GAME OF THE YEAR"},  # line 4: other spelling
+        {**AWARD_ROW, "review_status": "needs_review"},  # line 5: not verified, so never shown or counted anyway
+        {**AWARD_ROW, "result": "nominee"},  # line 6: another result
+        {**AWARD_ROW, "steam_appid": "", "steam_mapping": "none", "award_title": "Console Game"},  # line 7
+        {**AWARD_ROW, "steam_appid": "", "steam_mapping": "none", "award_title": "Console Game"},  # line 8: repeat
+        {**AWARD_ROW, "steam_appid": "", "steam_mapping": "none", "award_title": "Other Console Game"},  # line 9
+    ])
+    data = load_curated(tmp_path)
+    assert [problem for problem in data.problems if problem.startswith("awards.csv")] == [
+        "awards.csv:3: repeats the result on line 2 (same organization, year, category, result and game); "
+        "it is counted once",
+        "awards.csv:4: repeats the result on line 2 (same organization, year, category, result and game); "
+        "it is counted once",
+        "awards.csv:8: repeats the result on line 7 (same organization, year, category, result and game); "
+        "it is counted once",
+    ]
+    assert [(award.result, award.source_url) for award in data.awards_for(10)] == [
+        ("winner", "https://example.invalid/winners"), ("nominee", "https://example.invalid/winners")]
+    assert [award.award_title for award in data.awards if award.appid is None] == ["Console Game", "Other Console Game"]
+
+
 def test_a_game_verified_as_both_aaa_and_aa_shows_neither(tmp_path):
     write_csv(tmp_path / "games.csv", [{"steam_appid": "10", "title": "Test Quest"}])
     write_csv(tmp_path / "awards.csv", [AWARD_ROW])
