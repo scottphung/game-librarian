@@ -1,0 +1,142 @@
+{% from "_platforms.html" import scope_badge %}
+{% from "_trending_macros.html" import thumb, game_link, time_span, days_text %}
+{# Momentum (web._momentum_report): which games account for the change in Steam review count across the catalog games.
+   The waterfall (dashboard.review_waterfall) starts at the earlier total of a fixed cohort, steps through the largest
+   changes either way and "Other tracked games", and ends at the later total of exactly the same games. A game's bar
+   is a link that shows its Steam player snapshots in the chart beside it (dashboard.player_line): in place with
+   JavaScript, with a reload (?player=) without. Without two comparable snapshots, one message gives the dates saved. #}
+
+{# The class of a waterfall step by its change: up, down, or flat for no change. #}
+{% macro step_class(change) -%}{{ "is-up" if change > 0 else "is-down" if change < 0 else "is-flat" }}{%- endmacro %}
+
+{% set wf = dash.waterfall %}{% set cw, mb = dash.change_window_days, dash.max_baseline_days %}
+<section class="report" aria-labelledby="report-title">
+  <header class="report-head">
+    <h2 class="report-title" id="report-title">Momentum</h2>
+    <p class="report-question">Which games account for the change in review activity across our tracked games?</p>
+  </header>
+
+  {% if wf %}
+  <div class="report-canvas is-momentum" data-momentum>
+    <figure class="chart-card wf-card" aria-labelledby="chart-waterfall">
+      <figcaption>
+        <div class="trend-head"><h3 class="chart-title" id="chart-waterfall">Change in Steam review count</h3>{{ scope_badge("steam") }}</div>
+        <p class="chart-sub">From {{ time_span(wf.before, dates=true) }} to {{ time_span(wf.after, dates=true) }}, for the <strong>{{ wf.games }}</strong> catalog {{ "game" if wf.games == 1 else "games" }} with a count at both dates: {{ wf.rising }} gained reviews, {{ wf.falling }} lost some. A review count says nothing about copies sold or people playing.</p>
+      </figcaption>
+      <ul class="legend"><li><span class="key wf-key is-up"></span>More reviews</li>{% if wf.steps|selectattr("change", "lt", 0)|list %}<li><span class="key wf-key is-down"></span>Fewer reviews (removed or corrected)</li>{% endif %}<li><span class="key wf-key is-total"></span>Net change of all {{ wf.games }} games</li></ul>
+      <ol class="wf-rows" style="--zero: {{ wf.zero_x }}%" aria-label="Change in Steam review count, from the earlier total to the later total">
+        <li class="wf-row is-total">
+          <span class="wf-label"><span class="wf-name">Earlier total</span><span class="wf-when">{{ time_span(wf.before, dates=true) }}</span></span>
+          <span class="wf-plot" aria-hidden="true"><span class="wf-mark" style="left: {{ wf.zero_x }}%"></span><span class="wf-out" style="left: {{ wf.zero_x }}%"></span></span>
+          <span class="wf-value">{{ wf.before_total|number }}</span>
+        </li>
+        {% for step in wf.steps %}{% set line = dash.lines.get(step.appid) if step.kind == "game" else none %}
+        <li class="wf-row {{ step_class(step.change) }}{% if step.kind == 'other' %} is-other{% endif %}">
+          <span class="wf-label">
+            {%- if step.kind == "game" %}{{ thumb(step.image_url) }}{{ game_link(step.appid, step.name, step.details_url, "wf-name") }}
+            {%- else %}<span class="thumb is-empty" aria-hidden="true"></span><span class="wf-name">Other tracked games</span><span class="wf-when">{{ step.games }} {{ "game" if step.games == 1 else "games" }}</span>{% endif -%}
+          </span>
+          <span class="wf-plot">
+            <span class="wf-in" style="left: {{ step.start_x }}%" aria-hidden="true"></span>
+            {%- if line and line.line %}
+            <a class="wf-bar" href="/dashboard?report=momentum&amp;player={{ step.appid }}#players" data-player="{{ step.appid }}" style="left: {{ step.left }}%; width: {{ step.width }}%" title="{{ step.name }}: {{ step.change|signed }} Steam reviews ({{ step.before|number }} → {{ step.after|number }}). Show its Steam players." aria-label="Show the Steam players of {{ step.name }}"{% if step.appid == dash.player %} aria-current="true"{% endif %}></a>
+            {%- else %}
+            <span class="wf-bar" style="left: {{ step.left }}%; width: {{ step.width }}%" title="{% if step.kind == 'game' %}{{ step.name }}: {{ step.change|signed }} Steam reviews ({{ step.before|number }} → {{ step.after|number }}){% else %}{{ step.games }} other games: {{ step.change|signed }} Steam reviews{% endif %}" aria-hidden="true"></span>
+            {%- endif %}
+            <span class="wf-out" style="left: {{ step.end_x }}%" aria-hidden="true"></span>
+          </span>
+          <span class="wf-value">{{ step.change|signed }}</span>
+        </li>
+        {% endfor %}
+        <li class="wf-row is-total is-end">
+          <span class="wf-label"><span class="wf-name">Later total</span><span class="wf-when">{{ time_span(wf.after, dates=true) }}</span></span>
+          <span class="wf-plot" aria-hidden="true"><span class="wf-in" style="left: {{ wf.steps[-1].end_x }}%"></span><span class="wf-bar" style="left: {{ wf.net_left }}%; width: {{ wf.net_width }}%"></span></span>
+          <span class="wf-value">{{ wf.after_total|number }} <span class="wf-net">{{ wf.net|signed }}</span></span>
+        </li>
+      </ol>
+      <div class="wf-axis-row" aria-hidden="true"><span></span><div class="wf-axis">{% for tick in wf.ticks %}<span class="wf-tick{% if loop.first %} is-first{% elif loop.last %} is-last{% endif %}" style="left: {{ tick.x }}%">{{ tick.label }}</span>{% endfor %}</div><span></span></div>
+      <p class="axis-title is-x">Change since the earlier total, in Steam reviews</p>
+      <p class="chart-meta">Steam review summaries (all languages, Steam purchasers) saved by the sync · earlier counts {{ time_span(wf.before) }}, later counts {{ time_span(wf.after) }} · each game’s newest count against its newest one {{ cw }} to {{ mb }} days earlier.</p>
+      <details class="table-view">
+        <summary>Show as a table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th scope="col">Step</th><th scope="col" class="num">Earlier count</th><th scope="col" class="num">Later count</th><th scope="col" class="num">Change</th></tr></thead>
+            <tbody>
+              <tr><td>Earlier total ({{ wf.games }} games)</td><td class="num">{{ wf.before_total|number }}</td><td class="num"></td><td class="num"></td></tr>
+              {% for step in wf.steps %}<tr><td>{{ step.name if step.kind == "game" else "Other tracked games (" ~ step.games ~ ")" }}</td><td class="num">{{ step.before|number if step.kind == "game" else "" }}</td><td class="num">{{ step.after|number if step.kind == "game" else "" }}</td><td class="num">{{ step.change|signed }}</td></tr>{% endfor %}
+              <tr><td>Sum of the changes</td><td class="num"></td><td class="num"></td><td class="num">{{ wf.steps_total|signed }}</td></tr>
+              <tr><td>Later total ({{ wf.games }} games)</td><td class="num"></td><td class="num">{{ wf.after_total|number }}</td><td class="num">{{ wf.net|signed }}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </figure>
+
+    <section class="chart-card players-card" id="players" aria-labelledby="chart-players" data-player-chart>
+      <div class="trend-head"><h3 class="chart-title" id="chart-players">Players in game on Steam</h3>{{ scope_badge("steam") }}</div>
+      {% if dash.player %}
+      {% for appid, found in dash.lines.items() if found.line %}{% set ln = found.line %}
+      <div class="pl-panel" data-player-panel="{{ appid }}"{% if appid != dash.player %} hidden{% endif %}>
+        <p class="chart-sub"><strong>{{ found.name }}</strong>: concurrent players at each snapshot this site saved, {{ found.first|datetime }} – {{ found.last|datetime }}.</p>
+        <div class="line-plot" data-chart-tips>
+          {%- for tick in ln.y_ticks %}<span class="grid-line is-y{% if loop.first %} is-base{% endif %}" style="bottom: {{ tick.y }}%" aria-hidden="true"><span class="tick-label">{{ tick.label }}</span></span>{% endfor %}
+          {%- for tick in ln.x_ticks %}<span class="line-tick" style="left: {{ tick.x }}%" aria-hidden="true">{{ tick.label }}</span>{% endfor %}
+          <svg class="line-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+            {%- for segment in ln.segments %}<polyline points="{{ segment }}" vector-effect="non-scaling-stroke"></polyline>{% endfor -%}
+          </svg>
+          {%- for point in ln.points %}<span class="line-dot" style="left: {{ point.x }}%; bottom: {{ point.y }}%" title="{{ point.players|number }} players · {{ point.at|datetime }}" data-tip-name="{{ point.players|number }} players" data-tip-text="{{ point.at|datetime }}" aria-hidden="true"></span>{% endfor %}
+        </div>
+        <p class="chart-meta">Steam Web API <code>GetNumberOfCurrentPlayers</code> · {{ found.count }} snapshots, each at its own time{% if ln.gaps %}; the line breaks where none was saved for more than {{ dash.line_gap_days }} days ({% for gap in ln.gaps %}{{ gap[0]|date }} – {{ gap[1]|date }}{{ ", " if not loop.last else "" }}{% endfor %}){% endif %}. Counts also follow the time of day.</p>
+        <details class="table-view">
+          <summary>Show as a table</summary>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th scope="col">Snapshot</th><th scope="col" class="num">Players in game on Steam</th></tr></thead>
+              <tbody>{% for point in ln.points %}<tr><td>{{ point.at|datetime }}</td><td class="num">{{ point.players|number }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+      {% endfor %}
+      <p class="chart-note">Choose a bar in the waterfall to show that game.</p>
+      {% else %}
+      <p class="chart-empty">{% if dash.player_days %}Player snapshots so far: {{ days_text(dash.player_days) }}. A line needs one game’s snapshots at least {{ cw }} days apart{% if dash.players_from %}, so the first can appear from {{ dash.players_from|date }} if the sync runs daily{% endif %}.{% else %}No player counts have been collected yet. <code>python -m game_librarian sync</code> saves one per game.{% endif %}</p>
+      {% endif %}
+    </section>
+  </div>
+  {% else %}{% set reviews, players, launch = dash.coverage.reviews, dash.coverage.players, dash.coverage.launch %}
+  {# Not enough history for the waterfall: one note on what the saved snapshots cover, from the database, instead of
+     an empty chart. Nothing is estimated between snapshots or before the first one. #}
+  <p class="coverage-note" id="coverage"><strong>Not enough snapshot history yet.</strong>
+    {% if reviews.games %}Steam review counts of {{ reviews.games }} {{ "game" if reviews.games == 1 else "games" }} on {{ days_text(reviews.days) }} ({% if reviews.most == reviews.fewest %}{{ reviews.most }} per game{% else %}{{ reviews.fewest }} to {{ reviews.most }} per game{% endif %}){% if players.games %}, and player counts of {{ players.games }} {{ "game" if players.games == 1 else "games" }} on {{ days_text(players.days) }}{% endif %}. A change needs one game’s counts {{ cw }} to {{ mb }} days apart, and no game has such a pair yet{% if dash.reviews_from %}: the first can appear from {{ dash.reviews_from|date }} if the sync runs then{% endif %}.{% else %}No review counts have been saved yet. <code>python -m game_librarian sync</code> saves one per game.{% endif %}
+    {% if launch.first %}A comparison of games’ first {{ dash.launch_weeks }} weeks after launch is planned for games released on Steam since {{ launch.first|day }}{% if launch.candidates %}: {{ launch.candidates|length }} so far, {{ launch.eligible|length }} with every weekly count{% else %}: none has been released yet{% endif %}.{% endif %}</p>
+  {% endif %}
+
+  <details class="method-details" id="sources">
+    <summary>Sources and methodology</summary>
+    <div class="method-body">
+      <h3 class="chart-title">Change in Steam review count</h3>
+      <ul class="method-notes">
+        <li><strong>Two comparable snapshots:</strong> every sync saves each catalog game’s Steam review summary (all languages, Steam purchasers) with its time. A game is compared by the Trending page’s rule: its newest count against its newest count {{ cw }} to {{ mb }} days earlier. Nothing between two snapshots is estimated.</li>
+        <li><strong>A fixed cohort:</strong> only games with a count at both ends are included, and the earlier and later totals cover exactly those games, so a game that joined the catalog in between never shows up as a rise.{% if wf %} Now: {{ wf.games }} games; their earlier counts were saved {{ time_span(wf.before) }} and their later counts {{ time_span(wf.after) }}.{% endif %}</li>
+        <li><strong>Steps:</strong> the {{ dash.waterfall_games }} largest changes either way have a step each, largest first (a game without a change never has one); every other game is in “Other tracked games”. A fall is kept as it is: Steam removes reviews (for example after account bans or as corrections), and a game can end lower than it started. The steps add up exactly to the later total minus the earlier one; the table shows the sum.</li>
+        <li><strong>The axis:</strong> zero is the earlier total, and each bar’s length is its change, on one scale. The totals are written as numbers: drawn from zero they would dwarf every change.</li>
+        <li><strong>What it is not:</strong> a review count changes when Steam purchasers write or remove reviews. It cannot tell how many copies sold or how many people played, and it says nothing about other platforms.</li>
+      </ul>
+      <h3 class="chart-title">Players in game on Steam</h3>
+      <ul class="method-notes">
+        <li><strong>Snapshots:</strong> every sync saves each catalog game’s current player count on Steam (Steam Web API <code>GetNumberOfCurrentPlayers</code>), one moment per game. People playing on consoles, in other PC stores or offline are not counted, and a count depends on the time of day of its snapshot.</li>
+        <li><strong>The line:</strong> the last {{ dash.history_days }} days of snapshots, each at its actual time, on an axis from zero. Snapshots more than {{ dash.line_gap_days }} days apart are not joined, so a gap shows as a break, and a game needs snapshots at least {{ cw }} days apart for a line: a few days show the daily swing, not a change.</li>
+      </ul>
+      {% set launch = dash.coverage.launch %}
+      <h3 class="chart-title">Planned: the first {{ dash.launch_weeks }} weeks after launch</h3>
+      <ul class="method-notes">
+        <li><strong>Not shown yet:</strong> comparing new games by the reviews they gather in each of their first {{ dash.launch_weeks }} weeks on Steam needs real observations of those weeks, and the saved review counts {% if launch.first %}begin on {{ launch.first|day }}{% else %}have not begun{% endif %}.{% if launch.first %} Catalog games released since then: {{ launch.candidates|length }}; with every weekly count: {{ launch.eligible|length }}.{% endif %}</li>
+        <li><strong>Which games will qualify:</strong> a game with a reliable Steam release date (the exact day Steam gives) and a review count saved at every weekly boundary: on its release day and {{ dash.launch_days|listing }} days later, each on that day or the next.</li>
+        <li><strong>Missing stays missing:</strong> a week without its two counts has no value, nothing is filled in between snapshots, and a lifetime review total saved later never stands for the reviews of a launch week.</li>
+      </ul>
+      <p class="chart-sub">Data from Steam, saved by <code>python -m game_librarian sync</code>. {% if dash.review_days %}Review snapshots in the last {{ mb }} days of history: {{ days_text(dash.review_days) }}.{% endif %} Player counts are never added up: each was taken at its own moment.</p>
+    </div>
+  </details>
+</section>

@@ -20,14 +20,16 @@ Pages, in the order of the site navigation:
   the upcoming refresh; upcoming.py, twitch.py). Steam activity covers the Steam catalog only (stored Steam
   snapshots, trending.py). Every game shows where it is out and where it is only announced (IGDB).
 - Data Stories (/stories): hand-checked series timelines (stories.py).
-- Dashboard (/dashboard...): Trending games first (/dashboard), charting the Trending lists' games from the
-  stored snapshots, placing the tracked upcoming games on a release radar (dashboard.release_radar), and
-  analyzing Most watched on Twitch against Most wishlisted on Steam and Steam reviews instead of repeating the
-  lists (_list_analysis); then the Power BI report's measures as HTML (dashboard.py): Player reception
-  (/dashboard/reception), Awards and About the data. Old addresses redirect (see dashboard_home).
-  Trending games' Estimated Steam copies sold chart (Gamalytic) is sent only to a browser on the computer that
-  runs the site (is_local_request): Gamalytic's terms forbid sharing its data.
-- Wishlist (/wishlist): the browser-local Game Librarian wishlist.
+- Dashboard (/dashboard...): Trending games first (/dashboard): three report pages about the Trending page's
+  games, from the stored lists and snapshots (?report=: Sales & reception, Upcoming releases and Momentum; see
+  _sales_report, _upcoming_report and _momentum_report); then the Power BI report's measures as HTML
+  (dashboard.py): Player reception (/dashboard/reception), Awards and About the data. Old addresses redirect (see
+  dashboard_home). Sales & reception's Estimated Steam copies sold chart (Gamalytic) is sent only to a browser on
+  the computer that runs the site (is_local_request): Gamalytic's terms forbid sharing its data.
+- Wishlist (/wishlist): the browser-local Game Librarian wishlist, behind the header's star icon.
+- Daily Trivia: the header's lightbulb opens a popup on any page. Its content comes from /trivia/panel: today's
+  quiz from curated/trivia.json, the same for everyone that quiz day (UTC; trivia.py), and the facts open for
+  browsing. The visitor's answers and scores stay in the browser (static/trivia.js); the server never sees them.
 
 Run with `python -m game_librarian serve` (uses the `create_app` factory).
 """
@@ -49,8 +51,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, catalog, critics, dashboard, gamalytic, list_history, pricing, ranking, related, stories, \
-    store, trending, twitch, upcoming
+from . import __version__, catalog, critics, dashboard, gamalytic, list_comparison, pricing, ranking, related, \
+    stories, store, trending, trivia, twitch, upcoming
 from .catalog import ALL_VIEW, COLLECTION_KEYS, DEFAULT_VIEW, LABEL_ORDER, LEGACY_NO_LABEL, NO_VERIFIED_LABEL, \
     SORT_ALIASES, SORT_OPTIONS, SORTS, STEAM_REVIEW_LABELS, TOP_VIEW, VIEWS, CatalogGame
 from .config import PACKAGE_DIR, STORE_PAGE_URL, Settings, load_settings
@@ -704,9 +706,12 @@ def _igdb_item(row, key: str, today: date, **facts) -> dict:
 
     `key` is upcoming.game_key_for's answer, so a game that is also a catalog game opens the catalog game.
     `facts` adds what the list shows besides: position and IGDB's value, change, date_change, Twitch fields.
+    "steam_appid" is the verified Steam app (else None) and "steam_candidates" every Steam app IGDB lists, verified or
+    not: the dashboard's list comparison matches games by verified apps and flags a shared unverified one.
     """
     dates = upcoming.stored_dates(row)
     publishers = json.loads(row["publishers"] or "[]")
+    verified = row["steam_match"] == "verified"
     return {
         "key": key,
         "igdb_id": row["igdb_id"],
@@ -716,7 +721,9 @@ def _igdb_item(row, key: str, today: date, **facts) -> dict:
         "state": upcoming.release_state(row["game_type"], row["game_status"], dates, row["first_release_date"], today),
         "availability": _availability(row, today),
         "publisher": publishers[0] if publishers else None,
-        "steam_verified": row["steam_match"] == "verified",
+        "steam_verified": verified,
+        "steam_appid": row["steam_appid"] if verified else None,
+        "steam_candidates": json.loads(row["steam_appids"] or "[]"),
         "checked_at": row["checked_at"],
         **facts,
     }
@@ -735,7 +742,8 @@ def _trending_lists(conn, today: date, moment: datetime) -> dict:
     """Every cross-platform list on Trending, from stored data only (no network).
 
     "upcoming": one list per signal, games not out on any platform ("games" shows the first LIST_SIZE; "tracked"
-    holds every upcoming game of the newest snapshot, up to TRACKED_PER_SIGNAL, for the dashboard's release radar);
+    holds every upcoming game of the newest snapshot, up to TRACKED_PER_SIGNAL, for the dashboard's release radar and
+    list comparison; "unread" counts the snapshot's entries without a stored IGDB record, which no rule can place);
     "recent": the Want to Play games first released in the last RECENT_WINDOW; "twitch": Twitch's newest top
     categories that are IGDB games, if the list is less than 24 hours old ("games" shows the first LIST_SIZE;
     "listable" holds all of them, for the dashboard's analyses). A game released since the last refresh moves from
@@ -771,6 +779,7 @@ def _trending_lists(conn, today: date, moment: datetime) -> dict:
         tracked = by_kind[upcoming.UPCOMING]
         upcoming_games = tracked[:upcoming.LIST_SIZE]
         upcoming_lists.append({**common, "games": upcoming_games, "tracked": tracked,
+                               "unread": sum(1 for entry in latest if entry["igdb_id"] not in rows),
                                "has_changes": any(item["change"] for item in upcoming_games)})
         if signal.tracks_recent_releases:
             recent_games = by_kind[upcoming.RECENT][:upcoming.LIST_SIZE]
@@ -810,35 +819,14 @@ def _fill_catalog_images(conn, items: list[dict]) -> None:
             item["image_url"] = images.get(int(item["key"]))
 
 
-def _list_analysis(conn, lists: dict, steam: dict, reviews_at: dict) -> dict:
-    """The dashboard's analyses of Most watched on Twitch, from stored data only.
-
-    `lists`, `steam` and `reviews_at` are what dashboard_trending already read. Twitch's list has no history, because
-    Twitch allows keeping its data for 24 hours, so only its newest list is compared: with Steam's newest saved
-    most-wishlisted list (by IGDB id; list_history keeps one snapshot per IGDB calculation) and with the Steam reviews
-    of its catalog games.
-    """
-    signal = upcoming.STEAM_WISHLISTS
-    snapshots = list_history.comparable_snapshots(store.popularity_snapshot_rows(conn, signal.key))
-    newest = snapshots[-1] if snapshots else None
-    twitch_games = lists["twitch"]["listable"]
-    return {
-        "wishlists": next(data for data in lists["upcoming"] if data["signal"] is signal),
-        "newest": newest,
-        "overlap": dashboard.list_overlap(newest, twitch_games, lists["twitch"]["depth"]),
-        "reception": dashboard.twitch_reception(twitch_games, steam["catalog"], reviews_at),
-        "saved": len(newest.positions) if newest else 0,  # games in the newest saved Steam list
-        "tracked": upcoming.TRACKED_PER_SIGNAL,  # the most upcoming games a refresh saves per list
-    }
-
-
 def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datetime) -> dict:
     """The Steam activity part of Trending (catalog games, Steam only), from stored data (no network).
 
     The Trending page and the Trending games dashboard both use this, so they show the same games: each list
     keeps its first trending.SECTION_SIZE games, and each item carries its platforms from IGDB when known.
     The player history reaches dashboard.HISTORY_DAYS further back than the changes need, for the dashboard's
-    small charts; a change only ever compares snapshots CHANGE_WINDOW to MAX_BASELINE_AGE apart.
+    player line; a change only ever compares snapshots CHANGE_WINDOW to MAX_BASELINE_AGE apart, and the review
+    history it reads is returned too, for the dashboard's review waterfall.
     """
     window = ranking.RankingWindow.for_website(current_day)
     catalog_rows = store.matching_games(conn, [], [])
@@ -893,7 +881,8 @@ def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datet
         "players_status": players_status,
         "reviews_status": reviews_status,
         "player_history": player_history,
-        "catalog": by_appid,  # every catalog game, for the Steam facts of cross-platform games
+        "review_history": review_history,
+        "catalog": by_appid,  # every catalog game, for the dashboard's sales and reception charts
     }
 
 
@@ -941,6 +930,7 @@ def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict:
         **dashboard.sales_chart(games, store.latest_sales_estimates(conn, appids), store.price_rows(conn, appids),
                                 moment),
         "trending_games": len(games),
+        "named": dashboard.RING_NAMED,  # the largest estimates with a named slice each
         "summary": store.sales_estimate_summary(conn),
         "last_run": runs[0] if runs else None,
         "last_problem": store.run_problem(runs[0]) if runs else None,
@@ -950,6 +940,159 @@ def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict:
         "stale_days": gamalytic.STALE_AFTER.days,
         "about_url": gamalytic.ABOUT_URL,
         "terms_url": gamalytic.TERMS_URL,
+    }
+
+
+# ---------------------------------------------------------------------- the Trending games dashboard's report pages
+
+
+def _reception_view(conn, steam: dict, view: str | None) -> dict:
+    """The strong-reception scatterplot of Sales & reception (dashboard.reception_chart), in `view` (a
+    dashboard.RECEPTION_VIEWS key; any other value shows every game).
+
+    It draws every catalog game that meets the Trending page's rule (trending.well_received_released_between) in the
+    five-year window, not only the first 10 the Trending page lists, each once, this year's releases highlighted. The
+    peer benchmarks compare them with every comparable game: each catalog game with usable Steam reviews and an exact
+    Steam release date in the same window, strong reception or not ("below" lists the ones not drawn).
+    """
+    games = steam["catalog"].values()
+    start, end = steam["four_years_window"]
+    cohort = trending.well_received_released_between(games, start, end)
+    this_year = {game.appid for game in trending.well_received_released_between(games, *steam["this_year_window"])}
+    comparable = [game for game in games if game.total and trending.released_between(game, start, end)]
+    rows = store.game_rows(conn, sorted(game.appid for game in comparable))
+
+    def point(game: CatalogGame) -> dict:
+        row = rows[game.appid]
+        return {"appid": game.appid, "name": row["name"] or row["curated_title"], "details_url": f"/games/{game.appid}",
+                "total": game.total, "positive": game.positive, "percent": game.percent,
+                "share_tenths": dashboard.percent_tenths(game.positive, game.total),
+                "review_label": game.review_label, "released_on": game.released_on,
+                "genres": json.loads(row["genres"] or "[]")}
+
+    pool = [point(game) for game in comparable]
+    drawn = {game.appid for game in cohort}
+    by_appid = {game["appid"]: game for game in pool}
+    times = [rows[game.appid]["reviews_updated_at"] for game in comparable if rows[game.appid]["reviews_updated_at"]]
+    chart = dashboard.reception_chart([by_appid[game.appid] for game in cohort], pool, this_year)
+    views = list(dashboard.RECEPTION_VIEWS)
+    return {
+        "chart": chart,
+        "view": view if view in views and chart and chart["views"]["year"] else views[0],
+        "games": len(cohort),
+        "this_year": len(this_year),
+        "comparable": len(pool),
+        "below": sorted((game for game in pool if game["appid"] not in drawn),
+                        key=lambda game: (game["name"].casefold(), game["appid"])),
+        "window": (start, end),
+        "this_year_window": steam["this_year_window"],
+        "saved": (min(times), max(times)) if times else None,  # each game's summary at its own moment of the sync
+        "listed": trending.SECTION_SIZE,  # the games each list shows on the Trending page
+        "min_peers": dashboard.MIN_PEERS,
+        "gameplay_genres": dashboard.GAMEPLAY_GENRES,
+    }
+
+
+def _chart_status(game: CatalogGame, drawn: set[int], start: date) -> str:
+    """Why a game of the copies-sold doughnut is or is not on the reception chart below it."""
+    if game.appid in drawn:
+        return "drawn"
+    if game.total is None:
+        return "no_reviews"
+    if game.released_on is None:
+        return "no_date"
+    return "before_window" if game.released_on < start else "below_threshold"
+
+
+def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetime, view: str | None, *,
+                  local: bool) -> dict:
+    """Sales & reception: Gamalytic's estimated Steam copies sold only for a local request (is_local_request), then
+    the strong-reception scatterplot in `view`. Each doughnut game says whether it is on that chart."""
+    steam = _steam_activity(conn, curated, current_day, moment)
+    reception = _reception_view(conn, steam, view)
+    sales = _sales_view(conn, _trending_lists(conn, current_day, moment), steam, moment) if local else None
+    if sales:
+        drawn = {point["appid"] for point in reception["chart"]["points"]} if reception["chart"] else set()
+        named = [part for part in sales["ring"]["parts"] if part["kind"] == "game"] if sales["ring"] else []
+        for item in sales["ranked"] + named:  # a named slice is its own copy of its game's row
+            item["chart_status"] = _chart_status(item["game"], drawn, reception["window"][0])
+    return {"sales": sales, "reception": reception, "strong_labels": catalog.STRONG_RECEPTION_LABELS}
+
+
+def _upcoming_report(conn, current_day: date, moment: datetime, window: str | None, group: str | None, *,
+                     configured: bool) -> dict:
+    """Upcoming releases: the release radar narrowed to `window` (a dashboard.RADAR_WINDOWS key; any other value shows
+    every tracked game), beside the comparison of IGDB's and Steam's captures (list_comparison) with `group` open (a
+    list_comparison group key; by default the games seen only on IGDB). Both share one list of distinct games; each
+    game that Twitch's newest list names by the same IGDB id carries its Twitch place ("twitch"), for its panel."""
+    lists = _trending_lists(conn, current_day, moment)
+    runs = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
+    windows = [key for key, _, _ in dashboard.RADAR_WINDOWS]
+    radar = dashboard.release_radar(lists["upcoming"], current_day)
+    watched = {item["igdb_id"]: item for item in lists["twitch"]["listable"]}
+    for game in radar["games"]:
+        game["twitch"] = next((watched[igdb_id] for igdb_id in game["igdb_ids"] if igdb_id in watched), None)
+    comparison = list_comparison.compare_lists(lists["upcoming"], radar["games"])
+    groups = list(list_comparison.BAR_ORDER)
+    return {
+        "radar": radar,
+        "window": window if window in windows else windows[-1],
+        "comparison": comparison,
+        "group": group if group in groups else list_comparison.IGDB_ONLY,
+        "group_labels": list_comparison.GROUP_LABELS,
+        "twitch": lists["twitch"],
+        "igdb": {"configured": configured, "last_run": runs[0] if runs else None,
+                 "last_problem": store.run_problem(runs[0]) if runs else None, "list_size": upcoming.LIST_SIZE},
+    }
+
+
+def _momentum_report(conn, curated: CuratedData, current_day: date, moment: datetime, player: str | None) -> dict:
+    """Momentum: the review waterfall of the catalog games (dashboard.review_waterfall), and the Steam player line of
+    each game with a step of its own (dashboard.player_line). `player` (an app id) picks the line shown first when
+    that game has one; otherwise the largest change with a line is shown. "coverage" says what the saved snapshots
+    cover, game by game, and which games the planned launch-weeks comparison could include (its only real data)."""
+    steam = _steam_activity(conn, curated, current_day, moment)
+    all_reviews = store.review_history(conn, "")  # every saved review count: launch weeks reach back to a release
+    release_days = {appid: game.released_on for appid, game in steam["catalog"].items()
+                    if game.released_on and not game.upcoming}
+    waterfall = dashboard.review_waterfall(steam["review_history"])
+    games = [step for step in waterfall["steps"] if step["kind"] == "game"] if waterfall else []
+    rows = store.game_rows(conn, [game["appid"] for game in games])
+    for game in games:
+        row = rows[game["appid"]]
+        game.update(name=row["name"] or row["curated_title"], details_url=f"/games/{game['appid']}",
+                    # a portrait cover, as in the copies-sold chart; the wide Steam header when Steam has no cover
+                    image_url=row["cover_image_url"] or row["header_image_url"])
+    newest = steam["players_status"]["last"]
+    lines = {game["appid"]: {**dashboard.player_line(steam["player_history"].get(game["appid"], []), newest),
+                             "name": game["name"]}
+             for game in games} if newest else {}
+    charted = [appid for appid, found in lines.items() if found["line"]]
+    chosen = int(player) if player and player.isdigit() and int(player) in charted else None
+
+    def first_possible(status: dict) -> datetime | None:
+        """When a first comparison can exist, if that is still ahead (a snapshot CHANGE_WINDOW after the first)."""
+        moment_from = status["changes_possible_from"]
+        return moment_from if moment_from and moment_from > moment else None
+
+    return {
+        "waterfall": waterfall,
+        "waterfall_games": dashboard.WATERFALL_GAMES,
+        "lines": lines,
+        "player": chosen or (charted[0] if charted else None),
+        "review_days": dashboard.capture_days(steam["review_history"]),
+        "player_days": dashboard.capture_days(steam["player_history"], "players"),
+        "reviews_from": first_possible(steam["reviews_status"]),
+        "players_from": first_possible(steam["players_status"]),
+        "coverage": {"reviews": dashboard.snapshot_coverage(steam["review_history"], "total"),
+                     "players": dashboard.snapshot_coverage(steam["player_history"], "players"),
+                     "launch": dashboard.launch_weeks_coverage(release_days, all_reviews)},
+        "launch_weeks": dashboard.LAUNCH_WEEKS,
+        "launch_days": dashboard.LAUNCH_BOUNDARIES[1:],  # the weekly boundaries after the release day
+        "change_window_days": trending.CHANGE_WINDOW.days,
+        "max_baseline_days": trending.MAX_BASELINE_AGE.days,
+        "history_days": dashboard.HISTORY_DAYS,
+        "line_gap_days": dashboard.PLAYER_LINE_GAP.days,
     }
 
 
@@ -979,8 +1122,11 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     templates.env.filters.update(
         date=format_date, datetime=format_datetime, number=format_number, hours=format_hours, day=format_day,
         rate=dashboard.format_rate, compact=dashboard.compact_number, signed=format_signed, listing=format_list,
+        tenths=dashboard.format_tenths,
     )
     templates.env.globals["app_version"] = __version__  # cache-busts the stylesheet and script after an upgrade
+    # Today's Daily Trivia day (UTC) in the header, so the lightbulb's "finished" badge follows the server's quiz day.
+    templates.env.globals["trivia_day"] = lambda: trivia.quiz_day(now()).isoformat()
     live_lock = threading.Lock()  # one Twitch check at a time; a second request then finds the fresh answer
     live_client: list[twitch.TwitchClient] = []  # created on first use, then reused with its token
 
@@ -1140,40 +1286,32 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         return RedirectResponse("/dashboard", status_code=307)
 
     def dashboard_trending(request: Request):
-        """Trending games: the Trending page's games charted, from the same stored data and rules (no network)."""
+        """Trending games: three report pages about the Trending page's games, from the same stored data and rules
+        (no network). ?report= picks the page (dashboard.TRENDING_REPORTS; Sales & reception when it is missing or
+        unknown); Sales & reception reads ?view=, Upcoming releases ?window= and ?group=, Momentum ?player=, all
+        optional: an unknown value shows the page's default."""
+        params = request.query_params
+        report = params.get("report")
+        if report not in dashboard.TRENDING_REPORTS:
+            report = dashboard.DEFAULT_REPORT
         current_day, moment = today(), now()
         conn = store.connect(settings.db_path)
         try:
             # Twitch allows keeping its data for 24 hours; an older list is deleted, not just hidden.
             store.purge_twitch_top_games(conn, (moment - twitch.KEEP_FOR).isoformat(timespec="seconds"))
-            steam = _steam_activity(conn, curated_cache.get(), current_day, moment)
-            lists = _trending_lists(conn, current_day, moment)
-            # Twitch's whole list, not only its first games: its chart with Steam reviews looks further down.
-            listed = [data["games"] for data in (*lists["upcoming"], lists["recent"] or {"games": []})]
-            listed.append(lists["twitch"]["listable"])
-            catalog_keys = sorted({int(item["key"]) for items in listed for item in items if item["key"].isdigit()})
-            reviews_at = {appid: row["reviews_updated_at"] for appid, row in store.game_rows(conn, catalog_keys).items()}
-            analysis = _list_analysis(conn, lists, steam, reviews_at)
+            if report == "upcoming":
+                view = _upcoming_report(conn, current_day, moment, params.get("window"), params.get("group"),
+                                        configured=settings.igdb_configured)
+            elif report == "momentum":
+                view = _momentum_report(conn, curated_cache.get(), current_day, moment, params.get("player"))
+            else:
+                # Gamalytic's estimates go only to a browser on this computer; for anyone else the chart does not exist.
+                view = _sales_report(conn, curated_cache.get(), current_day, moment, params.get("view"),
+                                     local=is_local_request(request))
             last_sync = store.last_successful_sync(conn)
-            igdb_run = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
-            # Gamalytic's estimates go only to a browser on this computer; for anyone else the chart does not exist.
-            sales = _sales_view(conn, lists, steam, moment) if is_local_request(request) else None
         finally:
             conn.close()
-        view = dashboard.trending_page(lists, steam, reviews_at)
-        view.update({
-            "analysis": analysis,
-            "radar": dashboard.release_radar(lists["upcoming"], current_day),
-            "sales": sales,
-            "steam": {key: value for key, value in steam.items() if key not in ("player_history", "catalog")},
-            "igdb": {"configured": settings.igdb_configured, "last_run": igdb_run[0] if igdb_run else None,
-                     "last_problem": store.run_problem(igdb_run[0]) if igdb_run else None,
-                     "list_size": upcoming.LIST_SIZE, "date_changes_days": DATE_CHANGES_SHOWN_FOR.days},
-            "recent_days": upcoming.RECENT_WINDOW.days,
-            "change_window_days": trending.CHANGE_WINDOW.days,
-            "max_baseline_days": trending.MAX_BASELINE_AGE.days,
-            "strong_labels": catalog.STRONG_RECEPTION_LABELS,
-        })
+        view.update(report=report, reports=dashboard.TRENDING_REPORTS)
         return render_dashboard(request, "trending", last_sync, ranking.RankingWindow.for_website(current_day), view)
 
     @app.get("/dashboard/about", response_class=HTMLResponse)
@@ -1204,7 +1342,9 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             "counts": counts,
             "sync": sync_status,
             "size": trending.SECTION_SIZE,
-            **{key: value for key, value in steam.items() if key not in ("player_history", "catalog")},
+            # The raw histories feed the dashboard's charts; this page lists the changes trending.py computed from them.
+            **{key: value for key, value in steam.items()
+               if key not in ("player_history", "review_history", "catalog")},
             "four_years_url": CatalogQuery(reception=catalog.STRONG_RECEPTION_LABELS, sort="reception").url(),
             "change_window_days": trending.CHANGE_WINDOW.days,
             "max_baseline_days": trending.MAX_BASELINE_AGE.days,
@@ -1285,6 +1425,20 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     @app.get("/wishlist", response_class=HTMLResponse)
     def wishlist_page(request: Request):
         return templates.TemplateResponse(request, "wishlist.html", {"active": "wishlist"})
+
+    @app.get("/trivia/panel", response_class=HTMLResponse)
+    def trivia_panel(request: Request):
+        """Daily Trivia's content as an HTML fragment for the popup: today's quiz (the quiz day is the UTC date of
+        `now`), the facts of earlier quizzes and today's facts, marked. A game links its details only when it is
+        in the catalog. Reads the curated file and the catalog only: answers and scores stay in the browser."""
+        daily = trivia.daily_trivia(trivia.load_trivia(settings.curated_dir), trivia.quiz_day(now()))
+        conn = store.connect(settings.db_path)
+        try:
+            in_catalog = {row["appid"] for row in store.matching_games(conn, [], [])}
+        finally:
+            conn.close()
+        return templates.TemplateResponse(request, "trivia_panel.html",
+                                          {"daily": daily, "in_catalog": in_catalog, "reset_label": trivia.RESET_LABEL})
 
     @app.get("/games/{key}/panel", response_class=HTMLResponse)
     def game_panel(request: Request, key: str):

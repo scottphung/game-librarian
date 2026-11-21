@@ -18,23 +18,28 @@ more free time or a computer upgrade. It helps you:
   **What the critics said**, **Watch it live** with current Twitch streams, awards, "More games like this"), save
   it to the Game Librarian wishlist, and visit Steam or the official website when you are ready;
 - read sourced **Data Stories** about game series, Grand Theft Auto and Final Fantasy, as compact year-by-year
-  timelines with each game's cover art.
+  timelines with each game's cover art;
+- come back every day for **Daily Trivia** (the lightbulb in the header): a five-question quiz about a gaming story,
+  the same for everyone that day, with sources, cover art and links to the games' details, plus earlier facts to
+  browse (see [Daily Trivia](#daily-trivia)).
 
-The **Dashboard** opens on **Trending games**: the games of the Trending page compared one by one in ranked bar
-charts, an **Upcoming Release Radar** that places the tracked upcoming games by how soon each is due on each
-platform, and Twitch's most-watched list analyzed rather than repeated (a connected-dot chart of the games also in
-Steam's most-wishlisted list, Twitch places beside Steam reviews), each chart with its
-own source and update time. Its other pages (Player reception, Awards, About
+The **Dashboard** opens on **Trending games**: three short report pages about the Trending page's games, behind
+one tab bar. **Sales & reception** compares this year's and the five-year window's strong-reception games as
+scatterplots of Steam reviews against positive share; **Upcoming releases** places the tracked upcoming games on an
+**Upcoming Release Radar** with a selected-game panel, and says which wishlisted games are also being watched on
+Twitch; **Momentum** shows which games account for the change in Steam review count, with a game's Steam player
+snapshots beside it. Each chart keeps its own source and update time. Its other pages (Player reception, Awards, About
 the data) show the catalog's reception and awards; an optional Power BI project in `reporting/` shows those three
 pages in Power BI Desktop (Trending games is on the website only). Prices are supporting information: there is no
-price filter, and Steam is always the place to confirm the final price. On the computer that runs the site, Trending
-games first charts **Estimated Steam copies sold** from Gamalytic's free API: a local evaluation only, because
+price filter, and Steam is always the place to confirm the final price. On the computer that runs the site, Sales &
+reception first charts **Estimated Steam copies sold** from Gamalytic's free API: a local evaluation only, because
 Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only)).
 
-- **Backend:** FastAPI, with server-rendered Jinja templates and two small scripts (`static/app.js`,
-  `static/wishlist.js`) that progressively enhance filters, the details dialog, the trailer clip, the release
-  radar's tooltips and the wishlist.
-  Every page except the wishlist also works without them.
+- **Backend:** FastAPI, with server-rendered Jinja templates and three small scripts (`static/app.js`,
+  `static/wishlist.js`, `static/trivia.js`) that progressively enhance filters, the details dialog, the trailer clip,
+  the dashboard's report pages (the radar's selected game and windows, chart tooltips, arrow keys between a
+  scatterplot's dots, the waterfall's player line), the wishlist and Daily Trivia.
+  Every page also works without them; the wishlist and Daily Trivia need JavaScript.
 - **Storage:** one SQLite file, written by separate commands (`sync`, `candidates`).
 - **Catalog:** hand-picked games (`curated/games.csv`) plus games promoted through a reviewed candidate workflow
   (`curated/promoted_games.csv`). Every catalog game is a verified Steam app.
@@ -63,15 +68,16 @@ Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sol
 15. [What the critics said](#what-the-critics-said)
 16. [Scores, counts, rankings and sales](#scores-counts-rankings-and-sales)
 17. [Data Stories](#data-stories)
-18. [Dashboard](#dashboard)
-19. [Data sources and terms](#data-sources-and-terms)
-20. [How the sync works](#how-the-sync-works)
-21. [Curated awards and classifications](#curated-awards-and-classifications)
-22. [Current architecture](#current-architecture)
-23. [Future cloud architecture](#future-cloud-architecture)
-24. [Limitations](#limitations)
-25. [Verification status](#verification-status)
-26. [Future work](#future-work)
+18. [Daily Trivia](#daily-trivia) (the daily quiz, scores in the browser, adding questions)
+19. [Dashboard](#dashboard)
+20. [Data sources and terms](#data-sources-and-terms)
+21. [How the sync works](#how-the-sync-works)
+22. [Curated awards and classifications](#curated-awards-and-classifications)
+23. [Current architecture](#current-architecture)
+24. [Future cloud architecture](#future-cloud-architecture)
+25. [Limitations](#limitations)
+26. [Verification status](#verification-status)
+27. [Future work](#future-work)
 
 ## Setup
 
@@ -144,7 +150,7 @@ All commands run from the project folder with the virtual environment's Python.
 | `python -m game_librarian sales-estimates [--force]` | Asks Gamalytic's free API (no key) for the estimated Steam copies sold of every catalog game that is due: each game once in 7 days, 100 games per request (3 requests for 238 games). `--force` asks about every game now. `sync` runs it too. The estimates are shown only on the computer that runs the site; see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only). |
 | `python -m game_librarian serve [--port 8000] [--reload]` | Runs the web app at <http://127.0.0.1:8000>. |
 | `python -m game_librarian status` | Shows catalog counts, the stored prices and snapshot history, the cross-platform Trending lists, critic scores, the sales estimates, the Twitch caches (live streams, most-watched list) and the most recent sync runs with their outcomes. |
-| `python -m game_librarian check-curated` | Validates the curated CSV files (including the reviewer decisions in `steam_matches.csv` and `critic_articles.csv`), the publisher aliases and the Data Story files, and lists problems with their file and line. |
+| `python -m game_librarian check-curated` | Validates the curated CSV files (including the reviewer decisions in `steam_matches.csv` and `critic_articles.csv`), the publisher aliases, the Data Story files and the Daily Trivia questions (`trivia.json`), and lists problems with their file and line. |
 | `python -m game_librarian export-report [--out DIR]` | Writes the Power BI report's CSV tables (default `reporting/data/`) from the catalog and curated files, and points the report at that folder. Run it after `sync`. |
 | `python -m game_librarian candidates add --source discovery\|awards\|igdb [--limit N]` | Collects candidate games (see [Growing the catalog](#growing-the-catalog)). Never changes the catalog. |
 | `python -m game_librarian candidates screen [--limit N] [--min-reviews 50] [--min-positive 70] [--recheck-days D]` | Checks due candidates against Steam, 50 apps per request, and applies the inclusion rules. |
@@ -302,9 +308,12 @@ apps or none for them (for example *Portal*, *Dark Souls* and *Diablo II*). See
 
 ## Using the website
 
-Every page has a black header with **GAME LIBRARIAN** and the tabs **Discover**, **Trending**, **Data Stories**,
-**Dashboard** and **Wishlist**, in that order; the current tab is marked. On a phone the tabs fill two rows with
-touch targets about 40 px tall. **Discover** is the home page `/` (the wordmark links there too), and Trending is at
+Every page has a black header with **GAME LIBRARIAN**, the tabs **Discover**, **Trending**, **Data Stories** and
+**Dashboard**, then two icon buttons: an outline star for the **Wishlist** page and, last, an outline lightbulb for
+[Daily Trivia](#daily-trivia) (since 0.17; the star replaced the "Wishlist" tab). The icons are black squares with
+a thin gold border; their names ("Wishlist", "Daily Trivia") are their accessible names and show as a tip on hover
+and keyboard focus (Escape hides the tip). The current tab is marked. On a phone the tabs fill two rows with touch
+targets about 40 px tall, and the icons are 40 px squares. **Discover** is the home page `/` (the wordmark links there too), and Trending is at
 `/trending`. Versions 0.7 to 0.9 put Trending first; since 0.10, Discover is the first tab.
 
 Discover has a "Discover." headline, a filter sidebar and the catalog.
@@ -355,7 +364,7 @@ Discover has a "Discover." headline, a filter sidebar and the catalog.
   when a mode is selected, and its details say "Not listed on Steam": missing data is not shown as "unsupported".
   Selected modes stay in every search, sort, view, collection, page and details link.
 - **Wishlist.** **Add to wishlist** / **Remove from wishlist** in the details (also for upcoming games and games
-  that are not on Steam), and **Wishlist** in the header. This is Game Librarian's own list, not your Steam wishlist. It is saved in browser local storage: only in this browser
+  that are not on Steam), and the star in the header. This is Game Librarian's own list, not your Steam wishlist. It is saved in browser local storage: only in this browser
   on this device, never synced across browsers or devices, never sent to the server, and erased when the site's
   browser data is cleared (or by some private windows). It needs JavaScript; if the browser blocks storage, the
   details and the wishlist page say so instead of showing a button that cannot work. Damaged stored data is read as
@@ -906,7 +915,7 @@ These measure different things, and the site never presents one as another:
 | PopScore values | Most wanted on IGDB, Most wanted new releases | IGDB's relative shares or list positions | Counts of people or wishlists |
 | Chart positions | Steam's most-wishlisted list; Twitch's most-watched order | A rank among other games or Twitch categories, at one moment | Unit sales, revenue, or a count of players or viewers |
 | Physical resale prices | Not shown | Marketplace prices of physical copies (for example PriceCharting) | Steam's digital prices |
-| Estimated Steam copies sold | The Estimated Steam copies sold chart (Dashboard > Trending games), on the computer that runs the site only | Gamalytic's model estimate of copies bought directly on Steam, all time up to the collection | Sales reported by publishers, sales on other platforms or stores, key activations, sales in a period, or revenue |
+| Estimated Steam copies sold | The Estimated Steam copies sold chart (Dashboard > Trending games > Sales & reception), on the computer that runs the site only | Gamalytic's model estimate of copies bought directly on Steam, all time up to the collection | Sales reported by publishers, sales on other platforms or stores, key activations, sales in a period, or revenue |
 | Unit sales reported by publishers, revenue | Not shown | Not published per game by Valve; Gamalytic's free answers leave revenue out | Anything this site calculates: copies are never multiplied by a price |
 
 **PriceCharting is not integrated.** Its API is paid, and making its price data available to others requires a
@@ -994,18 +1003,129 @@ games that are not sold on Steam; an entry links to Game Librarian only when the
 - **Manual review needed:** the facts were checked by Claude (an AI assistant) against the linked revisions;
   spot-check them, and set `checked_by` when you re-verify a story.
 
+## Daily Trivia
+
+The lightbulb at the end of the header opens **Daily Trivia** in a popup over the current page, which keeps its
+place. It gives visitors a short gaming story each day and links every game that is in the catalog to its details,
+where it can be added to the wishlist. It needs JavaScript, like the wishlist; without it the lightbulb is not shown.
+
+- **Today's Quiz** (the mode it opens in): five multiple-choice questions, one at a time, with the game's cover art,
+  a progress bar, the question number and the score. After an answer it says whether it was right, names the right
+  answer (marked by text, not only by color), explains it in two or three sentences and links the source it was
+  checked against and the cover's IGDB record. One point per correct answer; there is no timer. At the end: today's
+  score, the personal best and the quiz's five games, each with **Details** (the existing details popup) when it is
+  in the catalog and "Not in the catalog" otherwise.
+- **Browse Facts:** one fact at a time (cover art, the fact, its source and **Details**) between previous and next
+  arrows; the ← and → keys work too, and the ends wrap around. It holds the facts of the quizzes shown before today,
+  newest first, plus today's five once today's quiz is finished. Facts of quizzes not shown yet are never sent to the
+  browser, so browsing never gives away a future quiz. When there is nothing to browse yet (the first day, before
+  the quiz is finished), it says so and links to the quiz.
+- **Keyboard and focus:** Enter or Space on the lightbulb opens the popup and focus moves to the question; after an
+  answer, to the verdict; then to the next question or the score. The two modes are tabs (← and → between them).
+  Escape, the close button or a click outside closes the popup, and focus returns to the lightbulb. **Details** opens
+  the game details popup on top; closing it returns to the same trivia card with focus on its Details link.
+- **Finished badge:** after today's quiz is finished, a small gold check sits on the lightbulb (screen readers hear
+  "Today's quiz is finished" as its description). It follows the server's quiz day, so it is gone after the reset.
+
+### How the daily quiz is chosen
+
+- **Reset at 00:00 UTC.** A quiz day is a calendar day in UTC, the same for everyone; the popup also shows the reset
+  in the visitor's local time (6:00 PM in US Central time). The server decides the day, so a wrong clock on the
+  visitor's computer does not change the quiz. A popup left open past the reset loads the new quiz when it is opened
+  again.
+- **Order.** `curated/trivia.json` holds quizzes of exactly five questions. From its `start_day` (21 Nov 2026) on,
+  each day shows one quiz: a quiz never shown before comes first, in file order, once its `available_from` day has
+  come; when every available quiz has been shown, the quiz shown longest ago comes back. The schedule is calculated
+  from the file and the date alone (`game_librarian/trivia.py`), so everyone sees the same quiz on the same day.
+- **After the first seven days.** The seven initial quizzes (35 questions) run from 21 to 27 Nov 2026 and then repeat
+  in the same order: quiz 1 again on 28 Nov, and so on, so there is a quiz every day without an end date. A repeated
+  quiz says so ("Repeat, first shown 21 Nov 2026"), "How Daily Trivia works" explains the rotation, and a visitor
+  who played it before sees when and with what score.
+- **New quizzes come first.** A quiz added with `available_from` set to a later day is that day's quiz (one a day, in
+  file order, when several are added) and then joins the rotation. Adding a quiz never changes an earlier day.
+
+### Scores and progress
+
+- Kept only in this browser on this device (`localStorage` key `game-librarian-trivia-v1`, written by
+  `static/trivia.js`), never sent to the server, like the wishlist; the popup says "Saved on this device".
+- The current attempt (the answers so far and the card shown) is saved after every step, so closing and reopening
+  the popup or reloading the page resumes it.
+- The **first finished score of each day** is saved and never replaced. **Play again for practice** shows a practice
+  score only. The **personal best** is the best first score, dated by the earliest day it was reached. A repeated quiz
+  is a new day, so its first score counts.
+- A new day starts a new attempt; an unfinished attempt from an earlier day is dropped. If the questions of the day
+  change while a visitor plays, a new attempt starts, as practice when the day already has a first score.
+- When the browser blocks site storage (some private windows) or storage is full, the quiz still works until the page
+  is closed and the popup says it is not saved. Damaged or foreign stored data counts as nothing saved, clearing the
+  site's data starts over, and a first score saved in another tab is never overwritten.
+
+### Adding questions
+
+1. Append a quiz of exactly five questions to the end of `quizzes` in `curated/trivia.json`, with a new `id` and
+   `available_from` set to tomorrow or later (so today's quiz does not change for visitors who have started it):
+   `{"id": "quiz-08", "available_from": "2026-12-05", "questions": [ ... five questions ... ]}`.
+2. Write each question like the existing ones:
+
+   ```json
+   {"id": "half-life-no-cutscenes", "category": "mechanics",
+    "question": "…?", "choices": ["…", "…", "…", "…"], "answer": "…",
+    "explanation": "Two or three sentences, also shown as the fact in Browse Facts.",
+    "source": {"title": "Wikipedia: Half-Life (video game)", "url": "https://en.wikipedia.org/w/index.php?title=…&oldid=…"},
+    "checked_on": "2026-12-01",
+    "game": {"title": "Half-Life", "steam_appid": 70},
+    "image": {"source": "IGDB", "kind": "cover", "igdb_id": …, "image_id": "…", "igdb_url": "https://www.igdb.com/games/…", "checked_on": "2026-12-01"}}
+   ```
+
+   - `id`: unique in the file, lowercase words joined by hyphens. Browsers save it, so never change it once shown.
+   - `category`: one of `famous`, `indie`, `development`, `music`, `mechanics`, `awards`.
+   - `question` up to 160 characters; two to four different `choices` up to 80 characters each; `answer` is one of
+     the choices, written the same way. Vary the answer's position.
+   - `explanation` up to 420 characters; `source` is the page the fact was checked against (an `https://` link; for
+     Wikipedia, a permanent `oldid` link); `checked_on` is the day it was checked.
+   - `game.steam_appid` only when that Steam app is the same game (not a remaster or a collection); **Details**
+     appears while the app is in the catalog. Otherwise `null`.
+   - `image` (optional): the game's IGDB cover record, chosen and checked as for Data Stories. Without one, the card
+     shows a plain box.
+3. Check facts against reliable sources and leave out what sources disagree on, or say that they disagree.
+4. Never remove, reorder or rename shown quizzes; correct a question's text in place.
+5. Run `python -m game_librarian check-curated`. Invalid questions are reported; a quiz with an invalid question is
+   left out whole, so every quiz keeps five questions.
+
+### The initial questions and their sources
+
+- **35 questions in 7 quizzes:** famous games, indie games, development stories, music and mechanics (6 each) and
+  awards (5); every quiz mixes five categories. 21 are about catalog games (with Details); 14 are about games
+  outside the catalog, such as Final Fantasy, Tetris and Pac-Man. Portal and Civilization IV name their Steam apps,
+  so their Details appear if they join the catalog.
+- **Checked on 21 Nov 2026** against the linked source: 31 exact Wikipedia revisions, the official FINAL FANTASY
+  YouTube channel's 35th-anniversary interview (2023), Microsoft's Minecraft press release (2014), the Hugo Awards'
+  2021 results and BAFTA's Best Game list. The award facts agree with the verified rows in `awards.csv`.
+- **Final Fantasy's name** follows Hironobu Sakaguchi's explanation in that interview: the team wanted a title that
+  shortens to "FF", like Dragon Quest's nickname, and considered "Fighting Fantasy", which trademark issues ruled out.
+  Three reports of the interview (Inverse, GamesRadar+, Den of Geek) agree. The "last game" story is not presented as
+  the reason, and not declared false either.
+- **Disputed details left out:** the year of Tetris's first version (sources say 1984 or 1985) and the length of
+  Stardew Valley's development (sources differ). Uncertain wording is kept as the source gives it ("Tajiri has said").
+- **Cover art:** each game's IGDB record, matched through IGDB's own Steam record (catalog games) or by title, first
+  release date and platforms (the others), and all 36 candidate covers looked at on one contact sheet. Three covers
+  say what they show: Metroid's Japanese Famicom Disk System box, Pokémon's North American Red Version box and
+  Minecraft's Java Edition cover. Covers load from IGDB's image server and are credited beside each fact, as in Data
+  Stories; a cover IGDB no longer serves becomes a plain box.
+- **Manual review needed:** the facts were checked by Claude (an AI assistant); the file's `checked_by` says so for
+  maintainers (the site does not). Spot-check them, and update `checked_by` when you re-verify.
+
 ## Dashboard
 
-The header's **Dashboard** link opens **Trending games**, the first tab and default page since 0.10: the games of
-the Trending page compared one by one in charts, on the website only. The other tabs are an HTML version of the Power
-BI report (Player reception, Awards, About the data). It needs no account, no Power BI and no export: each page load
-calculates it from the stored data, with the website's five-year ranking window (the Power BI report keeps its
-four-year window, so its ranks can differ). Run `sync` (and `upcoming` for the cross-platform lists), then reload
-the page.
+The header's **Dashboard** link opens **Trending games**, the first tab and default page since 0.10: since 0.15,
+three short report pages about the Trending page's games, on the website only. The other tabs are an HTML version
+of the Power BI report (Player reception, Awards, About the data). It needs no account, no Power BI and no export:
+each page load calculates it from the stored data, with the website's five-year ranking window (the Power BI report
+keeps its four-year window, so its ranks can differ). Run `sync` (and `upcoming` for the cross-platform lists), then
+reload the page.
 
 | Page | URL | Shows | Filters |
 | --- | --- | --- | --- |
-| Trending games (first tab) | `/dashboard` | On the computer that runs the site, Gamalytic's estimated Steam copies sold first (full width). Then the Trending page's games compared one by one: the Upcoming Release Radar (the tracked upcoming games placed by time until release, one section per platform family, with the TBA and approximate dates listed beside it) and ranked bars of IGDB's relative Want to Play values with covers and platforms; Twitch's most-watched list beside Steam reviews, and the games also in Steam's most-wishlisted list as a connected-dot chart; Steam players and positive / negative Steam reviews, with this year's strong-reception games full width above those since the five-year window's start; changes over time once dated snapshots exist, and a collapsed **Sources and methodology** part. See [Trending games](#trending-games) | — |
+| Trending games (first tab) | `/dashboard`, `?report=upcoming`, `?report=momentum` | Three report pages behind one tab bar: **Sales & reception** (the default), **Upcoming releases** and **Momentum**. See [Trending games](#trending-games) | Sales & reception: this year's releases only (`?view=year`); Upcoming releases: a release window (`?window=`) and the open group (`?group=`); Momentum: the game whose players are shown |
 | Player reception | `/dashboard/reception` | Games with review data, total Steam reviews, the review-weighted and the average game positive rate; review volume against positive share (one dot per game, reviews on a log scale); both rates by production label; the five-year ranking; games per positive-share band | Tag or genre, production label, award status |
 | Awards | `/dashboard/awards` | Award entries, winners, nominees, catalog games with awards and the share of entries in the catalog; entries per ceremony year (winners and nominees); how each award's entries match Steam; every verified entry with its source link | Year, award (organization · category), result, match to Steam |
 | About the data | `/dashboard/about` | What the dashboard is, then the definitions (Player reception, Five-year ranking, Refreshing, Snapshots) as expandable topics; the loaded data and the award coverage, calculated from the curated files | — |
@@ -1015,7 +1135,6 @@ the page.
   bookmarked `/dashboard?tag=Indie` or the pre-0.8 `/dashboard?label=Unclassified`) redirects to
   `/dashboard/reception` with the same query, so the filter still applies. A bare `/dashboard` bookmark now opens
   Trending games. The redirects are temporary (307), so nothing is cached for good if the order changes again.
-
 - **Same numbers as Power BI.** The dashboard (`game_librarian/dashboard.py`) aggregates the same tables that
   `export-report` writes (`report_export.collect_tables`), using the measure definitions in
   [`reporting/README.md`](reporting/README.md). A test checks that its cards equal the measures calculated from an
@@ -1023,194 +1142,202 @@ the page.
 - **Filters** apply to every chart and table on their page. They are kept in the address, so a filtered view can be
   bookmarked. A value that does not exist, such as an unknown tag, is ignored. Filters hide games but never
   renumber the five-year ranking.
-- **Charts** are plain HTML and CSS (the release radar's grid is inline SVG), with no chart library. JavaScript only
-  adds conveniences: a menu applies its filter at once (without it, select **Apply**), and the release radar shows
-  tooltips (without it, each point keeps a plain title). Point at a dot, column or bar segment for its details. A chart that shows
-  values only as positions has a **Show the numbers** (or **Show as a table**) table. Colors come from a palette that
-  was checked for contrast and color blindness against the page background (the bar blue and the positive / negative
-  review pair were re-checked on 2026-11-20 against both dark surfaces with the dataviz palette validator: all pass).
+- **Charts** are plain HTML and CSS (the release radar's grid and the player line are inline SVG), with no chart
+  library. JavaScript only adds conveniences, each with a link or a table behind it: a menu applies its filter at
+  once (without it, select **Apply**), and on Trending games the radar's selected game and windows, chart tooltips,
+  arrow keys between a scatterplot's dots and the waterfall's player line. A chart that shows values only as
+  positions has a **Show the numbers** (or **Show as a table**) table. Colors come from a palette that was checked
+  for contrast and color blindness against the page background with the dataviz palette validator.
 - **Trending games** reads the stored Trending data directly (below); none of it is in the Power BI export, so
   this page has no Power BI twin. The Power BI report, semantic model, export and `reporting/README.md` were not
-  changed in 0.10.
+  changed for it.
 - **Removed in version 0.4:** the `GAME_LIBRARIAN_DASHBOARD_URL` setting and the embedded Power BI frame. The
   Dashboard page no longer shows a Power BI report, and the setting is ignored if it is still in `.env`.
 
 ### Trending games
 
-`/dashboard` (the first tab) compares the games of the [Trending](#trending) page one by one. It is built from the
-same two functions as that page (`web._trending_lists` and `web._steam_activity`), so its list charts show the same
-games, chosen by the same rules, with the same timestamps (a test checks that the games match). Since 0.12, Most
-watched on Twitch is analyzed instead of repeated ([below](#most-wishlisted-on-steam-and-most-watched-on-twitch-analyzed)),
-and since 0.14 the [Upcoming Release Radar](#upcoming-release-radar) places the upcoming games of both upcoming
-lists; both look further than the 10 games each list shows. It makes no network request.
-IGDB's attention signals, Twitch's viewing order, Steam players and Steam reviews stay **separate measures**: each
-chart shows one of them in its own unit, none is added to another, there is no combined score, none is shown as
-sales or revenue, and Steam counts never stand for players on other platforms. Every game's name opens its details
-(the same dialog as on Trending), and every chart has a short visible source and update line.
+`/dashboard` (the first tab) answers three questions about the games of the [Trending](#trending) page, one report
+page each, chosen in a tab bar that stays at the top of the window (also on a phone). The Trending page lists the
+games; these pages analyze them. They are built from the same stored lists and rules (`web._trending_lists`,
+`web._steam_activity`; `web._sales_report`, `_upcoming_report` and `_momentum_report`; the templates
+`dashboard_trending.html` and `_trending_*.html`) and make no network request. Each page has one main chart and at
+most two supporting ones, each with its metric, platform scope and date in view; exact values are in a **Show as a
+table** view or the game's details dialog, which every game name and point opens. Definitions and sources fold under
+one **Sources and methodology** per page. IGDB's attention signals, Twitch's viewing order, Steam players and Steam
+reviews stay **separate measures**: none is added to another, there is no combined score, and Steam counts never
+stand for players on other platforms.
 
-| Chart | Form | Real data | What a value means |
+| Page and chart | Form | Real data | What a value means |
 | --- | --- | --- | --- |
-| Upcoming Release Radar (Upcoming & Anticipated, first since 0.14; it replaces 0.12's release timeline and 0.13's top 10 over time) | A circular radar: the center is today, rings end 1 week, 1 month, 3 months, 6 months and 1 year out, and a "Later" band lies beyond; one section per platform family (PC, Xbox, PlayStation, Switch, Other) and a point per game and section with an exact release day. Beside it, the **Date TBA or approximate** games by their stated date. A tooltip (cover, dates, platforms) and a table | The upcoming games of the newest saved Most wanted on IGDB and Most wishlisted on Steam lists (up to 25 each, saved by `upcoming`), with IGDB's release dates per platform and covers | When a game is due **on each platform**, only for an exact day: a month, quarter, year or TBA is never placed. A game on several platforms has a point in each of its sections, so the section counts add up to more than the games. Not every announced game. See [below](#upcoming-release-radar) |
-| Most wanted on IGDB (Upcoming & Anticipated; full width, in two columns, since 0.14) | Ranked bars with cover and platforms | IGDB PopScore type 2 "Want to Play", saved by `upcoming`; IGDB release dates, platforms and covers | IGDB's value as an **index of the list's highest (= 100)**: a relative share, not a count of people, over a period IGDB does not state. The table shows IGDB's raw value and the game's place among all games |
-| Most wanted new releases (Trending now) | Ranked bars, as above | The same Want to Play values, for games first released in the last 90 days on any platform | Index of the list's highest, as above |
-| Most watched on Twitch, with their Steam reviews (Trending now) | Twitch's place (a link to the category on Twitch) beside a split bar of positive and negative Steam reviews, up to 10 games in Twitch's order; a table | Twitch Get Top Games (kept 24 hours) and the Steam review summaries of catalog games | Two measures side by side, **never combined**: a **place** among Twitch's categories by current viewers on any platform, at one moment (no viewer numbers), and Steam purchasers' reviews. Only catalog games among Twitch's first 100 categories have both; the others are left out, not zero |
-| In both lists: most wishlisted on Steam and most watched on Twitch (Trending now) | A connected-dot chart: per game, a circle at its place in Steam's list and a diamond at its place in Twitch's, on one axis of places with #1 (the top) at the left; legend, covers, a table | The newest saved Steam list (up to 25 upcoming games) and Twitch's newest list (100 categories), matched by IGDB id | The same IGDB game in both lists; each place stays in its own list, and the line between the dots only joins them: not a score |
-| Players in game on Steam (Steam activity) | Ranked bars with the Steam header image | Steam Web API `GetNumberOfCurrentPlayers`, one snapshot per game saved by `sync` | Concurrent players **on Steam only**, each at its own snapshot time (in the bar's tooltip and the table); never summed, never all of a game's players |
-| Positive and negative Steam reviews (Steam activity: the same games, and the two strong-reception lists, which since 0.13 span the page, this year's first; their years follow the calendar) | Thin split bars with the counts and the share, in columns in the full-width cards | Steam review summaries (all languages, Steam purchasers) | Steam purchasers' reviews; a game without usable counts says so instead of showing 0 |
-| Changes over time | Small multiples (player sparklines), ranked bars of rises, small tables | Snapshots this site saved | Only between snapshots 7 to 14 days apart; until they exist, one note names the charts that are not available yet and how far the snapshots reach. Since 0.14 Steam's most-wishlisted list follows this rule again, like the other lists (0.12 and 0.13 compared it in cards of its own) |
-| Estimated Steam copies sold (on the computer that runs the site only; first on the page since 0.13) | Full-width ranked bars with the Steam cover, the Trending lists each game is in, and a table | Gamalytic's free list endpoint (`copiesSold`), saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, all time up to the collection; never sales in a period, never revenue. See below |
+| Sales & reception: Estimated Steam copies sold (on the computer that runs the site only; first, full width) | A doughnut: the 5 largest estimates each a slice with the game's cover art cropped into it and a numbered badge, the rest one "Other tracked games" slice whose games fold open; the cohort's total and size in the middle; a numbered list beside it; a table | Gamalytic's free list endpoint, saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, as shares of the cohort's total. See [below](#estimated-steam-copies-sold-local-evaluation-only) |
+| Sales & reception: Strong Steam reception since the five-year window's start (full width; first on the public site) | One scatterplot, each game once: x = total Steam reviews (log scale when the counts span ten times or more), y = positive share to one decimal; this year's releases in the accent color, with a **this year only** view on the same axes; a selected game rings its peers, draws their median as a line and fills a detail strip; a table | Steam review summaries, genres and release dates of the catalog games | Does a game stand out among similar releases: its positive share against the median of its peers. See [Compared with similar releases](#compared-with-similar-releases) |
+| Upcoming releases: Upcoming Release Radar (left, three fifths) | A circular radar (rings: time to release; sections: platform families), windows **Next month**, **Next 3 months**, **All tracked**, a panel with the selected game's cover, dates by platform, list ranks and Twitch place, and **Date TBA or approximate** folded under one counted control | The upcoming games of the newest saved Most wanted on IGDB and Most wishlisted on Steam lists (up to 25 each) | When a game is due **on each platform**, exact days only. See [below](#upcoming-release-radar) |
+| Upcoming releases: IGDB's Want to Play and Steam's most wishlisted, compared (beside the radar; below it on a phone) | One finding, each capture's date and depth, three blocks sized by their number of games (seen on both lists, only on IGDB, only on Steam) under brackets for each capture, the open group's games, a table | The same two captures | What a player would miss by browsing only Steam's list. See [below](#what-a-player-would-miss-on-steams-list-alone) |
+| Momentum: Change in Steam review count | A waterfall: the earlier total, the 8 largest changes either way, "Other tracked games", the later total of exactly the same games | Review snapshots saved by `sync` | See [Momentum](#momentum) |
+| Momentum: Players in game on Steam (beside the waterfall) | A small line of one game's player snapshots at their actual times, breaking at gaps; a waterfall bar picks the game | Player snapshots saved by `sync` | Concurrent players on Steam at each snapshot; never summed |
 
-- **Sources and methodology (collapsed, at the bottom).** The table of every list's measure, source, number of games
-  and observation time; how many games the lists hold and which appear in more than one; the platform counts and
-  release-date precision of each list (no longer the main charts); how Twitch's top 100 categories divide and where
-  the listed games sit in Twitch's order; how the release radar works (games, rings, sections, several platforms,
-  exact days only); how Steam's and Twitch's lists are compared (matching by IGDB id, no Twitch history); and the
-  definitions of snapshot, position, relative value, trend and sales. The jump link "Sources and methodology" opens it (`#sources`).
-- **Steam data of the cross-platform games** (collapsed table): Steam players and reviews for the games of the IGDB and
-  Twitch lists that are catalog games; every other game says "Unavailable" and why (no verified Steam app:
-  console-only, not on Steam or not matched; or on Steam but not in the catalog). **Never zero.**
-- **Covers.** Small thumbnails only help recognition: the name is always written beside them, and a missing or broken
-  image becomes a gray box (`app.js`). IGDB covers for the IGDB and Twitch lists (credited to IGDB.com), Steam store
-  images for the Steam lists, as elsewhere on the site.
-- **Refresh.** `python -m game_librarian upcoming` refreshes the IGDB lists and Twitch's order (at most once every
-  20 hours unless `--force`); `python -m game_librarian sync` refreshes Steam data and then the lists when due.
-  Reload the page afterwards.
-- **Coverage.** Each list shows at most 10 games, as on Trending; the release radar uses the up to 25 upcoming games
-  a refresh saves from each upcoming list, and the Twitch analyses the up to 25 Steam games and Twitch's 100
-  categories. Steam data exists only for catalog games (4 of the
-  37 cross-platform games on 2026-11-20).
-- **Limitations.** IGDB does not say over which period its Want to Play shares are counted, so the bars compare games
-  within one list at one refresh, nothing more. Twitch's order is one moment. Player counts are one moment per game
-  and depend on the time of day. Platform counts overlap by design. The release radar places only exact release
-  days, so most tracked games (TBA or approximate) sit beside it rather than on it. A list that is not refreshed
-  keeps its last saved data with its own date, and an empty or missing list says so instead of drawing a chart.
-- **Removed in 0.8:** the "Steam players in these games" card. It summed player counts taken at different moments,
-  so it was not one simultaneous total. The previous charts of the 15 most played catalog games are replaced by the
-  Trending page's own 10.
+- **Public and local layouts.** Only a browser on the computer that runs the site gets the Gamalytic chart; any
+  other browser gets Sales & reception led by the reception charts, with one line saying that no sales figures are
+  shown, and no Gamalytic figure or wording anywhere.
+- **Removed or merged in 0.15** (the Trending page still lists every list): the Want to Play bars of Most wanted on
+  IGDB and Most wanted new releases (the radar panel gives each game's rank instead), Twitch beside Steam reviews,
+  the Steam player bars and the positive / negative review splits (replaced by the scatterplots), the player
+  sparklines, the rises in players and reviews and the position-change and release-date-change tables of "Changes
+  over time" (the waterfall and the player line replace them), the Steam data table of the cross-platform games,
+  the platform and date-precision counts and Twitch's category split in the methodology (now one sentence of
+  coverage), and the jump links.
+- **Removed or merged in 0.16:** the two strong-reception scatterplots (now one chart, each game once), the
+  copies-sold bars (now the doughnut) and "Which wishlisted games are also being watched?" (Steam against Twitch;
+  Twitch's place now shows in the selected game's panel, and `list_history.py` went with that card).
+- **Refresh.** `python -m game_librarian sync` refreshes the Steam data (reviews, genres, release dates, players)
+  and then, when due, the IGDB lists, Twitch's order and the sales estimates; `python -m game_librarian upcoming`
+  refreshes the IGDB lists and Twitch's order alone (at most once every 20 hours unless `--force`), and
+  `python -m game_librarian sales-estimates` the Gamalytic estimates alone. Reload the page afterwards.
 
 #### Upcoming Release Radar
 
-Since 0.14 the **Upcoming Release Radar** leads Upcoming & Anticipated. It replaces 0.12's "Most wishlisted on Steam:
-release timeline" and 0.13's "Most wishlisted on Steam: the top 10 over time" (`dashboard.release_radar`, the radar
-card in `templates/dashboard_trending.html`, its tooltip in `static/app.js`). No table, command or sync step was
-added: it reads the lists that `upcoming` (also run by `sync`) already saves.
+Since 0.14 the **Upcoming Release Radar** places the tracked upcoming games; since 0.15 it is the main chart of
+Upcoming releases (`dashboard.release_radar`, `templates/_trending_upcoming.html`, its script in `static/app.js`).
 
 - **Which games.** "Upcoming games in our tracked lists": the upcoming games of the newest saved Most wanted on IGDB
   and Most wishlisted on Steam lists. Each refresh saves the first 25 upcoming games of each (the Trending page shows
-  10), and a game in both lists counts once. It is not every announced game. A game that came out since the last
-  refresh leaves the radar at the next page load.
+  10), and a game in both lists counts once. It is not every announced game.
 - **Rings.** The center is today. The rings end 1 week, 1 month, 3 months, 6 months and 1 year later (calendar
-  months: 20 Nov + 1 month = 20 Dec), and an outer **Later** band holds what is due after a year (two years or more
-  out sits at its edge). Every band has the same width, so the scale is not linear; inside a band a later day sits
-  further out, and no point sits on a ring line.
-- **Sections.** One per platform family the games are announced for, clockwise from the top: PC (IGDB's "PC
-  (Microsoft Windows)", on any store, not only Steam), Xbox, PlayStation, Switch (Nintendo Switch and Switch 2) and
-  Other (any other platform, such as Mac). A section's number counts its placed games. The angle inside a section
-  only keeps games apart.
+  months: 20 Nov + 1 month = 20 Dec), and an outer **Later** band holds what is due after a year. Every band has
+  the same width, so the scale is not linear; inside a band a later day sits further out.
+- **Sections.** One per platform family the games are announced for, clockwise from the top: PC (on any store),
+  Xbox, PlayStation, Switch and Other (any other platform, such as Mac). The angle inside a section only keeps games
+  apart.
 - **Several platforms.** A game gets a point in every section where it has an exact release day, at that family's
-  earliest day: *Persona 4 Revival* has PC, Xbox and PlayStation points on 18 Feb 2027 and a Switch point on 20 May
-  2027. So the section numbers add up to more than the games, and the line under the radar gives both counts.
+  earliest day, so a game due on PC and consoles on different days sits at a different distance in each section.
 - **Exact days only.** A section whose date is a month, quarter, year or TBA gets no point. A game without any exact
-  day is listed beside the radar under **Date TBA or approximate**, by the earliest date IGDB states: months,
-  quarters and years in order of the last day each allows ("Mar 2027" before "2027"), then TBA, then "No date yet"
-  (only an early access, or platforms listed without a date). An alpha, beta or early access is not a release.
-- **Pointing, focusing, opening.** Pointing at or focusing a point shows a tooltip with the cover, the name, that
-  point's date and platforms, every platform's date and the lists, and lights up the game's points in its other
-  sections. The tooltip stays open while the pointer is on it and closes with Escape. A click, a tap or Enter opens
-  the game's details dialog, as everywhere on the site. Without JavaScript, each point keeps a plain title and opens
-  the details page.
-- **Keyboard and screen readers.** Only a game's first point is a tab stop, so Tab moves from game to game, soonest
-  first. That point's text gives every date and platform; the repeated points are hidden from screen readers. Points
-  keep a 24 px pointer target, and a system color in high-contrast modes. **Show as a table** lists every game with
-  its soonest release, its sections, every platform's date and its lists, and the list beside the radar needs no
-  hover either.
-- **Phones.** The radar takes the card's width (320 px on a 390 px screen), the dated list moves below it, and the
-  section labels stay inside the circle.
-- **Real data, 2026-11-20** (a copy of the database): 44 upcoming games, the 25 saved from each list, 6 in both. 9
-  have an exact release day, giving 30 points: PC 9, Xbox 8, PlayStation 8, Switch 3 and Other 2 (Mac). The soonest
-  is *Warhammer 40,000: Dawn of War IV* (PC, 3 Dec 2026); the furthest point is *Persona 4 Revival* on Switch 2 (20
-  May 2027), so the "Later" band is empty. The other 35: 13 with only a month, quarter or year (2026 to 2028), 16
-  TBA, 6 with no date.
-- **Limitations.** Most tracked games have no exact day yet, so most sit beside the radar, not on it. IGDB's dates
-  can change; a change shows under Changes over time once two refreshes see it. Points can crowd where many games are
-  due within weeks of each other; the tooltip, the list and the table keep every game readable.
-- **Empty states.** Not refreshed yet; no tracked game still upcoming; tracked games but no exact day (no points:
-  every game listed by its stated date).
+  day is under **Date TBA or approximate**, one control that says how many games it holds (each counted once), by
+  the earliest date IGDB states.
+- **Windows (0.15).** **Next month** and **Next 3 months** end on the 1-month and 3-month rings: they keep only the
+  points due by then (counted in each button), dim the bands beyond, and update the address (`?window=month` or
+  `quarter`, which also works without JavaScript). They never add an approximate date.
+- **Selected game (0.15).** The panel beside the radar (below it when the radar's card is under 700 px wide, as it is
+  beside the comparison since 0.16) shows one game: the soonest when the page opens, then whatever the visitor points
+  at with a mouse or pen, focuses with Tab, or taps, on the radar or in the comparison's open group. It gives the
+  cover, the name, the soonest release, every platform's date (with the days to go for an exact day) and the game's
+  rank in each tracked list, as the Trending page numbers it. A second click or tap on the selected game, Enter, or
+  the name in the panel opens the details dialog. TBA and approximate games select the same way.
+- **Keyboard and screen readers.** Only a game's soonest point is a tab stop, so Tab moves from game to game, soonest
+  first, and a window never hides that point while another of the game's points shows. Its text gives every date
+  and platform; the repeated points are hidden from screen readers. **Show as a table** lists every game with its
+  soonest release, its sections, every platform's date and its ranks.
+- **Real data, 2026-11-20** (a copy of the database): 44 upcoming games (6 in both lists); 9 have an exact day, giving
+  30 points; Next month 2 games, Next 3 months 7; 35 TBA or approximate. The first selected game is *Warhammer
+  40,000: Dawn of War IV* (PC, 3 Dec 2026).
+- **Empty states.** Not refreshed yet; no tracked game still upcoming; tracked games but no exact day (no points, the
+  list open instead).
 
-#### Most wishlisted on Steam and Most watched on Twitch, analyzed
+#### What a player would miss on Steam's list alone
 
-Since 0.12 the dashboard no longer repeats these two lists as position tiles: the Trending page lists them, and the
-dashboard analyzes them (`game_librarian/list_history.py`, `dashboard.py`, `web._list_analysis`). Since 0.14 Steam's
-list has no chart of its own: its upcoming games are on the [release radar](#upcoming-release-radar), and its
-7–14-day position changes are under Changes over time, as for the other lists. "Most watched" uses Twitch's data
-(Helix Get Top Games) and is named **Most watched on Twitch** everywhere; it was never a Steam list.
+Since 0.16 the main analysis of Upcoming releases compares IGDB's Want to Play capture with Steam's most-wishlisted
+capture (`game_librarian/list_comparison.py`; the radar reads the same distinct games).
 
-- **Snapshots, already saved.** Every `upcoming` refresh (also run by `sync`) saves Steam's list as a dated snapshot
-  in `popularity_snapshots`: the first 25 upcoming games among the 200 places it scans, with each place, IGDB's value,
-  when IGDB calculated it and when it was saved. The signal key (`steam_wishlists`) fixes the source (IGDB PopScore
-  type 10, from Steam), the definition and the scope (PC games with a Steam store page). No new table or sync step
-  was needed.
-- **The newest list.** IGDB recalculates PopScore about once a day, and `upcoming --force` can save the same
-  calculation twice, so `list_history` reads one snapshot per IGDB calculation (the newest saved of it). "In both
-  lists" uses the newest. The Trending page's "Up 2 places since …" keeps its own rule (a snapshot 7 to 14 days
-  older).
-- **In both lists.** Steam's newest saved list and Twitch's newest list share a game when Twitch names the same IGDB
-  game for a category. Names are never matched. Each place stays in its own list.
-- **Twitch place and Steam reviews.** Only catalog games have stored Steam reviews, so only they are compared; the
-  others are left out, never counted as zero. A Twitch place covers viewers on every platform at one moment; Steam
-  reviews cover Steam purchasers. The two are shown side by side and never combined into a score.
-- **No Twitch history.** The Twitch Developer Services Agreement (last modified 12/04/2024, re-read on 2026-11-20)
-  allows caching Twitch data "for only a twenty-four hour time period", and lists "Research - educational and
-  non-commercial projects that examine trends over specific time periods" among uses that need "a separate agreement
-  and running through an approval process". So Twitch's list is still deleted after 24 hours, no Twitch snapshots
-  are saved, and the dashboard shows no Twitch rank changes or repeat top places: that analysis cannot become
-  available with this site's access, only with such an agreement.
-- **Removed in 0.14:** the release timeline of Steam's list (0.12) and its top 10 over time (0.13), replaced by the
-  release radar. Their comparisons (moves, entries and exits, time in the top 10) left `list_history.py` with them.
-- **Real data, 2026-11-20** (a copy of the database): 12 of the 75 games in Twitch's first 100 categories have
-  Steam reviews here. One game is in both lists: *Deadlock*, #1 most wishlisted on Steam and #36 on Twitch.
-- **Empty states.** Not refreshed yet; no Twitch list from the last 24 hours; no game in both lists.
+- **Population.** The newest saved snapshot of each list, both from one refresh: the first 25 upcoming games of IGDB
+  PopScore type 2 ("Want to Play", every platform, read from its first 1,000 places) and of type 10 (Steam's
+  most-wishlisted upcoming games, read from its first 200 places), with the release radar's upcoming rule applied
+  again on the day the page is served. The card shows each capture's save time, IGDB's calculation time and its real
+  depth: on 2026-11-20 IGDB's 25 reached place #447 (most of its highest places are games already out), Steam's #26.
+- **Matching.** One game when entries share a verified identifier: the IGDB id, the game key (a catalog Steam app) or
+  a verified Steam app (one Steam app listed by IGDB with the same name on Steam, or a reviewer's decision). Names
+  are never compared. A game listed twice in one capture counts once, at its best rank.
+- **Unresolved identities.** When IGDB links one Steam app to two games without a verified match for each, they may
+  be one game: both are listed apart as unresolved and left out of the groups, so they can never count once as
+  "only on IGDB" and again as "only on Steam". A saved entry without an IGDB record is counted apart too.
+- **Groups and denominator.** Every distinct resolved game is in exactly one group: **Seen on both lists**, **Seen
+  only on IGDB** or **Seen only on Steam**. Their counts add up to the distinct games of both captures, the one
+  denominator, and the card prints the reconciliation (IGDB's distinct games + Steam's − both = the total). Each
+  block is as wide as its count (a 2 rem minimum keeps a tiny group readable and tappable); an empty group shows its
+  zero beside the bar without a width. A block opens its group: names (each opens the details dialog), platforms,
+  ranks in each capture and a started early access; a listed game is selected for the radar's panel and lit up on
+  the radar (a window that hides it gives way to **All tracked**).
+- **Steam listing.** Games seen only on IGDB split into **Verified Steam listing** and **Steam availability
+  unknown**. Absence from Steam's capture means only that the game was not among the places that capture holds; no
+  game is called console-only, because IGDB's platforms are announcements, not exclusivity.
+- **The finding** is generated from the counts: "Of N distinct upcoming games in these captures, X appeared only on
+  IGDB. Of those, Y had a verified Steam listing", plus how many of those Y were already in early access. With a
+  capture missing, from two refreshes, or without an upcoming game, the card shows the coverage it has and no groups.
+- **Twitch** is context only: where Twitch's newest list names the same IGDB game, the selected game's panel gives
+  its place with a link to Twitch. It is not in the comparison, and no Twitch history is kept (24-hour cache).
+- **Real data, captures of 2026-11-20 16:55 UTC** (a copy of the database, checked 2026-11-21): 44 distinct upcoming
+  games = 25 + 25 − 6; 19 seen only on IGDB, 6 on both, 19 only on Steam, 0 unresolved. Of the 19, 14 had a verified
+  Steam listing and 9 of those 14 were already in early access, while none of the 25 games of Steam's capture was.
 
 #### Estimated Steam copies sold (local evaluation only)
 
-Since 0.11, Trending games has an **Estimated Steam copies sold** section (jump link "Estimated sales"), first on
-the page since 0.13 (0.11 and 0.12 had it between Steam activity and Changes over time). It is built for **local
-evaluation**: Gamalytic's published terms do not allow
-showing its data to anyone else (see [Gamalytic](#gamalytic-checked-2026-11-20)), so the site sends the section only
-to a browser on the computer that runs it. Any other browser gets the page exactly as before 0.11, without the
-section, its jump link or any Gamalytic figure.
+Since 0.11 the dashboard has an **Estimated Steam copies sold** chart; since 0.15 it is the first chart of Sales &
+reception. It is built for **local evaluation**: Gamalytic's published terms do not allow showing its data to anyone
+else (see [Gamalytic](#gamalytic-checked-2026-11-20)), so the site sends it only to a browser on the computer that
+runs it.
 
 - **Collect the estimates:** `python -m game_librarian sales-estimates` (also run by `sync`, unless
-  `--skip-sales`). No account, key or setting is needed. Reload `/dashboard` on the same computer afterwards.
-- **What a value is:** Gamalytic's `copiesSold`, "Estimated number of owners who purchased the game directly on
-  Steam. This does not include key-activated units." It covers all time up to the collection. It is a model's
-  estimate, not sales reported by a publisher, and says nothing about other platforms or stores. The page never calls
-  it sales this year, this month or recently.
-- **How Gamalytic estimates:** from Steam's top-seller rank, concurrent players, a regression on release year,
-  review score and playtime, and publicly disclosed sales. Gamalytic reports that 77% of single-game estimates were
-  within 30% of actual sales and 98% within 50%, and that smaller and free-to-play games are less accurate
-  ([gamalytic.com/about](https://gamalytic.com/about), read 2026-11-20).
-- **Which games:** the catalog games on the Trending page (every list there), released, sold on Steam for a price,
-  with an estimate in their newest collection; up to 10 bars, largest first, on one scale from zero. **Free-to-play
-  games are left out** (Steam's own free flag): nobody has to buy them, and Gamalytic gives them very large values
-  (Counter-Strike 2: 367,242,903). The line under the chart counts what is left out and why (free to play, no
-  current Steam price, not released yet, no Gamalytic estimate, not asked yet); **About these estimates** names those
-  games. A missing estimate is never drawn as zero. This is not Steam's best-seller list.
-- **Source and time:** the line under the chart gives the source, when this site collected the values, and
-  "Gamalytic's data dated", the `cacheTimestamp` in Gamalytic's answer (undocumented; the same value on every answer
-  of 2026-11-20). A note appears when the estimates are more than 14 days old or when the last collection failed;
-  the estimates collected before stay on the page.
-- **History:** every collection adds rows (`sales_estimates`, one per game and collection); none is overwritten.
-  No change between collections is shown: Gamalytic revises its model, so a difference between two collections is
-  not a number of copies sold in between.
-- **No revenue.** Gamalytic's free answers leave `revenue` out even when it is requested, and copies times today's
-  price would be wrong (discounts, regional prices, bundles), so no revenue is shown or calculated.
-- **Collapsed:** **Show as a table** (Gamalytic's figure and the collection time) and **About these estimates**
-  (what a value is, the method and its accuracy, which games, times and history, no revenue, the terms).
-- **Real data (2026-11-20):** 235 of the 238 catalog games had an estimate (Grand Theft Auto V Legacy, Yakuza 0 and
-  the free "Counter-Strike:Global Offensive" app 4465480 had none). The Trending page showed 25 catalog games: 16 qualified, led by Stardew
-  Valley (≈ 32.7M), Rust (≈ 31.6M) and Cyberpunk 2077 (≈ 26.6M); 7 free-to-play games and 2 without a current Steam
-  price were left out.
+  `--skip-sales`). No account, key or setting is needed.
+- **What a value is:** Gamalytic's `copiesSold`, an estimate of owners who bought the game directly on Steam, all
+  time up to the collection ("Steam · cumulative estimates" above the chart). Not sales reported by a publisher,
+  sales in a period, other platforms or revenue.
+- **Which games:** the catalog games on the Trending page, released, sold on Steam for a price, with an estimate in
+  their newest collection. Since 0.16 a **doughnut**: the 5 largest each a slice (angle = share of the cohort's
+  total, the same ring thickness for all, the Steam cover cropped into it, a plain blue slice without one), the
+  rest one "Other tracked games" slice; the middle gives the cohort's total and size, the table shows the slices
+  adding up to it, and shares are rounded so they add up to 100.0%. Selecting a slice or a listed game selects its
+  dot on the reception chart when it has one (8 bars in 0.15). Free-to-play
+  games are left out. The line under the chart counts what is left out and why; **Sources and methodology** names
+  those games and holds the notes 0.11-0.14 had under "About these estimates" (method and accuracy, times, history,
+  no revenue, the terms).
+- **Real data (2026-11-20):** 16 Trending games qualified, ≈ 176.9M in all (176,898,948), led by Rust (≈ 31.6M,
+  17.9%), Cyberpunk 2077 (≈ 26.6M) and Euro Truck Simulator 2 (≈ 26.1M); 11 games share "Other tracked games".
+
+#### Compared with similar releases
+
+New in 0.16 on Sales & reception (`dashboard.peer_benchmark`, `dashboard.reception_chart`): does a game stand out
+among similar releases?
+
+- **Comparable games:** every catalog game with a usable Steam review summary and an exact Steam release date in the
+  five-year window, strong reception or not. A game without usable reviews is never a peer.
+- **Peers:** the other comparable games sharing the selected game's peer genre, one of Steam's gameplay genres
+  (Action, Adventure, Racing, RPG, Simulation, Sports, Strategy; Casual, Indie, Free To Play, Early Access and
+  Massively Multiplayer never make games comparable). With several, the most specific: the genre the fewest other
+  comparable games share among those at least 5 share (ties A–Z); when none reaches 5, the genre most share.
+- **Peer median:** the median positive share of the peers, each game once whatever its number of reviews, drawn as a
+  line; the strip gives the game's reviews and share, the median, the **gap in percentage points** and the peers'
+  genre, count and window. Shares round half up to one decimal from the exact counts, and the gap is the difference
+  of the two numbers shown. With fewer than 5 peers: the count and "Too few comparable games".
+- **Real data (2026-11-21):** 82 games drawn, 94 comparable; Elden Ring 93.2% against the RPG median 91.5% (35
+  peers), +1.7 points; Forza Horizon 5 is compared within Simulation (6 peers).
+
+
+#### Momentum
+
+New in 0.15: **Which games account for the change in review activity across our tracked games?**
+(`dashboard.review_waterfall`, `dashboard.player_line`, `templates/_trending_momentum.html`).
+
+- **Two comparable snapshots.** Each catalog game is compared by the Trending page's rule: its newest Steam review
+  count against its newest count 7 to 14 days earlier. The cohort is every game with a count at both ends, and the
+  earlier and later totals cover exactly those games, so a game that joined the catalog in between never shows up as
+  a rise. The page states both dates and the number of matched games.
+- **The waterfall.** From the earlier total, the 8 largest changes either way, each starting where the one above
+  ended, then "Other tracked games", then the later total. A fall (Steam removed or corrected reviews) is kept at its
+  size. Zero is the earlier total and each bar's length is its change; the totals are written as numbers, because
+  drawn from zero they would dwarf every change. The steps add up exactly to the later total minus the earlier one,
+  and the table shows that sum. The measure is "Change in Steam review count": not copies sold or players.
+- **The player line.** Beside it, one game's Steam player snapshots over the last 30 days, each at its actual time,
+  on an axis from zero; snapshots more than 2 days apart are not joined, so a gap shows as a break, and a game needs
+  snapshots at least 7 days apart for a line. A game's bar in the waterfall switches the line to it (`?player=`
+  without JavaScript); bars of games without enough history are not links.
+- **Not enough history.** Until both rules can be met, the page is one coverage note from the database (0.16): the
+  games and days with review and player counts, that no game has a comparable pair yet, and when the first can
+  appear. **Real data, 2026-11-21:** review counts of 234 games on 16, 19 and 20 Nov (3 each), player counts of 238
+  games on 19 and 20 Nov; the first comparison can appear from 23 Nov 2026. The waterfall and the line were checked
+  with test data only (see [Verification status](#verification-status)).
+- **First four weeks after launch (planned, not shown).** A game will qualify with a reliable Steam release date (the
+  exact day Steam gives) and a review count saved at every weekly boundary: on the release day and 7, 14, 21 and 28
+  days later, each on that day or the next (`dashboard.launch_weeks_coverage`). Missing counts stay missing, nothing
+  is filled in between snapshots, and today's lifetime review totals never stand for launch weeks. Review counts
+  began on 16 Nov 2026 and no catalog game has been released since, so no game qualifies yet.
 
 ### Power BI version (optional)
 
@@ -1617,9 +1744,10 @@ game_librarian/related.py   pure: "More games like this" from shared characteris
 game_librarian/publishers.py  pure: groups Steam's publisher spellings for the publisher filter
 game_librarian/pricing.py   pure: price freshness, sale badges and the details' price text
 game_librarian/trending.py  pure: the Steam activity sections of Trending and changes between dated snapshots
-game_librarian/list_history.py  pure: Steam's most-wishlisted list as saved snapshots, one per IGDB calculation
-                            (the newest is matched with Twitch's list)
+game_librarian/list_comparison.py  pure: IGDB's and Steam's upcoming captures matched by verified identifiers, in
+                            three groups (both, only IGDB, only Steam) with the finding
 game_librarian/stories.py   Data Stories: loads and validates curated/stories/*.json; waits, platforms, chart positions
+game_librarian/trivia.py    Daily Trivia: loads and validates curated/trivia.json; the UTC quiz day and the schedule
 game_librarian/candidates.py  catalog expansion: candidate sources, Steam screening rules, review, promotion
 game_librarian/identity.py  game keys: a Steam app id, or igdb-<id> for a game without a catalog Steam app
 game_librarian/twitch.py    Twitch app token (shared with IGDB), Helix streams and top games, category matching, 24-hour cache
@@ -1631,8 +1759,9 @@ game_librarian/critics.py   critic scores: article matching, review-table extrac
 game_librarian/gamalytic.py estimated Steam copies sold: free list endpoint, pacing, 24-hour budget, collection
 game_librarian/web.py       FastAPI + Jinja templates; reads stored data; calls Twitch only from /games/{key}/live;
                             sends the sales estimates only to a browser on the same computer
-game_librarian/dashboard.py  pure: the Dashboard pages' measures, filters and chart positions (the release radar too)
-templates/, static/         the dark catalog layout, app.js and wishlist.js (no frontend framework)
+game_librarian/dashboard.py  pure: the Dashboard pages' measures, filters and chart positions (Trending games'
+                            scatterplots, release radar, review waterfall and player line too)
+templates/, static/         the dark catalog layout, app.js, wishlist.js and trivia.js (no frontend framework)
 game_librarian/report_export.py  the report tables (collect_tables) and their CSV export (export-report)
 reporting/                  Power BI Project: TMDL semantic model + PBIR report pages
 ```
@@ -1774,11 +1903,11 @@ personal tool and those public-use rights have not been confirmed.
   screenshots (see [Data Stories](#data-stories)).
 - **Tag counts while choosing.** The numbers next to the tags count the games in the current results. They update
   when you apply the filters, not while you tick boxes, so a combination of tags can leave no game.
-- **Trending games dashboard** analyzes only what the Trending lists hold: at most 10 games per list, Steam data
-  only for catalog games, Twitch's order without viewer numbers, and history only from the snapshots this site has
-  saved. Its Want to Play bars compare IGDB's relative shares within one list and one refresh: IGDB publishes neither
-  the formula nor the period, so a bar twice as long means twice IGDB's value, not twice as many people. Nothing in
-  it is in the Power BI report, which was not changed for the redesign.
+- **Trending games dashboard** analyzes only what this site stores: Steam data only for catalog games, Twitch's
+  order without viewer numbers, the upcoming games of the two tracked IGDB lists, and history only from the
+  snapshots this site has saved. Momentum needs review snapshots of the same game 7 to 14 days apart and player
+  snapshots spanning 7 days, so until the sync has run that long it shows one message with the dates saved. A change
+  in review count is not copies sold or players. Nothing in it is in the Power BI report, which was not changed.
 - **Who checked the Data Stories.** The story pages say when and against which revisions the facts were checked, not
   who checked them. The story files (`checked_by`) and the Data Stories section above still record that an AI
   assistant did the checking, for maintainers; a person should spot-check the facts.
@@ -1801,6 +1930,105 @@ personal tool and those public-use rights have not been confirmed.
   `httpx2`. The tests pass with `httpx` 0.28, so no extra dependency was added.
 
 ## Verification status
+
+**Version 0.17 (Daily Trivia), checked on 2026-11-21.**
+
+- **What changed:** [Daily Trivia](#daily-trivia): the header's star (Wishlist) and lightbulb (Daily Trivia), the
+  popup (`templates/trivia_panel.html`, `/trivia/panel`), the schedule (`game_librarian/trivia.py`), browser storage
+  (`static/trivia.js`) and 35 checked questions (`curated/trivia.json`). The game details dialog is now on every page
+  (it was on Discover, Trending and Trending games only) so that trivia can open it anywhere; the full details page
+  still has none. `check-curated` validates the trivia file. No table, command, setting, dependency or data source
+  was added; the wishlist's storage, the details, the navigation, the dashboard and the Power BI files are unchanged.
+- **Automated tests:** `python -m pytest` runs 550 tests, all passing (528 before). New: `tests/test_trivia.py` (the
+  shipped questions and sources, the checks of the file, the UTC reset, the order, repeats, a quiz added later,
+  Browse Facts, the popup's content, missing covers and catalog links, escaping, the header on every page,
+  check-curated) and `tests/js/trivia.test.mjs` with Node (resuming, first score and practice, personal best, a new
+  day, a repeated quiz, changed questions, damaged, blocked, full and cleared storage, another tab). Two navigation
+  assertions were updated for the star.
+- **Mutation check:** 12 deliberate breaks (new quizzes not first, today's facts leaking into Browse Facts, a local
+  instead of a UTC day, http sources accepted, an invalid question kept, practice replacing the first score, a
+  personal-best tie, another tab's score overwritten, an old attempt resumed, today's facts unmarked, Details for
+  games outside the catalog, the details dialog on the full page), each file restored byte for byte. The first run
+  missed the old attempt (a repeated quiz resumed last week's finished attempt); a test now covers it, and all 12
+  fail the tests.
+- **Browser check** (headless Edge through the DevTools protocol, 1280 and 390 px, real key and mouse events, on a
+  copy of the real database with the server's clock moved between days): 62 checks passed: the header controls
+  (order, gold-bordered 36 px squares, accessible names, tips on hover and focus, Escape), opening with Enter over a
+  scrolled page that keeps its place, focus on the question and then the verdict, right and wrong answers, Details on
+  top of the popup and back to the same card (also from Browse Facts), Escape and the close button returning focus
+  to the lightbulb, resuming after closing and after a reload, the empty Browse Facts before finishing, the first
+  score in storage and the badge, practice keeping the first score, the arrows and keys in Browse Facts, a cover
+  that fails to load, blocked storage, the next UTC day, a popup reopened after the reset, a repeat with the
+  visitor's earlier score, no sideways scrolling at 390 px, and no lightbulb without JavaScript.
+- **Limits:** a real screen reader, a real phone and browsers other than Edge were not used. The facts were checked
+  against the linked sources by Claude (an AI assistant) and need a person's spot-check.
+
+**Version 0.16 (Trending games: what a player would miss, and peers), checked on 2026-11-21.**
+
+- **What changed:** Upcoming releases leads with IGDB's Want to Play against Steam's most wishlisted, beside the radar
+  ([What a player would miss](#what-a-player-would-miss-on-steams-list-alone)); Sales & reception has one reception
+  chart with peer medians ([Compared with similar releases](#compared-with-similar-releases)) and the copies-sold
+  doughnut (local only); Momentum shows one coverage note and documents the planned launch weeks. No table, command,
+  setting, dependency or data source was added; Power BI files are unchanged.
+- **Automated tests:** `python -m pytest` runs 528 tests, all passing. New: `tests/test_list_comparison.py` (groups
+  reconciling to the distinct union, duplicates, a game matched by its Steam app, unresolved identities, missing and
+  mismatched captures, a verified Steam listing outside Steam's capture, the page, Twitch as context); in
+  `tests/test_dashboard_trending.py` the hand-calculated peer median (with a lower-rated peer, never the selected
+  game), the small-group fallback, missing reviews, half-up rounding and the gap; in `tests/test_sales_estimates.py`
+  slices that add up to the total and a public page without any estimate; in `tests/test_momentum.py` the coverage
+  note and the launch-week rule. `tests/test_list_analysis.py` (the Twitch overlap card) was removed with the card.
+- **Browser check** (headless Edge through the DevTools protocol, 1280 and 390 px, on a copy of the real database): 20
+  checks passed: no sideways scrolling, the comparison beside the radar (below it on a phone), blocks sized 19 : 6 :
+  19, Tab reaching a listed game and selecting it for the panel, a block opening its group in place (address kept),
+  a game hidden by a window brought back, first tap selects and second opens the details, the doughnut first with
+  five covers loaded, a doughnut game selecting its dot with 29 ringed peers and the RPG median line, the arrow keys
+  moving between dots, the this-year view on the same axes, and no Gamalytic markup for another computer.
+- **Limits:** a real screen reader and a real phone were not used. The captures are one refresh: Steam's capture
+  holds only its first 26 places, so "only on IGDB" says nothing about Steam's places below them.
+
+**Version 0.15 (Trending games as three report pages), checked on 2026-11-20.**
+
+- **What changed:** Dashboard → Trending games is three report pages behind one sticky tab bar (`?report=`), Sales &
+  reception first: [Trending games](#trending-games). Estimated Steam copies sold (8 bars, local only) leads Sales &
+  reception where it may be shown; this year's and the five-year window's strong-reception games are two
+  scatterplots on shared axes (`dashboard.reception_plots`). Upcoming releases: the release radar at two thirds with
+  a selected-game panel, ring-aligned windows and the TBA / approximate games under one counted control; the
+  wishlisted-and-watched comparison sized to its overlap. Momentum (new): the review waterfall
+  (`dashboard.review_waterfall`) and the player line (`dashboard.player_line`). The long feed of 0.10-0.14 is gone
+  (listed under [Trending games](#trending-games)). The templates are split into `dashboard_trending.html` and
+  `_trending_*.html`. No table, command, sync step, dependency or data source was added; Trending, Discover, the
+  ranking, the wishlist, Data Stories and the other dashboard pages are unchanged, and so are the Power BI report,
+  semantic model, export and `reporting/README.md`.
+- **Automated tests:** `python -m pytest` runs 515 tests, no network needed, all passing. New: `tests/test_momentum.py`
+  (the waterfall's cohort, falls, zero changes, step order, reconciliation, axis and dates; the player line's span,
+  gaps and ticks; the page, `?player=` and the sparse states); rewritten: `tests/test_dashboard_trending.py` (the
+  report tabs, the removed feed, the shared axes, log or linear scale, named games, public and local layouts),
+  `tests/test_release_radar.py` (soonest point as tab stop, windows, panel), `tests/test_list_analysis.py` (the
+  comparison's three sizes); updated: the sales, compact-page and two older test files.
+- **Waterfall arithmetic:** on a database copy with re-dated snapshots (below), an independent SQL calculation of the
+  per-game rule gave the same cohort (234 games), totals (47,557,589 → 47,590,768, +33,179), eight steps and
+  "Other tracked games" (+20,371, 226 games) as the page.
+- **Mutation check:** 12 deliberate breaks (zero changes as steps, falls dropped, signed ranking, the oldest
+  baseline, the log switch, a per-plot axis, the radar's tab stop and window ends, estimates for every browser, the
+  line's gaps and span, hidden points shown), each file restored byte for byte. One was missed at first (a per-plot
+  y axis): a test now has a longer-window game with a lower share, and all 12 fail the tests.
+- **Browser check** (headless Edge through the DevTools protocol, 1280 and 390 px, as this computer and as another
+  one behind a proxy): on a copy of the real database 98 checks passed: no sideways scrolling, every visible image
+  loaded (the 35 folded covers once opened), the main chart in the first screen, the Gamalytic chart only locally,
+  both scatterplots with one geometry, labels inside their cards and never overlapping, the radar round at two
+  thirds with the panel beside it (below on a phone), sticky tabs (65 px tall on a phone); keyboard (Tab through the
+  radar soonest first with the panel following, Enter and Escape on the dialog, one Tab stop per scatterplot and the
+  arrow keys with a tooltip), pointer (hover selects, a click on the selected point opens it), touch (the first tap
+  selects, the second opens) and the windows (in place and with `?window=month`). On the re-dated copy 15 Momentum
+  checks passed (layout at both widths, aligned rows and meeting connectors, a bar switching the line in place and
+  with Enter, the line's gap). The first runs found two faults, now fixed: a long direct label made the phone page
+  scroll sideways, and narrowing the radar could leave a TBA game in the panel.
+- **Test data:** real snapshots are too close together for Momentum (reviews on 16, 19 and 20 Nov, players on 19 and
+  20 Nov), so the real page shows its one-line message. The waterfall and the player line were checked only on a
+  copy where the 16 Nov review counts were re-dated to 12 Nov and the 19 Nov player counts to 10-11 Nov.
+- **Not verified:** a real screen reader and touch on a real phone (emulation only); a real waterfall and player line
+  (from about 23 Nov 2026 if the sync runs daily); a comparison of two or more games in both lists with real data
+  (the tests cover it).
 
 **Version 0.14 (the Upcoming Release Radar on the Trending games dashboard), checked on 2026-11-20.**
 

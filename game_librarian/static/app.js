@@ -232,34 +232,146 @@
     else { image.addEventListener("error", function () { useImageFallback(image); }, { once: true }); }
   });
 
-  // The release radar (Trending games dashboard): pointing at or focusing a game shows its cover, dates and
-  // platforms in one tooltip and lights up the game's points in its other platform sections. The tooltip only
-  // repeats the page (each point's own text, the "Date TBA or approximate" list and the table say the same), so it
-  // is hidden from assistive technology. It stays open while the pointer moves onto it, and Escape closes it.
-  document.querySelectorAll("[data-radar-card]").forEach(function (card) {
-    var tip = document.createElement("div");
-    tip.className = "radar-tip";
-    tip.hidden = true;
-    tip.setAttribute("aria-hidden", "true");
-    card.appendChild(tip);
-    var current = null; // the point or name the tooltip belongs to
-    var hideTimer = 0;
+  // A plain click: not a modified one (new tab, new window) and not another mouse button.
+  function isPlainClick(event) {
+    return event.button === 0 && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+  }
 
-    function marksOf(key) { return card.querySelectorAll('[data-game="' + CSS.escape(key) + '"]'); }
+  // The current address with one query parameter set (or removed, for an empty value), for history.replaceState: a
+  // view changed in place keeps its own address, and the other parameters stay.
+  function urlWith(name, value) {
+    var url = new URL(window.location.href);
+    if (value) { url.searchParams.set(name, value); } else { url.searchParams.delete(name); }
+    return url.pathname + url.search;
+  }
 
-    function hide() {
-      window.clearTimeout(hideTimer);
-      if (!current) { return; }
-      marksOf(current.getAttribute("data-game")).forEach(function (mark) { mark.classList.remove("is-active"); });
-      card.classList.remove("has-active");
-      tip.hidden = true;
-      tip.replaceChildren();
-      current = null;
+  // One selected game per scope, for the dashboard's linked charts: pointing at a mark ([data-game]) with a mouse or
+  // pen, focusing it, or tapping it calls select(key); a click on the selected game, a second tap, or Enter opens its
+  // details. `current()` gives the selected key.
+  function trackSelection(scope, select, current) {
+    var pressed = null; // the selection when a pointer went down on a game, for the click that follows
+    scope.addEventListener("pointerover", function (event) {
+      var mark = event.target.closest("[data-game]");
+      if (mark && (event.pointerType === "mouse" || event.pointerType === "pen")) { select(mark.getAttribute("data-game")); }
+    });
+    scope.addEventListener("focusin", function (event) {
+      var mark = event.target.closest("[data-game]");
+      if (mark) { select(mark.getAttribute("data-game")); }
+    });
+    scope.addEventListener("pointerdown", function (event) {
+      pressed = event.target.closest("[data-game]") ? { selected: current() } : null;
+    });
+    scope.addEventListener("click", function (event) {
+      var mark = event.target.closest("[data-game]");
+      var before = pressed;
+      pressed = null;
+      if (!mark || !isPlainClick(event)) { return; }
+      var key = mark.getAttribute("data-game");
+      if (before && before.selected !== key) { // a first tap, or a click before the pointer selected it
+        event.preventDefault(); // stops the details dialog too (it skips handled clicks)
+        select(key);
+      }
+    });
+  }
+
+  // Trending games → Upcoming releases: one game is always selected, and the panel beside the radar shows it (cover,
+  // name, every platform's date, its list ranks and its Twitch place). Its marks on the radar, under "Date TBA or
+  // approximate" and in the comparison's open group select it (trackSelection). The panel's copy of each game comes
+  // from its server-rendered <template>. The window links show only the points due within a month or three months,
+  // and the comparison's blocks open their group, in place; without JavaScript they reload with ?window= or ?group=.
+  document.querySelectorAll("[data-upcoming]").forEach(function (scope) {
+    var panel = scope.querySelector("[data-radar-panel]");
+    var body = scope.querySelector("[data-radar-panel-body]");
+    var radar = scope.querySelector("[data-radar]");
+    var selected = panel ? panel.getAttribute("data-selected") : null;
+
+    function marksOf(key) { return scope.querySelectorAll('[data-game="' + CSS.escape(key) + '"]'); }
+
+    function showWindow(key) {
+      if (!radar) { return; }
+      radar.setAttribute("data-window", key);
+      var first = null;
+      radar.querySelectorAll("[data-windows]").forEach(function (point) {
+        point.hidden = point.getAttribute("data-windows").split(" ").indexOf(key) < 0;
+        if (!point.hidden && !first) { first = point; } // primary points come first, soonest game first
+      });
+      scope.querySelectorAll("[data-radar-window]").forEach(function (link) {
+        if (link.getAttribute("data-radar-window") === key) { link.setAttribute("aria-current", "true"); }
+        else { link.removeAttribute("aria-current"); }
+      });
+      window.history.replaceState(window.history.state, "", urlWith("window", key === "all" ? null : key));
+      var shown = Array.prototype.some.call(marksOf(selected), function (mark) {
+        return mark.hasAttribute("data-windows") && !mark.hidden;
+      });
+      if (!shown && first) { select(first.getAttribute("data-game")); } // the panel shows a game on the radar
     }
 
-    // Above the point, or below it when the window has no room above; never past the card's sides.
-    function place(mark) {
-      var box = card.getBoundingClientRect();
+    function select(key) {
+      if (!key || key === selected || !panel) { return; }
+      var template = document.getElementById("radar-game-" + key);
+      if (!template) { return; }
+      body.replaceChildren(template.content.cloneNode(true)); // server-rendered by Jinja, which escapes every value
+      body.querySelectorAll("img[data-image-fallback]").forEach(function (image) {
+        image.addEventListener("error", function () { useImageFallback(image); }, { once: true });
+      });
+      marksOf(selected).forEach(function (mark) { mark.classList.remove("is-selected"); });
+      marksOf(key).forEach(function (mark) { mark.classList.add("is-selected"); });
+      panel.setAttribute("data-selected", key);
+      selected = key;
+      // A game picked in the comparison whose every point the window hides: show all tracked games again.
+      var points = Array.prototype.filter.call(marksOf(key), function (mark) { return mark.hasAttribute("data-windows"); });
+      if (points.length && points.every(function (point) { return point.hidden; })) { showWindow("all"); }
+    }
+
+    function showGroup(key) {
+      scope.querySelectorAll("[data-compare-panel]").forEach(function (part) {
+        part.hidden = part.getAttribute("data-compare-panel") !== key;
+      });
+      scope.querySelectorAll("[data-compare-group]").forEach(function (link) {
+        if (link.getAttribute("data-compare-group") === key) { link.setAttribute("aria-current", "true"); }
+        else { link.removeAttribute("aria-current"); }
+      });
+      window.history.replaceState(window.history.state, "", urlWith("group", key));
+    }
+
+    scope.addEventListener("click", function (event) {
+      var windowLink = event.target.closest("[data-radar-window]");
+      var groupLink = event.target.closest("[data-compare-group]");
+      if (!isPlainClick(event) || !(windowLink || groupLink)) { return; }
+      event.preventDefault();
+      if (windowLink) { showWindow(windowLink.getAttribute("data-radar-window")); }
+      else { showGroup(groupLink.getAttribute("data-compare-group")); }
+    });
+    trackSelection(scope, select, function () { return selected; });
+  });
+
+  // Chart tooltips (the reception scatterplots and the player line): pointing at or focusing a mark shows its name
+  // or value and its figures. They repeat the mark's own text and the table view, so the tooltip is hidden from
+  // assistive technology; Escape closes it. Without JavaScript a mark's title does the same.
+  document.querySelectorAll("[data-chart-tips]").forEach(function (plot) {
+    var holder = plot.closest(".chart-card") || plot.parentElement;
+    var tip = document.createElement("div");
+    var name = document.createElement("p");
+    var figures = document.createElement("p");
+    tip.className = "chart-tip";
+    name.className = "chart-tip-name";
+    figures.className = "chart-tip-text";
+    tip.hidden = true;
+    tip.setAttribute("aria-hidden", "true");
+    tip.append(name, figures);
+    holder.appendChild(tip);
+    var current = null;
+
+    function hide() { tip.hidden = true; current = null; }
+
+    // Above the mark, or below it when the window has no room above; never past the card's sides.
+    function show(mark) {
+      if (mark === current) { return; }
+      name.textContent = mark.getAttribute("data-tip-name"); // textContent: names come from stored data
+      figures.textContent = mark.getAttribute("data-tip-text");
+      tip.hidden = false;
+      current = mark;
+      var box = holder.getBoundingClientRect();
       var spot = mark.getBoundingClientRect();
       var left = spot.left - box.left + spot.width / 2 - tip.offsetWidth / 2;
       tip.style.left = Math.max(8, Math.min(left, box.width - tip.offsetWidth - 8)) + "px";
@@ -267,53 +379,494 @@
       tip.style.top = (above ? spot.top - box.top - tip.offsetHeight - 10 : spot.bottom - box.top + 10) + "px";
     }
 
-    function show(mark) {
-      window.clearTimeout(hideTimer);
-      if (mark === current) { return; }
-      var template = document.getElementById(mark.getAttribute("data-tip"));
-      if (!template) { return; }
-      hide();
-      tip.replaceChildren(template.content.cloneNode(true)); // server-rendered by Jinja, which escapes every value
-      var when = tip.querySelector("[data-tip-when]");
-      if (when) { when.textContent = mark.getAttribute("data-when") || ""; }
-      tip.querySelectorAll("img[data-image-fallback]").forEach(function (image) {
-        image.addEventListener("error", function () { useImageFallback(image); }, { once: true });
-      });
-      current = mark;
-      marksOf(mark.getAttribute("data-game")).forEach(function (other) { other.classList.add("is-active"); });
-      card.classList.add("has-active");
-      tip.hidden = false;
-      place(mark);
-    }
-
-    function hideSoon() {
-      window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(hide, 150); // time to move the pointer onto the tooltip
-    }
-
-    // Without JavaScript a point's title is its tooltip; with this one it would show twice.
-    card.querySelectorAll("[data-tip][title]").forEach(function (mark) { mark.removeAttribute("title"); });
-    card.addEventListener("pointerover", function (event) {
-      var mark = event.target.closest("[data-tip]");
-      if (mark) { show(mark); } else if (tip.contains(event.target)) { window.clearTimeout(hideTimer); }
-    });
-    card.addEventListener("pointerout", function (event) {
-      var into = event.relatedTarget;
-      if (current && !(into && (current.contains(into) || tip.contains(into)))) { hideSoon(); }
-    });
-    card.addEventListener("focusin", function (event) {
-      var mark = event.target.closest("[data-tip]");
+    plot.querySelectorAll("[data-tip-name][title]").forEach(function (mark) { mark.removeAttribute("title"); });
+    plot.addEventListener("pointerover", function (event) {
+      var mark = event.target.closest("[data-tip-name]");
       if (mark) { show(mark); }
     });
-    card.addEventListener("focusout", function (event) {
-      var into = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest("[data-tip]") : null;
-      if (!into || !card.contains(into)) { hide(); }
+    plot.addEventListener("pointerout", function (event) {
+      if (current && !(event.relatedTarget && current.contains(event.relatedTarget))) { hide(); }
     });
+    plot.addEventListener("focusin", function (event) {
+      var mark = event.target.closest("[data-tip-name]");
+      if (mark) { show(mark); }
+    });
+    plot.addEventListener("focusout", hide);
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && current) { hide(); }
     });
     window.addEventListener("resize", hide);
   });
+
+  // A scatterplot's names never cover each other: the page lists them most important first, and on a narrow screen
+  // a name that would overlap one already shown is hidden. Its dot, tooltip and table still name the game. A name
+  // that the chart's current view does not show (data-views) stays hidden.
+  function fitLabels(plot) {
+    var card = plot.closest("[data-view]");
+    var view = card ? card.getAttribute("data-view") : null;
+    var shown = [];
+    plot.querySelectorAll(".plot-label").forEach(function (label) {
+      var views = label.getAttribute("data-views");
+      label.hidden = Boolean(view && views && views.split(" ").indexOf(view) < 0);
+      if (label.hidden) { return; }
+      var box = label.getBoundingClientRect();
+      var clash = shown.some(function (other) {
+        return box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top;
+      });
+      if (clash) { label.hidden = true; } else { shown.push(box); }
+    });
+  }
+  var plots = document.querySelectorAll(".plot");
+  plots.forEach(fitLabels);
+  var fitTimer = 0;
+  window.addEventListener("resize", function () {
+    window.clearTimeout(fitTimer);
+    fitTimer = window.setTimeout(function () { plots.forEach(fitLabels); }, 150);
+  });
+
+  // A scatterplot is one Tab stop: the left and right arrow keys move between its shown dots, which the page lists by
+  // number of reviews, and Home and End go to the first and last. Without JavaScript every dot is a Tab stop.
+  function shownItems(group) {
+    return Array.prototype.filter.call(group.querySelectorAll("[data-roving-item]"), function (item) { return !item.hidden; });
+  }
+  // The tab stop of a scatterplot whose view changed: kept on its dot if that one still shows, else the first shown.
+  function resetTabStop(group) {
+    var items = shownItems(group);
+    if (items.some(function (item) { return item.getAttribute("tabindex") === "0"; }) || !items.length) { return; }
+    group.querySelectorAll("[data-roving-item]").forEach(function (item) { item.setAttribute("tabindex", "-1"); });
+    items[0].setAttribute("tabindex", "0");
+  }
+  document.querySelectorAll("[data-roving]").forEach(function (group) {
+    if (group.querySelectorAll("[data-roving-item]").length < 2) { return; }
+    group.querySelectorAll("[data-roving-item]").forEach(function (item) { item.setAttribute("tabindex", "-1"); });
+    resetTabStop(group);
+    group.addEventListener("keydown", function (event) {
+      var items = shownItems(group); // a view can hide some dots
+      var index = items.indexOf(document.activeElement);
+      var moves = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: items.length - 1 };
+      if (index < 0 || !(event.key in moves)) { return; }
+      event.preventDefault();
+      var next = Math.max(0, Math.min(items.length - 1, moves[event.key]));
+      items[index].setAttribute("tabindex", "-1");
+      items[next].setAttribute("tabindex", "0");
+      items[next].focus();
+    });
+  });
+
+  // Trending games → Sales & reception: selecting a dot (trackSelection) fills the strip above the plot from the game's
+  // server-rendered <template>, rings its peers (the other dots of its peer genre, data-genres) and draws their median
+  // across the plot. The view links show every game or this year's only, in place; without JavaScript they reload
+  // with ?view=. The axes never change. The doughnut above selects its games here too (receptionCharts).
+  var receptionCharts = [];
+  document.querySelectorAll("[data-reception]").forEach(function (card) {
+    var plot = card.querySelector("[data-reception-plot]");
+    var strip = card.querySelector("[data-bench-strip]");
+    if (!plot || !strip) { return; }
+    var dots = Array.prototype.slice.call(plot.querySelectorAll(".plot-dot[data-game]"));
+    var line = plot.querySelector("[data-plot-median]");
+    var lineLabel = plot.querySelector("[data-plot-median-label]");
+    var selected = null;
+
+    function dotOf(key) { return plot.querySelector('.plot-dot[data-game="' + CSS.escape(key) + '"]'); }
+
+    function showView(view) {
+      card.setAttribute("data-view", view);
+      dots.forEach(function (dot) { dot.hidden = dot.getAttribute("data-views").split(" ").indexOf(view) < 0; });
+      card.querySelectorAll("[data-reception-view]").forEach(function (link) {
+        if (link.getAttribute("data-reception-view") === view) { link.setAttribute("aria-current", "true"); }
+        else { link.removeAttribute("aria-current"); }
+      });
+      fitLabels(plot);
+      resetTabStop(plot);
+      window.history.replaceState(window.history.state, "", urlWith("view", view === "all" ? null : view));
+    }
+
+    function select(key) {
+      var dot = dotOf(key);
+      var template = document.getElementById("bench-" + key);
+      if (!dot || !template || key === selected) { return; }
+      if (dot.hidden) { showView("all"); } // a game picked in the doughnut that this year's view hides
+      strip.replaceChildren(template.content.cloneNode(true)); // server-rendered by Jinja, which escapes every value
+      var genre = template.getAttribute("data-peer-genre");
+      dots.forEach(function (other) {
+        other.classList.toggle("is-selected", other === dot);
+        other.classList.toggle("is-peer", other !== dot && genre !== "" &&
+          other.getAttribute("data-genres").split(" ").indexOf(genre) >= 0);
+      });
+      var median = template.getAttribute("data-median-y");
+      line.hidden = median === null; // too few peers: no median to draw
+      if (median !== null) {
+        line.style.bottom = median + "%";
+        lineLabel.textContent = template.getAttribute("data-median-label");
+      }
+      selected = key;
+    }
+
+    card.addEventListener("click", function (event) {
+      var link = event.target.closest("[data-reception-view]");
+      if (!link || !isPlainClick(event)) { return; }
+      event.preventDefault();
+      showView(link.getAttribute("data-reception-view"));
+    });
+    trackSelection(plot, select, function () { return selected; });
+    receptionCharts.push({ has: function (key) { return Boolean(dotOf(key)); }, select: select });
+  });
+
+  // Trending games → Sales & reception, on this computer only: selecting a game in the doughnut or in its list dims
+  // the other slices and selects the game's dot on the reception chart, when it has one. A game of "Other tracked
+  // games" lights up that slice.
+  document.querySelectorAll("[data-sales-ring]").forEach(function (card) {
+    var ring = card.querySelector("[data-ring]");
+    var selected = null;
+
+    function select(key) {
+      if (!key || key === selected || !ring) { return; }
+      var mark = card.querySelector('[data-game="' + CSS.escape(key) + '"]');
+      var slice = ring.querySelector('.ring-slice[data-game="' + CSS.escape(key) + '"]') ||
+        (mark && mark.closest(".ring-row.is-other") ? ring.querySelector(".ring-slice.is-other") : null);
+      card.querySelectorAll("[data-game]").forEach(function (other) {
+        other.classList.toggle("is-selected", other === slice || (!other.classList.contains("ring-slice") &&
+          other.getAttribute("data-game") === key));
+      });
+      ring.setAttribute("data-selected", key);
+      selected = key;
+      receptionCharts.forEach(function (chart) { if (chart.has(key)) { chart.select(key); } });
+    }
+
+    trackSelection(card, select, function () { return selected; });
+  });
+
+  // Trending games → Momentum: a game's bar in the waterfall shows that game's Steam players in the line chart beside
+  // it, in place; without JavaScript the bar's link reloads the page with ?player=.
+  document.querySelectorAll("[data-momentum]").forEach(function (canvas) {
+    var chart = canvas.querySelector("[data-player-chart]");
+    if (!chart) { return; }
+    canvas.addEventListener("click", function (event) {
+      var bar = event.target.closest("a[data-player]");
+      if (!bar || !isPlainClick(event)) { return; }
+      var key = bar.getAttribute("data-player");
+      var panel = chart.querySelector('[data-player-panel="' + CSS.escape(key) + '"]');
+      if (!panel) { return; }
+      event.preventDefault();
+      chart.querySelectorAll("[data-player-panel]").forEach(function (other) { other.hidden = other !== panel; });
+      canvas.querySelectorAll("a[data-player]").forEach(function (other) {
+        if (other === bar) { other.setAttribute("aria-current", "true"); } else { other.removeAttribute("aria-current"); }
+      });
+      window.history.replaceState(window.history.state, "", bar.getAttribute("href").split("#")[0]);
+      if (chart.getBoundingClientRect().top > window.innerHeight) { chart.scrollIntoView({ block: "nearest" }); }
+    });
+  });
+
+  // The header's icon controls (the wishlist star and the Daily Trivia lightbulb) show their name as a tip on hover
+  // and keyboard focus. Escape hides a tip that is showing; the next hover or focus shows it again.
+  var navIcons = document.querySelectorAll(".nav-icon");
+  navIcons.forEach(function (control) {
+    ["mouseenter", "mouseleave", "focus", "blur"].forEach(function (name) {
+      control.addEventListener(name, function () { control.classList.remove("is-tip-hidden"); });
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { navIcons.forEach(function (control) { control.classList.add("is-tip-hidden"); }); }
+  });
+
+  // Daily Trivia: the lightbulb opens a popup with today's quiz and Browse Facts, over the current page. The server
+  // renders the questions and facts (/trivia/panel); this code shows one card at a time, checks the answers, and keeps
+  // progress and scores in this browser's storage (static/trivia.js). A Details link opens the game details dialog on
+  // top of the popup (see below), so closing the details returns to the same card. Without JavaScript the lightbulb is
+  // hidden (base.html).
+  var Trivia = window.GameLibrarianTrivia;
+  var triviaDialog = document.getElementById("trivia-dialog");
+  var triviaButton = document.querySelector("[data-trivia-open]");
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // "2026-11-21" -> "21 Nov 2026", the style of the server's dates.
+  function dayLabel(day) {
+    var parts = day.split("-");
+    return Number(parts[2]) + " " + MONTHS[Number(parts[1]) - 1] + " " + parts[0];
+  }
+
+  function setUpTrivia(dialog, button) {
+    var content = dialog.querySelector("[data-trivia-content]");
+    var title = dialog.querySelector("#trivia-title");
+    var badge = button.querySelector("[data-trivia-badge]");
+    var storage = Trivia.open(window); // null when this browser does not let the site store data
+    var store = storage || Trivia.memoryStore(); // then progress lasts until the page is closed
+    var state = Trivia.read(store);
+    var saveFailed = false;
+    var view = null; // the loaded panel (setUpPanel)
+    var factId = null; // the fact shown in Browse Facts, kept while this page is open
+
+    // The lightbulb's badge: the quiz of `day` has a first score. Screen readers hear it as the button's description.
+    function showBadge(day) {
+      var done = Boolean(Trivia.firstScore(state, day));
+      badge.hidden = !done;
+      if (done) { button.setAttribute("aria-describedby", "trivia-done-note"); }
+      else { button.removeAttribute("aria-describedby"); }
+    }
+
+    function save() {
+      try {
+        state = Trivia.save(store, state);
+        saveFailed = false;
+      } catch (_) { saveFailed = true; } // full or read-only storage: the quiz goes on, and the popup says so
+      if (view) { view.showSaved(); }
+    }
+
+    // The quiz, its cards and its facts, once /trivia/panel is in the popup. Returns what the popup needs from it.
+    function setUpPanel(root) {
+      var quiz = {
+        day: root.getAttribute("data-day"),
+        id: root.getAttribute("data-quiz"),
+        ids: root.getAttribute("data-ids").split(" "),
+        answers: root.getAttribute("data-answers").split(" ").map(Number)
+      };
+      var nextReset = Date.parse(root.getAttribute("data-next-reset"));
+      var tabs = Array.prototype.slice.call(root.querySelectorAll("[data-trivia-tab]"));
+      var panels = { quiz: root.querySelector('[data-trivia-panel="quiz"]'),
+                     facts: root.querySelector('[data-trivia-panel="facts"]') };
+      var cards = Array.prototype.slice.call(root.querySelectorAll("[data-trivia-question]"));
+      var steps = root.querySelectorAll("[data-trivia-step]");
+      var results = root.querySelector("[data-trivia-results]");
+      var facts = Array.prototype.slice.call(root.querySelectorAll("[data-trivia-fact]"));
+      var mode = "quiz";
+
+      root.querySelectorAll("img[data-image-fallback]").forEach(function (image) {
+        image.addEventListener("error", function () { useImageFallback(image); }, { once: true });
+      });
+      var localReset = new Date(nextReset).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      root.querySelectorAll("[data-trivia-local-reset]").forEach(function (span) {
+        span.textContent = " (" + localReset + " your time)";
+      });
+
+      function choiceText(card, index) {
+        return card.querySelector('[data-choice="' + index + '"] .trivia-choice-text').textContent;
+      }
+
+      // One question card as the attempt left it: before an answer, or with the answer marked and explained.
+      function paintCard(card, index, attempt) {
+        var chosen = attempt.answers[index];
+        var correct = quiz.answers[index];
+        var answered = chosen !== null;
+        card.querySelectorAll("[data-choice]").forEach(function (choice) {
+          var value = Number(choice.getAttribute("data-choice"));
+          var isCorrect = answered && value === correct;
+          var isWrong = answered && value === chosen && chosen !== correct;
+          choice.classList.toggle("is-correct", isCorrect);
+          choice.classList.toggle("is-wrong", isWrong);
+          if (answered) { choice.setAttribute("aria-disabled", "true"); } else { choice.removeAttribute("aria-disabled"); }
+          choice.querySelector("[data-trivia-mark]").textContent = isCorrect ?
+            (value === chosen ? "Your answer, correct" : "Correct answer") : (isWrong ? "Your answer" : "");
+        });
+        card.querySelector("[data-trivia-feedback]").hidden = !answered;
+        if (answered) {
+          var verdict = card.querySelector("[data-trivia-verdict]");
+          verdict.textContent = chosen === correct ? "Correct!" :
+            "Not quite. The answer is “" + choiceText(card, correct) + "”.";
+          verdict.classList.toggle("is-wrong", chosen !== correct);
+        }
+      }
+
+      function paintResults(attempt) {
+        var got = Trivia.score(attempt, quiz);
+        var first = Trivia.firstScore(state, quiz.day);
+        var top = Trivia.best(state);
+        root.querySelector("[data-trivia-total]").textContent =
+          (attempt.practice ? "Practice score: " : "Today’s score: ") + got + " of " + quiz.ids.length;
+        root.querySelector("[data-trivia-first]").textContent = !first ? "" : (attempt.practice ?
+          "Your first score today stays " + first.score + " of " + first.total + ": practice never changes it." :
+          "Saved as today’s first score.");
+        root.querySelector("[data-trivia-best]").textContent = !top ? "" : "Personal best: " + top.score + " of " +
+          top.total + (top.day === quiz.day ? ", set today." : ", first set on " + dayLabel(top.day) + ".");
+      }
+
+      function renderQuiz(focus) {
+        var attempt = Trivia.current(state, quiz);
+        var count = quiz.ids.length;
+        var finished = attempt.position >= count;
+        cards.forEach(function (card, index) {
+          card.hidden = index !== attempt.position;
+          paintCard(card, index, attempt);
+        });
+        steps.forEach(function (step, index) {
+          var choice = attempt.answers[index];
+          step.className = choice === null ? (index === attempt.position ? "is-current" : "") :
+            (choice === quiz.answers[index] ? "is-right" : "is-wrong");
+        });
+        root.querySelector("[data-trivia-position]").textContent = (attempt.practice ? "Practice · " : "") +
+          (finished ? "All " + count + " answered" : "Question " + (attempt.position + 1) + " of " + count);
+        root.querySelector("[data-trivia-score]").textContent = "Score " + Trivia.score(attempt, quiz);
+        results.hidden = !finished;
+        if (finished) { paintResults(attempt); }
+        var before = Trivia.playedBefore(state, quiz); // a repeated quiz the visitor played on an earlier day
+        var played = root.querySelector("[data-trivia-played]");
+        played.hidden = !before;
+        if (before) {
+          played.textContent = "You played this quiz on " + dayLabel(before.day) + " and scored " + before.score +
+            " of " + before.total + ".";
+        }
+        if (focus) { // the question, its verdict when it is answered, or the score
+          var card = cards[attempt.position];
+          (finished ? root.querySelector("[data-trivia-total]") : attempt.answers[attempt.position] === null ?
+            card.querySelector(".trivia-question") : card.querySelector("[data-trivia-verdict]")).focus();
+        }
+      }
+
+      // Browse Facts: the facts of earlier quizzes, and today's once today's quiz has a first score.
+      function eligibleFacts() {
+        var done = Boolean(Trivia.firstScore(state, quiz.day));
+        return facts.filter(function (card) { return done || !card.hasAttribute("data-today"); });
+      }
+
+      function factIndex(list) {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].getAttribute("data-trivia-fact") === factId) { return i; }
+        }
+        return 0;
+      }
+
+      function renderFacts() {
+        var list = eligibleFacts();
+        var focusWasInFact = facts.some(function (card) { return card.contains(document.activeElement); });
+        root.querySelector("[data-trivia-browse]").hidden = list.length === 0;
+        root.querySelector("[data-trivia-empty]").hidden = list.length > 0;
+        facts.forEach(function (card) { card.hidden = true; });
+        if (!list.length) { factId = null; return; }
+        var index = factIndex(list);
+        var card = list[index];
+        card.hidden = false;
+        factId = card.getAttribute("data-trivia-fact");
+        root.querySelector("[data-trivia-fact-count]").textContent = "Fact " + (index + 1) + " of " + list.length +
+          ": " + card.getAttribute("data-game-title");
+        if (focusWasInFact) { card.querySelector(".trivia-fact-title").focus(); } // its old card is hidden now
+      }
+
+      function stepFact(delta) {
+        var list = eligibleFacts();
+        if (!list.length) { return; }
+        var next = (factIndex(list) + delta + list.length) % list.length; // the ends wrap around
+        factId = list[next].getAttribute("data-trivia-fact");
+        renderFacts();
+      }
+
+      // Switch the mode. `focus`: "content" (the question or the score), "tab" (the mode's tab) or nothing.
+      function show(name, focus) {
+        mode = name;
+        tabs.forEach(function (tab) {
+          var selected = tab.getAttribute("data-trivia-tab") === name;
+          tab.setAttribute("aria-selected", String(selected));
+          tab.tabIndex = selected ? 0 : -1;
+          if (selected && focus === "tab") { tab.focus(); }
+        });
+        panels.quiz.hidden = name !== "quiz";
+        panels.facts.hidden = name !== "facts";
+        if (name === "quiz") { renderQuiz(focus === "content"); } else { renderFacts(); }
+      }
+
+      function showSaved() {
+        var label = root.querySelector("[data-trivia-saved]");
+        label.textContent = !storage ? "Not saved: this browser blocks site storage, so progress lasts until you " +
+          "leave the page" : (saveFailed ? "Not saved: this browser could not store your progress" :
+          "Saved on this device");
+        label.classList.toggle("is-warning", !storage || saveFailed);
+      }
+
+      root.addEventListener("click", function (event) {
+        var target = event.target;
+        var choice = target.closest("[data-choice]");
+        if (choice) {
+          if (choice.getAttribute("aria-disabled") === "true") { return; }
+          var result = Trivia.choose(state, quiz, Number(choice.getAttribute("data-choice")));
+          if (!result) { return; }
+          save();
+          renderQuiz(false);
+          choice.closest("[data-trivia-question]").querySelector("[data-trivia-verdict]").focus();
+          if (result.finished) { showBadge(quiz.day); }
+          return;
+        }
+        if (target.closest("[data-trivia-next]")) {
+          Trivia.advance(state, quiz);
+          save();
+          renderQuiz(true);
+        } else if (target.closest("[data-trivia-replay]")) {
+          Trivia.replay(state, quiz);
+          save();
+          renderQuiz(true);
+        } else if (target.closest("[data-trivia-tab]")) {
+          show(target.closest("[data-trivia-tab]").getAttribute("data-trivia-tab"), null);
+        } else if (target.closest("[data-trivia-goto]")) {
+          show(target.closest("[data-trivia-goto]").getAttribute("data-trivia-goto"), "tab");
+        } else if (target.closest("[data-trivia-step-by]")) {
+          stepFact(Number(target.closest("[data-trivia-step-by]").getAttribute("data-trivia-step-by")));
+        }
+      });
+
+      // The arrow keys move between the two tabs; in Browse Facts they also move between facts.
+      function onKey(event) {
+        if (event.altKey || event.ctrlKey || event.metaKey) { return; }
+        var tab = event.target.closest && event.target.closest("[data-trivia-tab]");
+        if (tab && ["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(event.key) >= 0) {
+          event.preventDefault();
+          var at = tabs.indexOf(tab);
+          var next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
+            (at + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+          show(tabs[next].getAttribute("data-trivia-tab"), "tab");
+        } else if (mode === "facts" && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+          event.preventDefault();
+          stepFact(event.key === "ArrowLeft" ? -1 : 1);
+        }
+      }
+
+      showBadge(quiz.day);
+      showSaved();
+      return { nextReset: nextReset, show: show, showSaved: showSaved, onKey: onKey };
+    }
+
+    function load() {
+      view = null;
+      content.innerHTML = '<p class="dialog-status">Loading today’s quiz…</p>';
+      fetch("/trivia/panel", { headers: { Accept: "text/html" } })
+        .then(function (response) {
+          if (!response.ok) { throw new Error("HTTP " + response.status); }
+          return response.text();
+        })
+        .then(function (html) {
+          content.innerHTML = html; // server-rendered by Jinja, which escapes every value
+          var root = content.querySelector("[data-trivia]");
+          view = root ? setUpPanel(root) : null;
+          // Focus moves to the question only when it is still on the popup's title (set when it opened).
+          if (view) { view.show("quiz", dialog.open && document.activeElement === title ? "content" : null); }
+        })
+        .catch(function () {
+          content.innerHTML = '<p class="dialog-status">Daily Trivia could not be loaded. ' +
+            '<button class="button" type="button" data-trivia-retry>Try again</button></p>';
+        });
+    }
+
+    button.addEventListener("click", function () {
+      if (dialog.open) { return; }
+      dialog.showModal(); // the page stays where it was, behind the popup; focus goes to the popup's title
+      document.documentElement.classList.add("has-trivia");
+      // Today's Quiz first. The panel is loaded on the first open, and again once the next quiz has started.
+      if (!view || Date.now() >= view.nextReset) { load(); } else { view.show("quiz", "content"); }
+    });
+    dialog.addEventListener("close", function () {
+      document.documentElement.classList.remove("has-trivia");
+      button.focus(); // every way of closing (Escape, the close button, the backdrop) returns to the lightbulb
+    });
+    dialog.querySelector("[data-trivia-close]").addEventListener("click", function () { dialog.close(); });
+    dialog.addEventListener("click", function (event) {
+      if (event.target === dialog) { dialog.close(); } // a click on the backdrop
+      else if (event.target.closest("[data-trivia-retry]")) { load(); }
+    });
+    dialog.addEventListener("keydown", function (event) { if (view) { view.onKey(event); } });
+    showBadge(button.getAttribute("data-trivia-day"));
+  }
+
+  if (triviaButton && Trivia && triviaDialog && typeof triviaDialog.showModal === "function") {
+    setUpTrivia(triviaDialog, triviaButton);
+  } else if (triviaButton) {
+    triviaButton.hidden = true; // a browser too old for <dialog>
+  }
 
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 

@@ -1,0 +1,1102 @@
+{
+  "start_day": "2026-11-21",
+  "about": "Daily Trivia questions, five per quiz. The README section Daily Trivia explains the daily schedule, the repeats and how to add a quiz. Run python -m game_librarian check-curated after every edit.",
+  "checked_by": "Claude (AI assistant)",
+  "quizzes": [
+    {
+      "id": "quiz-01",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "final-fantasy-name",
+          "category": "development",
+          "question": "What did Final Fantasy’s team want first, according to creator Hironobu Sakaguchi?",
+          "choices": [
+            "A title with the word “Quest”",
+            "A name that shortens to “FF”",
+            "A one-word title",
+            "A name about crystals"
+          ],
+          "answer": "A name that shortens to “FF”",
+          "explanation": "In a 2023 anniversary interview, Sakaguchi said the team wanted a short name, the way Dragon Quest had a nickname, and chose the initials FF first. “Fighting Fantasy” was considered, but trademark issues ruled it out, so they chose Final Fantasy. The story that “Final” meant a farewell game is not the reason he gives.",
+          "source": {
+            "title": "FINAL FANTASY on YouTube: Final Fantasy 35th Anniversary Special Interview, Part 1",
+            "url": "https://www.youtube.com/watch?v=HgngEQOFcWs"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Final Fantasy",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 385,
+            "image_id": "co2xv8",
+            "igdb_url": "https://www.igdb.com/games/final-fantasy",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "stardew-valley-solo",
+          "category": "indie",
+          "question": "Who made Stardew Valley’s code, art, music and writing?",
+          "choices": [
+            "A team of former Harvest Moon developers",
+            "Two brothers in Sweden",
+            "Eric Barone, working alone",
+            "A game design class"
+          ],
+          "answer": "Eric Barone, working alone",
+          "explanation": "Eric “ConcernedApe” Barone made Stardew Valley by himself, including the writing, art, audio and programming, before its 2016 release. He started it to improve his programming and design skills, inspired by the Harvest Moon series.",
+          "source": {
+            "title": "Wikipedia: Stardew Valley",
+            "url": "https://en.wikipedia.org/w/index.php?title=Stardew_Valley&oldid=1384348320"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Stardew Valley",
+            "steam_appid": 413150
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 17000,
+            "image_id": "coa93h",
+            "igdb_url": "https://www.igdb.com/games/stardew-valley",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "outer-wilds-time-loop",
+          "category": "mechanics",
+          "question": "In Outer Wilds, how long does each time loop last before the sun goes supernova?",
+          "choices": [
+            "12 minutes",
+            "22 minutes",
+            "45 minutes",
+            "One in-game day"
+          ],
+          "answer": "22 minutes",
+          "explanation": "Mobius Digital’s Outer Wilds traps its solar system in a 22-minute time loop: the sun goes supernova and everything resets, sooner if you die. Each loop you explore further to uncover what happened to the Nomai, an alien species.",
+          "source": {
+            "title": "Wikipedia: Outer Wilds",
+            "url": "https://en.wikipedia.org/w/index.php?title=Outer_Wilds&oldid=1385209875"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Outer Wilds",
+            "steam_appid": 753640
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 11737,
+            "image_id": "co65ac",
+            "igdb_url": "https://www.igdb.com/games/outer-wilds",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "pac-man-name",
+          "category": "famous",
+          "question": "Pac-Man’s original Japanese name, Puck Man, comes from a phrase describing what?",
+          "choices": [
+            "Gobbling something up",
+            "A hockey puck sliding on ice",
+            "A ghost being chased",
+            "A maze with no way out"
+          ],
+          "answer": "Gobbling something up",
+          "explanation": "Puck Man came from the Japanese “paku paku taberu”, which describes gobbling something up. For the North American release the name became Pac-Man, for fear that vandals would turn the P on cabinets into an F.",
+          "source": {
+            "title": "Wikipedia: Pac-Man",
+            "url": "https://en.wikipedia.org/w/index.php?title=Pac-Man&oldid=1386318664"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Pac-Man",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 2750,
+            "image_id": "co4ulc",
+            "igdb_url": "https://www.igdb.com/games/pac-man",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "journey-grammy-nomination",
+          "category": "music",
+          "question": "What did Austin Wintory’s score for Journey achieve at the 2013 Grammy Awards?",
+          "choices": [
+            "It won Album of the Year",
+            "It won Song of the Year",
+            "It won three Grammys",
+            "It was the first game score nominated in its category"
+          ],
+          "answer": "It was the first game score nominated in its category",
+          "explanation": "Journey’s soundtrack was nominated for Best Score Soundtrack for Visual Media at the 2013 Grammys, the first video game score nominated in that category. It did not win.",
+          "source": {
+            "title": "Wikipedia: Journey (2012 video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Journey_%282012_video_game%29&oldid=1385694948"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Journey",
+            "steam_appid": 638230
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 1352,
+            "image_id": "cob9lk",
+            "igdb_url": "https://www.igdb.com/games/journey",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-02",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "tetris-elektronika-60",
+          "category": "famous",
+          "question": "On which computer did Alexey Pajitnov first program Tetris?",
+          "choices": [
+            "Commodore 64",
+            "IBM PC",
+            "ZX Spectrum",
+            "Elektronika 60"
+          ],
+          "answer": "Elektronika 60",
+          "explanation": "Pajitnov wrote the first Tetris in Pascal on an Elektronika 60, a Soviet copy of the PDP-11, at the Dorodnitsyn Computing Center of the Academy of Sciences. It had no graphics, so the pieces were drawn with brackets and spaces. An IBM PC version followed.",
+          "source": {
+            "title": "Wikipedia: Tetris",
+            "url": "https://en.wikipedia.org/w/index.php?title=Tetris&oldid=1386321529"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Tetris",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 130749,
+            "image_id": "co6n9j",
+            "igdb_url": "https://www.igdb.com/games/tetris--4",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "konami-code-gradius",
+          "category": "mechanics",
+          "question": "The Konami Code (↑ ↑ ↓ ↓ ← → ← → B A) was created while porting which game to the NES?",
+          "choices": [
+            "Contra",
+            "Gradius",
+            "Castlevania",
+            "Metal Gear"
+          ],
+          "answer": "Gradius",
+          "explanation": "Kazuhisa Hashimoto created the code while porting the 1985 arcade game Gradius to the NES. He found it too hard to finish during testing, so the code gave him a full set of power-ups.",
+          "source": {
+            "title": "Wikipedia: Konami Code",
+            "url": "https://en.wikipedia.org/w/index.php?title=Konami_Code&oldid=1384646905"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Gradius",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 1476,
+            "image_id": "co231h",
+            "igdb_url": "https://www.igdb.com/games/gradius",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "hades-darren-korb",
+          "category": "music",
+          "question": "Hades composer Darren Korb also voices which character in the game?",
+          "choices": [
+            "Hades",
+            "Charon",
+            "Zagreus",
+            "Hermes"
+          ],
+          "answer": "Zagreus",
+          "explanation": "Darren Korb, audio director at Supergiant Games, composed the Hades soundtrack and voices Zagreus, the son of Hades who tries to escape the Underworld.",
+          "source": {
+            "title": "Wikipedia: Hades (video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Hades_%28video_game%29&oldid=1384327837"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Hades",
+            "steam_appid": 1145360
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 113112,
+            "image_id": "cob9kr",
+            "igdb_url": "https://www.igdb.com/games/hades--1",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "dota-2-warcraft-mod",
+          "category": "development",
+          "question": "Dota 2 is a sequel to Defense of the Ancients, a fan-made mod for which game?",
+          "choices": [
+            "Warcraft III",
+            "Half-Life",
+            "Quake III Arena",
+            "Age of Empires II"
+          ],
+          "answer": "Warcraft III",
+          "explanation": "Defense of the Ancients (DotA) was a community-made mod for Blizzard’s Warcraft III: Reign of Chaos. In 2009 Valve hired IceFrog, its lead designer, to make Dota 2, released in 2013.",
+          "source": {
+            "title": "Wikipedia: Dota 2",
+            "url": "https://en.wikipedia.org/w/index.php?title=Dota_2&oldid=1386311538"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Dota 2",
+            "steam_appid": 570
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 2963,
+            "image_id": "cod313",
+            "igdb_url": "https://www.igdb.com/games/dota-2",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "vampire-survivors-bafta",
+          "category": "awards",
+          "question": "Which game won the BAFTA Games Award for Best Game in 2023?",
+          "choices": [
+            "Elden Ring",
+            "God of War Ragnarök",
+            "Cult of the Lamb",
+            "Vampire Survivors"
+          ],
+          "answer": "Vampire Survivors",
+          "explanation": "Vampire Survivors, developed by poncle, won Best Game at the 2023 BAFTA Games Awards. The other nominees included Elden Ring, God of War Ragnarök and Cult of the Lamb.",
+          "source": {
+            "title": "BAFTA: Games Awards, Best Game winners and nominees",
+            "url": "https://www.bafta.org/awards/games/best-game/"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Vampire Survivors",
+            "steam_appid": 1794680
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 186725,
+            "image_id": "co4bzv",
+            "igdb_url": "https://www.igdb.com/games/vampire-survivors",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-03",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "elden-ring-worldbuilding",
+          "category": "famous",
+          "question": "Which fantasy writer created the backstory of Elden Ring’s world?",
+          "choices": [
+            "Brandon Sanderson",
+            "Neil Gaiman",
+            "George R. R. Martin",
+            "Patrick Rothfuss"
+          ],
+          "answer": "George R. R. Martin",
+          "explanation": "George R. R. Martin developed the world’s backstory, while director Hidetaka Miyazaki led the writing of the main story. FromSoftware released Elden Ring in 2022.",
+          "source": {
+            "title": "Wikipedia: Elden Ring",
+            "url": "https://en.wikipedia.org/w/index.php?title=Elden_Ring&oldid=1386550217"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Elden Ring",
+            "steam_appid": 1245620
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 119133,
+            "image_id": "co4jni",
+            "igdb_url": "https://www.igdb.com/games/elden-ring",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "undertale-kickstarter",
+          "category": "indie",
+          "question": "Undertale’s 2013 Kickstarter asked for US$5,000. About how much did it raise?",
+          "choices": [
+            "About $5,000",
+            "About $15,000",
+            "About $51,000",
+            "About $510,000"
+          ],
+          "answer": "About $51,000",
+          "explanation": "Toby Fox’s campaign ended on 24 July 2013 with US$51,124 from 2,398 backers, about ten times its goal. Undertale came out in 2015.",
+          "source": {
+            "title": "Wikipedia: Undertale",
+            "url": "https://en.wikipedia.org/w/index.php?title=Undertale&oldid=1385902684"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Undertale",
+            "steam_appid": 391540
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 12517,
+            "image_id": "cob1t2",
+            "igdb_url": "https://www.igdb.com/games/undertale",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "baba-is-you-rules",
+          "category": "mechanics",
+          "question": "How do you change the rules of a level in Baba Is You?",
+          "choices": [
+            "By typing commands into a console",
+            "By pushing word blocks into new sentences",
+            "By choosing perks between levels",
+            "By rotating the whole level"
+          ],
+          "answer": "By pushing word blocks into new sentences",
+          "explanation": "In Baba Is You, every rule is a sentence of word blocks in the level, such as BABA IS YOU or WALL IS STOP. Push the words apart or into new sentences and the rules change. It began as a short demo for the 2017 Nordic Game Jam.",
+          "source": {
+            "title": "Wikipedia: Baba Is You",
+            "url": "https://en.wikipedia.org/w/index.php?title=Baba_Is_You&oldid=1378983855"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Baba Is You",
+            "steam_appid": 736260
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 76638,
+            "image_id": "co2hqt",
+            "igdb_url": "https://www.igdb.com/games/baba-is-you",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "civilization-iv-baba-yetu",
+          "category": "music",
+          "question": "“Baba Yetu”, the first piece of video game music to win a Grammy, is the theme of which game?",
+          "choices": [
+            "Civilization IV",
+            "Age of Empires III",
+            "Assassin’s Creed II",
+            "Final Fantasy X"
+          ],
+          "answer": "Civilization IV",
+          "explanation": "Christopher Tin’s “Baba Yetu”, the Lord’s Prayer sung in Swahili, is the theme of Civilization IV (2005). A re-released recording won a Grammy in February 2011, a first for video game music.",
+          "source": {
+            "title": "Wikipedia: Baba Yetu",
+            "url": "https://en.wikipedia.org/w/index.php?title=Baba_Yetu&oldid=1384316015"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Sid Meier’s Civilization IV",
+            "steam_appid": 3900
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 293,
+            "image_id": "co1rjp",
+            "igdb_url": "https://www.igdb.com/games/sid-meier-s-civilization-iv",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "portal-narbacular-drop",
+          "category": "development",
+          "question": "Portal’s portals began in Narbacular Drop, a student game made at which school?",
+          "choices": [
+            "MIT",
+            "Carnegie Mellon University",
+            "Full Sail University",
+            "DigiPen Institute of Technology"
+          ],
+          "answer": "DigiPen Institute of Technology",
+          "explanation": "Narbacular Drop was a student project at DigiPen Institute of Technology built on a similar portal idea. Valve hired many of its team to create Portal, released in 2007.",
+          "source": {
+            "title": "Wikipedia: Portal (video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Portal_%28video_game%29&oldid=1386319381"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Portal",
+            "steam_appid": 400
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 71,
+            "image_id": "coay61",
+            "igdb_url": "https://www.igdb.com/games/portal",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-04",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "metroid-ending",
+          "category": "famous",
+          "question": "What did Metroid (1986) reveal to players who finished it fast enough?",
+          "choices": [
+            "Samus Aran is a woman",
+            "A hidden second quest",
+            "The planet was Earth all along",
+            "Mother Brain survived"
+          ],
+          "answer": "Samus Aran is a woman",
+          "explanation": "Metroid has five endings, chosen by completion time. In the three fastest, Samus Aran appears without her suit and is revealed to be a woman, and Metroid was praised as one of the first games with a female protagonist.",
+          "source": {
+            "title": "Wikipedia: Metroid (video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Metroid_%28video_game%29&oldid=1386894795"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Metroid",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 342602,
+            "image_id": "co9rib",
+            "igdb_url": "https://www.igdb.com/games/metroid--1",
+            "checked_on": "2026-11-21",
+            "note": "The Japanese Famicom Disk System box."
+          }
+        },
+        {
+          "id": "papers-please-arstotzka",
+          "category": "indie",
+          "question": "In Lucas Pope’s Papers, Please, which fictional country’s border checkpoint do you work at?",
+          "choices": [
+            "Latveria",
+            "Ruritania",
+            "Arstotzka",
+            "Sokovia"
+          ],
+          "answer": "Arstotzka",
+          "explanation": "You play an immigration inspector at a border checkpoint of Arstotzka, a fictional dystopian country, in 1982. Travelers’ passports and papers must be checked against an ever-growing list of rules.",
+          "source": {
+            "title": "Wikipedia: Papers, Please",
+            "url": "https://en.wikipedia.org/w/index.php?title=Papers%2C_Please&oldid=1386021715"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Papers, Please",
+            "steam_appid": 239030
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 2935,
+            "image_id": "co1vep",
+            "igdb_url": "https://www.igdb.com/games/papers-please",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "into-the-breach-attacks",
+          "category": "mechanics",
+          "question": "What does Into the Breach show you before the enemies act?",
+          "choices": [
+            "Exactly what each enemy will attack",
+            "A random hint for your next move",
+            "Your chance of winning the battle",
+            "Nothing: enemy turns are secret"
+          ],
+          "answer": "Exactly what each enemy will attack",
+          "explanation": "In Subset Games’ Into the Breach, the giant Vek telegraph their attacks, so you see each one coming and move your mechs in response. It was the studio’s second game, after FTL: Faster Than Light.",
+          "source": {
+            "title": "Wikipedia: Into the Breach",
+            "url": "https://en.wikipedia.org/w/index.php?title=Into_the_Breach&oldid=1370730341"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Into the Breach",
+            "steam_appid": 590380
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 27117,
+            "image_id": "co2gjp",
+            "igdb_url": "https://www.igdb.com/games/into-the-breach",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "valhalla-first-game-score-grammy",
+          "category": "music",
+          "question": "In 2023 the Grammys first gave an award for video game scores. Which game’s music won it?",
+          "choices": [
+            "Marvel’s Guardians of the Galaxy",
+            "Assassin’s Creed Valhalla: Dawn of Ragnarök",
+            "Call of Duty: Vanguard",
+            "Old World"
+          ],
+          "answer": "Assassin’s Creed Valhalla: Dawn of Ragnarök",
+          "explanation": "Stephanie Economou won the first Grammy for Best Score Soundtrack for Video Games and Other Interactive Media, in February 2023, for Dawn of Ragnarök, an expansion of Assassin’s Creed Valhalla. The other nominees included Call of Duty: Vanguard and Old World.",
+          "source": {
+            "title": "Wikipedia: Grammy Award for Best Score Soundtrack for Video Games and Other Interactive Media",
+            "url": "https://en.wikipedia.org/w/index.php?title=Grammy_Award_for_Best_Score_Soundtrack_for_Video_Games_and_Other_Interactive_Media&oldid=1386310776"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Assassin’s Creed Valhalla: Dawn of Ragnarök",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 185706,
+            "image_id": "co4kvw",
+            "igdb_url": "https://www.igdb.com/games/assassins-creed-valhalla-dawn-of-ragnarok",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "hades-hugo-award",
+          "category": "awards",
+          "question": "In 2021 Hades won a Hugo Award, a prize for science fiction and fantasy. In which category?",
+          "choices": [
+            "Best Novel",
+            "Best Dramatic Presentation",
+            "Best Graphic Story or Comic",
+            "Best Video Game, a one-time category"
+          ],
+          "answer": "Best Video Game, a one-time category",
+          "explanation": "DisCon III, the 2021 Worldcon, created a one-time Special Hugo Award category for Best Video Game. Supergiant Games’ Hades won it, ahead of finalists such as Animal Crossing: New Horizons and Final Fantasy VII Remake.",
+          "source": {
+            "title": "The Hugo Awards: 2021 Hugo Awards",
+            "url": "https://www.thehugoawards.org/hugo-history/2021-hugo-awards/"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Hades",
+            "steam_appid": 1145360
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 113112,
+            "image_id": "cob9kr",
+            "igdb_url": "https://www.igdb.com/games/hades--1",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-05",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "celeste-pico-8",
+          "category": "development",
+          "question": "Celeste began in 2015 as a small game made over a weekend for which fantasy console?",
+          "choices": [
+            "PICO-8",
+            "Playdate",
+            "TIC-80",
+            "Arduboy"
+          ],
+          "answer": "PICO-8",
+          "explanation": "In August 2015 Maddy Thorson and Noel Berry made the first Celeste for the PICO-8 fantasy console over a weekend, then expanded it into the full game, released in 2018.",
+          "source": {
+            "title": "Wikipedia: Celeste (video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Celeste_%28video_game%29&oldid=1385694879"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Celeste",
+            "steam_appid": 504230
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 26226,
+            "image_id": "cob9dh",
+            "igdb_url": "https://www.igdb.com/games/celeste",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "space-invaders-speed",
+          "category": "mechanics",
+          "question": "Why do the aliens in Space Invaders (1978) speed up as you shoot them?",
+          "choices": [
+            "A timer sped up every wave on purpose",
+            "Each alien type had its own speed",
+            "Fewer aliens let the hardware draw frames faster",
+            "The coin counter raised the speed"
+          ],
+          "answer": "Fewer aliens let the hardware draw frames faster",
+          "explanation": "Tomohiro Nishikado found that the processor drew each frame faster when fewer aliens were on screen, so they sped up as more were destroyed. Rather than correct it, he kept the effect as part of the gameplay.",
+          "source": {
+            "title": "Wikipedia: Space Invaders",
+            "url": "https://en.wikipedia.org/w/index.php?title=Space_Invaders&oldid=1386644115"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Space Invaders",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 3601,
+            "image_id": "cobtmt",
+            "igdb_url": "https://www.igdb.com/games/space-invaders",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "hollow-knight-team-cherry",
+          "category": "indie",
+          "question": "Team Cherry, the studio behind Hollow Knight, is based in which city?",
+          "choices": [
+            "Melbourne",
+            "Adelaide",
+            "Auckland",
+            "Vancouver"
+          ],
+          "answer": "Adelaide",
+          "explanation": "Team Cherry is based in Adelaide, Australia. It was founded by artist Ari Gibson and web designer William Pellen, and the idea for Hollow Knight began at a Ludum Dare game jam in 2013.",
+          "source": {
+            "title": "Wikipedia: Hollow Knight",
+            "url": "https://en.wikipedia.org/w/index.php?title=Hollow_Knight&oldid=1386594370"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Hollow Knight",
+            "steam_appid": 367520
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 14593,
+            "image_id": "cobfzp",
+            "igdb_url": "https://www.igdb.com/games/hollow-knight",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "tetris-korobeiniki",
+          "category": "music",
+          "question": "Tetris’s famous “Type A” music on the Game Boy is an arrangement of what?",
+          "choices": [
+            "A 19th-century Russian folk song",
+            "A Soviet-era pop hit",
+            "A Japanese school song",
+            "A Moscow radio jingle"
+          ],
+          "answer": "A 19th-century Russian folk song",
+          "explanation": "Hirokazu Tanaka arranged “Korobeiniki”, a Russian folk song based on an 1861 poem by Nikolay Nekrasov, as Type A for the 1989 Game Boy version. The Tetris Company has required the tune in every version of Tetris since 2002.",
+          "source": {
+            "title": "Wikipedia: Korobeiniki",
+            "url": "https://en.wikipedia.org/w/index.php?title=Korobeiniki&oldid=1384512997"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Tetris (Game Boy)",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 86490,
+            "image_id": "co2ufl",
+            "igdb_url": "https://www.igdb.com/games/tetris--1",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "dragon-age-first-game-awards",
+          "category": "awards",
+          "question": "Which game won Game of the Year at the first The Game Awards, in 2014?",
+          "choices": [
+            "Dark Souls II",
+            "Dragon Age: Inquisition",
+            "Middle-earth: Shadow of Mordor",
+            "Bayonetta 2"
+          ],
+          "answer": "Dragon Age: Inquisition",
+          "explanation": "Dragon Age: Inquisition won Game of the Year at the first The Game Awards, held in Las Vegas on 5 December 2014. The show succeeded the Spike Video Game Awards.",
+          "source": {
+            "title": "Wikipedia: The Game Awards 2014",
+            "url": "https://en.wikipedia.org/w/index.php?title=The_Game_Awards_2014&oldid=1372266283"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Dragon Age: Inquisition",
+            "steam_appid": 1222690
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 1887,
+            "image_id": "co2mvy",
+            "igdb_url": "https://www.igdb.com/games/dragon-age-inquisition",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-06",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "donkey-kong-jumpman",
+          "category": "famous",
+          "question": "Before he was Mario, what was Donkey Kong’s hero called in the game’s English materials?",
+          "choices": [
+            "Hammerman",
+            "Ladder Larry",
+            "Barrel Boy",
+            "Jumpman"
+          ],
+          "answer": "Jumpman",
+          "explanation": "In the 1981 arcade game Donkey Kong, the carpenter hero was unnamed in the Japanese release and called Jumpman in the operation manual and instructions. Minoru Arakawa of Nintendo of America suggested renaming him Mario.",
+          "source": {
+            "title": "Wikipedia: Donkey Kong (1981 video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=Donkey_Kong_%281981_video_game%29&oldid=1386623764"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Donkey Kong",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 1086,
+            "image_id": "co546n",
+            "igdb_url": "https://www.igdb.com/games/donkey-kong",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "balatro-big-two",
+          "category": "indie",
+          "question": "Besides the roguelike Luck Be a Landlord, which card game inspired Balatro?",
+          "choices": [
+            "Solitaire",
+            "Uno",
+            "Gin rummy",
+            "Big Two"
+          ],
+          "answer": "Big Two",
+          "explanation": "Solo developer LocalThunk made Balatro over about two and a half years, inspired by the card game Big Two and the roguelike Luck Be a Landlord. You score points by playing poker hands.",
+          "source": {
+            "title": "Wikipedia: Balatro",
+            "url": "https://en.wikipedia.org/w/index.php?title=Balatro&oldid=1386864469"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Balatro",
+            "steam_appid": 2379780
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 251833,
+            "image_id": "co9f4g",
+            "igdb_url": "https://www.igdb.com/games/balatro",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "obra-dinn-pocket-watch",
+          "category": "mechanics",
+          "question": "In Return of the Obra Dinn, what lets you see the moment of each death aboard the ship?",
+          "choices": [
+            "A pocket watch, the Memento Mortem",
+            "The captain’s logbook",
+            "A ghost in the cargo hold",
+            "A magic lantern"
+          ],
+          "answer": "A pocket watch, the Memento Mortem",
+          "explanation": "Lucas Pope’s Return of the Obra Dinn gives you the Memento Mortem, a pocket watch that recreates a death at the moment it happened. You use these scenes to work out the fate of all sixty people aboard.",
+          "source": {
+            "title": "Wikipedia: Return of the Obra Dinn",
+            "url": "https://en.wikipedia.org/w/index.php?title=Return_of_the_Obra_Dinn&oldid=1379932766"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Return of the Obra Dinn",
+            "steam_appid": 653530
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 9643,
+            "image_id": "co27j9",
+            "igdb_url": "https://www.igdb.com/games/return-of-the-obra-dinn",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "halo-macworld",
+          "category": "development",
+          "question": "Where was Halo shown to the public for the first time, in 1999?",
+          "choices": [
+            "At the Tokyo Game Show",
+            "At Apple’s Macworld Conference & Expo",
+            "At QuakeCon",
+            "At an Xbox launch event"
+          ],
+          "answer": "At Apple’s Macworld Conference & Expo",
+          "explanation": "Bungie’s Halo was unveiled at the 1999 Macworld Conference & Expo, after Apple’s Steve Jobs agreed to debut it there. Microsoft acquired Bungie in 2000 and made Halo a launch title for the Xbox.",
+          "source": {
+            "title": "Wikipedia: Halo: Combat Evolved",
+            "url": "https://en.wikipedia.org/w/index.php?title=Halo%3A_Combat_Evolved&oldid=1386314096"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Halo: Combat Evolved",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 740,
+            "image_id": "co2r2r",
+            "igdb_url": "https://www.igdb.com/games/halo-combat-evolved",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "clair-obscur-record",
+          "category": "awards",
+          "question": "How many awards did Clair Obscur: Expedition 33 win at The Game Awards 2025, a record for the show?",
+          "choices": [
+            "5",
+            "7",
+            "9",
+            "13"
+          ],
+          "answer": "9",
+          "explanation": "Clair Obscur: Expedition 33 won nine awards from a record thirteen nominations at The Game Awards 2025, including Game of the Year. No game had won more at the show.",
+          "source": {
+            "title": "Wikipedia: Clair Obscur: Expedition 33",
+            "url": "https://en.wikipedia.org/w/index.php?title=Clair_Obscur%3A_Expedition_33&oldid=1386890493"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Clair Obscur: Expedition 33",
+            "steam_appid": 1903340
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 305152,
+            "image_id": "co9gam",
+            "igdb_url": "https://www.igdb.com/games/clair-obscur-expedition-33",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quiz-07",
+      "available_from": "2026-11-21",
+      "questions": [
+        {
+          "id": "pokemon-insect-collecting",
+          "category": "development",
+          "question": "Which childhood hobby of Satoshi Tajiri inspired Pokémon?",
+          "choices": [
+            "Fishing",
+            "Bird watching",
+            "Trading baseball cards",
+            "Collecting insects"
+          ],
+          "answer": "Collecting insects",
+          "explanation": "Tajiri collected and traded insects as a child. He has said that linking two Game Boys with a cable gave him the idea for a game about that collecting and trading. It became Pokémon Red and Green, released in Japan in 1996.",
+          "source": {
+            "title": "Wikipedia: Satoshi Tajiri",
+            "url": "https://en.wikipedia.org/w/index.php?title=Satoshi_Tajiri&oldid=1386672228"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Pokémon Red and Green",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 1561,
+            "image_id": "co5pi4",
+            "igdb_url": "https://www.igdb.com/games/pokemon-red-version",
+            "checked_on": "2026-11-21",
+            "note": "The North American Pokémon Red Version box."
+          }
+        },
+        {
+          "id": "minecraft-mojang-deal",
+          "category": "famous",
+          "question": "In 2014 Microsoft agreed to buy Mojang, the studio behind Minecraft. For how much?",
+          "choices": [
+            "$250 million",
+            "$1 billion",
+            "$2.5 billion",
+            "$7.5 billion"
+          ],
+          "answer": "$2.5 billion",
+          "explanation": "On 15 September 2014 Microsoft announced an agreement to acquire Mojang, the Stockholm-based developer of Minecraft, for $2.5 billion. The Mojang team joined Microsoft Studios.",
+          "source": {
+            "title": "Microsoft: Minecraft to join Microsoft (15 September 2014)",
+            "url": "https://news.microsoft.com/2014/09/15/minecraft-to-join-microsoft/"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Minecraft",
+            "steam_appid": null
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 121,
+            "image_id": "coa77e",
+            "igdb_url": "https://www.igdb.com/games/minecraft-java-edition",
+            "checked_on": "2026-11-21",
+            "note": "The Java Edition cover."
+          }
+        },
+        {
+          "id": "untitled-goose-game-debussy",
+          "category": "music",
+          "question": "The music in Untitled Goose Game uses piano pieces by which composer?",
+          "choices": [
+            "Claude Debussy",
+            "Erik Satie",
+            "Frédéric Chopin",
+            "Maurice Ravel"
+          ],
+          "answer": "Claude Debussy",
+          "explanation": "Composer Dan Golding built the music from short clips of six of Claude Debussy’s Préludes. The clips play in response to what the goose does, which has been called reactive music.",
+          "source": {
+            "title": "Wikipedia: Untitled Goose Game",
+            "url": "https://en.wikipedia.org/w/index.php?title=Untitled_Goose_Game&oldid=1386330827"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Untitled Goose Game",
+            "steam_appid": 837470
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 72813,
+            "image_id": "co1vqc",
+            "igdb_url": "https://www.igdb.com/games/untitled-goose-game",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "animal-well-seven-years",
+          "category": "indie",
+          "question": "About how long did Billy Basso spend making Animal Well by himself?",
+          "choices": [
+            "Seven months",
+            "Two years",
+            "Seven years",
+            "Twelve years"
+          ],
+          "answer": "Seven years",
+          "explanation": "Billy Basso developed Animal Well, his first solo game, over about seven years, including its game engine. It was the first game published by Bigmode, the label started by YouTuber videogamedunkey (Jason Gastrow) and Leah Gastrow.",
+          "source": {
+            "title": "Wikipedia: Animal Well",
+            "url": "https://en.wikipedia.org/w/index.php?title=Animal_Well&oldid=1334268843"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "Animal Well",
+            "steam_appid": 813230
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 191435,
+            "image_id": "co4hdh",
+            "igdb_url": "https://www.igdb.com/games/animal-well",
+            "checked_on": "2026-11-21"
+          }
+        },
+        {
+          "id": "it-takes-two-co-op",
+          "category": "awards",
+          "question": "It Takes Two, The Game Awards’ 2021 Game of the Year, has which unusual rule?",
+          "choices": [
+            "It can be finished only once",
+            "It has no single-player mode",
+            "Every chapter has a time limit",
+            "It plays only in black and white"
+          ],
+          "answer": "It has no single-player mode",
+          "explanation": "Hazelight Studios’ It Takes Two must be played by two people, online or in split-screen: there is no single-player option. It won Game of the Year at The Game Awards 2021.",
+          "source": {
+            "title": "Wikipedia: It Takes Two (video game)",
+            "url": "https://en.wikipedia.org/w/index.php?title=It_Takes_Two_%28video_game%29&oldid=1381412136"
+          },
+          "checked_on": "2026-11-21",
+          "game": {
+            "title": "It Takes Two",
+            "steam_appid": 1426210
+          },
+          "image": {
+            "source": "IGDB",
+            "kind": "cover",
+            "igdb_id": 135243,
+            "image_id": "cob22v",
+            "igdb_url": "https://www.igdb.com/games/it-takes-two",
+            "checked_on": "2026-11-21"
+          }
+        }
+      ]
+    }
+  ]
+}

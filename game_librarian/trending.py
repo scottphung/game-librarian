@@ -40,13 +40,14 @@ def popular_now(games: Iterable[CatalogGame]) -> list[CatalogGame]:
     return sorted(playing, key=lambda game: (-game.players, game.sort_name, game.appid))
 
 
-def _released_between(game: CatalogGame, start: date, end: date) -> bool:
+def released_between(game: CatalogGame, start: date, end: date) -> bool:
+    """The game has an exact Steam release date from `start` to `end`, both included, and is out."""
     return game.released_on is not None and not game.upcoming and start <= game.released_on <= end
 
 
 def well_received_released_between(games: Iterable[CatalogGame], start: date, end: date) -> list[CatalogGame]:
     """Games with an exact Steam release date from `start` to `end` and strong reception, best reception first."""
-    chosen = [game for game in games if _released_between(game, start, end) and has_strong_reception(game)]
+    chosen = [game for game in games if released_between(game, start, end) and has_strong_reception(game)]
     return sorted(chosen, key=reception_order)
 
 

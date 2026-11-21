@@ -1,0 +1,140 @@
+{# Daily Trivia's content: an HTML fragment that app.js loads into the trivia dialog (base.html) from /trivia/panel.
+   The server renders every question, fact and label (Jinja escapes every value). app.js shows one card at a time,
+   checks the answers against data-answers and keeps the visitor's progress and scores in browser storage
+   (static/trivia.js). Today's facts carry data-today: Browse Facts shows them only after today's quiz is finished. #}
+
+{# The game's cover art from IGDB, or a plain box when the question names no checked cover record. #}
+{% macro art(q) -%}
+<div class="trivia-art{% if not q.cover_url %} is-empty{% endif %}">
+  {%- if q.cover_url %}<img src="{{ q.cover_url }}" alt="Cover art of {{ q.game_title }}" width="264" height="374" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-image-fallback>
+  {%- else %}<span class="visually-hidden">No cover art</span>{% endif -%}
+</div>
+{%- endmacro %}
+
+{# The source the answer was checked against, and the cover's credit. #}
+{% macro credits(q) -%}
+<p class="trivia-links">
+  <span>Source: <a class="text-link" href="{{ q.source.url }}" target="_blank" rel="noopener">{{ q.source.title }}<span class="visually-hidden"> (opens in a new tab)</span></a></span>
+  {%- if q.image %}<span>Cover art: <a class="text-link" href="{{ q.image.igdb_url }}" target="_blank" rel="noopener">IGDB<span class="visually-hidden">.com, the record of {{ q.game_title }} (opens in a new tab)</span></a>{% if q.image.note %}, {{ q.image.note }}{% endif %}</span>{% endif %}
+</p>
+{%- endmacro %}
+
+{# The existing game details popup, for a game in the catalog only. #}
+{% macro details_link(q, catalog) -%}
+{% if q.steam_appid and q.steam_appid in catalog %}<a class="button trivia-details" href="/games/{{ q.steam_appid }}" data-details="{{ q.steam_appid }}">Details<span class="visually-hidden"> about {{ q.game_title }}</span></a>{% endif %}
+{%- endmacro %}
+
+{# One fact for Browse Facts: a question's explanation, with its game, source and details link. #}
+{% macro fact(q, today, catalog) -%}
+<article class="trivia-card trivia-fact" data-trivia-fact="{{ q.id }}" data-game-title="{{ q.game_title }}"{% if today %} data-today{% endif %} aria-labelledby="trivia-f-{{ q.id }}" hidden>
+  {{ art(q) }}
+  <div class="trivia-main">
+    <p class="trivia-kicker">{{ q.category_label }}</p>
+    <h3 class="trivia-fact-title" id="trivia-f-{{ q.id }}" tabindex="-1">{{ q.game_title }}</h3>
+    <p class="trivia-explanation">{{ q.explanation }}</p>
+    {{ credits(q) }}
+    {% if q.steam_appid and q.steam_appid in catalog %}<p class="trivia-actions">{{ details_link(q, catalog) }}</p>{% endif %}
+  </div>
+</article>
+{%- endmacro %}
+
+{% if not daily %}
+<div class="trivia-missing">
+  <p><strong>Daily Trivia has no questions yet.</strong> They come from <code>curated/trivia.json</code>; run <code>python -m game_librarian check-curated</code> to see what is wrong with it.</p>
+</div>
+{% else %}
+{% set s = daily.showing %}
+{% set quiz = s.quiz.questions %}
+<div class="trivia" data-trivia data-day="{{ s.day.isoformat() }}" data-quiz="{{ s.quiz.id }}" data-ids="{{ quiz|map(attribute='id')|join(' ') }}" data-answers="{{ quiz|map(attribute='answer')|join(' ') }}" data-next-reset="{{ daily.next_reset.isoformat() }}">
+  <div class="trivia-tabs" role="tablist" aria-label="Daily Trivia">
+    <button class="trivia-tab" type="button" role="tab" id="trivia-tab-quiz" aria-controls="trivia-quiz" aria-selected="true" data-trivia-tab="quiz">Today’s Quiz</button>
+    <button class="trivia-tab" type="button" role="tab" id="trivia-tab-facts" aria-controls="trivia-facts" aria-selected="false" tabindex="-1" data-trivia-tab="facts">Browse Facts</button>
+  </div>
+
+  <section class="trivia-panel" id="trivia-quiz" role="tabpanel" aria-labelledby="trivia-tab-quiz" data-trivia-panel="quiz">
+    <div class="trivia-status">
+      <p class="trivia-meta">{{ s.day|day }} · Quiz {{ s.number }} of {{ daily.rotation_size }} · {% if s.repeat %}<strong>Repeat</strong>, first shown {{ s.first_shown|day }}{% else %}New today{% endif %}</p>
+      <p class="trivia-played" data-trivia-played hidden></p>
+      <div class="trivia-progress">
+        <p class="trivia-count"><span data-trivia-position>Question 1 of {{ quiz|length }}</span> · <span data-trivia-score>Score 0</span></p>
+        <ol class="trivia-steps" aria-hidden="true">{% for q in quiz %}<li data-trivia-step></li>{% endfor %}</ol>
+      </div>
+    </div>
+
+    {% for q in quiz %}
+    <article class="trivia-card" data-trivia-question="{{ loop.index0 }}" aria-labelledby="trivia-q-{{ q.id }}" hidden>
+      {{ art(q) }}
+      <div class="trivia-main">
+        <p class="trivia-kicker">{{ q.category_label }} · {{ q.game_title }}</p>
+        <h3 class="trivia-question" id="trivia-q-{{ q.id }}" tabindex="-1">{{ q.question }}</h3>
+        <div class="trivia-choices" role="group" aria-labelledby="trivia-q-{{ q.id }}">
+          {% for choice in q.choices %}
+          <button class="trivia-choice" type="button" data-choice="{{ loop.index0 }}"><span class="trivia-letter" aria-hidden="true">{{ "ABCD"[loop.index0] }}</span><span class="trivia-choice-text">{{ choice }}</span><span class="trivia-mark" data-trivia-mark></span></button>
+          {% endfor %}
+        </div>
+        <div class="trivia-feedback" data-trivia-feedback hidden>
+          <p class="trivia-verdict" data-trivia-verdict tabindex="-1"></p>
+          <p class="trivia-explanation">{{ q.explanation }}</p>
+          {{ credits(q) }}
+          <p class="trivia-actions">
+            <button class="button button-primary" type="button" data-trivia-next>{% if loop.last %}See your score{% else %}Next question{% endif %}</button>
+            {{ details_link(q, in_catalog) }}
+          </p>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+
+    <section class="trivia-results" data-trivia-results aria-labelledby="trivia-results-title" hidden>
+      <h3 class="trivia-results-title" id="trivia-results-title" tabindex="-1" data-trivia-total></h3>
+      <p class="trivia-results-line" data-trivia-first></p>
+      <p class="trivia-results-line" data-trivia-best></p>
+      <h4 class="trivia-games-title">Games in today’s quiz</h4>
+      <ul class="trivia-games">
+        {% for q in quiz %}
+        <li class="trivia-game">
+          <span class="trivia-thumb{% if not q.thumb_url %} is-empty{% endif %}">{% if q.thumb_url %}<img src="{{ q.thumb_url }}" alt="" width="45" height="64" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-image-fallback>{% endif %}</span>
+          <span class="trivia-game-name">{{ q.game_title }}</span>
+          {% if q.steam_appid and q.steam_appid in in_catalog %}{{ details_link(q, in_catalog) }}{% else %}<span class="trivia-game-note">Not in the catalog</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="trivia-actions">
+        <button class="button" type="button" data-trivia-replay>Play again for practice</button>
+        <button class="button" type="button" data-trivia-goto="facts">Browse facts</button>
+      </p>
+    </section>
+
+    <details class="trivia-rules">
+      <summary>How Daily Trivia works</summary>
+      <ul>
+        <li>A new quiz starts every day at {{ reset_label }}<span data-trivia-local-reset></span>: the same five questions for everyone that day.</li>
+        <li>New quizzes come first, in order, one a day. Once all {{ daily.rotation_size }} have been shown, they repeat in the same order until new questions are added, and a repeated quiz says when it was first shown.</li>
+        <li>One point for each correct answer, and no timer. Your first finished score of the day is saved; <strong>Play again</strong> is practice and never changes it. Your personal best is your best first score.</li>
+        <li>Progress and scores are saved only in this browser on this device (browser local storage), never sent to the server, and erased when this site’s browser data is cleared.</li>
+        <li>Browse Facts shows the facts from earlier quizzes, and today’s five once you finish today’s quiz.</li>
+        <li>Each answer links the source it was checked against. Cover art comes from IGDB.com and belongs to the games’ publishers.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="trivia-panel" id="trivia-facts" role="tabpanel" aria-labelledby="trivia-tab-facts" data-trivia-panel="facts" hidden>
+    <div class="trivia-browse" data-trivia-browse>
+      <div class="trivia-browse-bar">
+        <button class="trivia-arrow" type="button" data-trivia-step-by="-1" aria-label="Previous fact"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <p class="trivia-count" data-trivia-fact-count aria-live="polite"></p>
+        <button class="trivia-arrow" type="button" data-trivia-step-by="1" aria-label="Next fact"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M9 5l7 7-7 7"/></svg></button>
+      </div>
+      {% for q in quiz %}{{ fact(q, True, in_catalog) }}{% endfor %}
+      {% for q in daily.past_facts %}{{ fact(q, False, in_catalog) }}{% endfor %}
+      <p class="trivia-hint">Previous and next: the arrow buttons, or the ← and → keys.</p>
+    </div>
+    <div class="trivia-empty" data-trivia-empty hidden>
+      <p><strong>No facts to browse yet.</strong> Finish today’s quiz to add its five facts here; every new day’s quiz adds five more.</p>
+      <p><button class="button" type="button" data-trivia-goto="quiz">Go to today’s quiz</button></p>
+    </div>
+  </section>
+
+  <p class="trivia-foot"><span class="trivia-saved" data-trivia-saved>Saved on this device</span> · New quiz every day at {{ reset_label }}<span data-trivia-local-reset></span></p>
+</div>
+{% endif %}

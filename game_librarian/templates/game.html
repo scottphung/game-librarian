@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{# The full details page has no details dialog (base.html): its links to other games open their own pages. #}
+{% set details_dialog = false %}
 {% from "_details.html" import game_details %}
 {% from "_igdb_details.html" import igdb_details %}
 {% block title %}{% if game %}{{ game.name }} | {% endif %}Game Librarian{% endblock %}

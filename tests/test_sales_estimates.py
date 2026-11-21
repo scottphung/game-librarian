@@ -217,9 +217,19 @@ def test_the_chart_ranks_released_paid_games_and_names_every_game_it_leaves_out(
     prices = {appid: {"status": "priced"} for appid in (*range(1, 13), 23, 24, 25)}
     prices.update({20: {"status": FREE}, 21: {"status": "not_sold"}})  # 22 has no stored price
     chart = dashboard.sales_chart(games, estimates, prices, datetime(2026, 11, 9, 13, tzinfo=UTC))
-    assert [(bar["appid"], bar["copies"], bar["width"]) for bar in chart["bars"]][:3] == [
-        (12, 12_000, 100.0), (11, 11_000, 91.67), (10, 10_000, 83.33)]
-    assert len(chart["bars"]) == dashboard.SALES_BARS and chart["ranked"] == 12  # the first 10 of 12
+    assert [item["appid"] for item in chart["ranked"]] == list(range(12, 0, -1))  # the cohort, largest first
+    ring = chart["ring"]
+    # Five named slices and "Other tracked games" for the other seven; the slices add up to the total in the middle.
+    assert [part["appid"] if part["kind"] == "game" else "other" for part in ring["parts"]] == [12, 11, 10, 9, 8, "other"]
+    assert [item["appid"] for item in ring["other"]["members"]] == [7, 6, 5, 4, 3, 2, 1]
+    assert (ring["total"], ring["games"], ring["named"]) == (78_000, 12, dashboard.RING_NAMED)
+    assert sum(part["copies"] for part in ring["parts"]) == ring["total"] == sum(range(1_000, 13_000, 1_000))
+    assert sum(part["share_tenths"] for part in ring["parts"]) == 1_000  # the shares shown add up to 100.0%
+    # Each slice's angle is its share of the total, clockwise from the top, and the last one closes the ring.
+    assert [(part["start"], part["end"]) for part in ring["parts"]][:2] == [(0.0, 55.38), (55.38, 106.15)]
+    assert all(a["end"] == b["start"] for a, b in zip(ring["parts"], ring["parts"][1:])) and ring["parts"][-1]["end"] == 360
+    assert ring["parts"][0]["badge"] is not None and ring["parts"][-1]["badge"] is None  # "Other" carries no number
+    assert ring["parts"][0]["clip"].startswith("polygon(") and ring["parts"][0]["box"]["width"] > 0
     assert chart["left_out"] == {"free": ["Free Game"], "no_price": ["Unsold Game", "Unpriced Game"],
                                  "not_released": ["Future Game"], "no_estimate": ["Unknown Game"],
                                  "not_asked": ["Unasked Game"]}
@@ -228,7 +238,10 @@ def test_the_chart_ranks_released_paid_games_and_names_every_game_it_leaves_out(
                                 datetime(2026, 11, 9, 13, tzinfo=UTC))
     assert old["stale"] is True  # more than 14 days old
     empty = dashboard.sales_chart([], {}, {}, datetime(2026, 11, 9, tzinfo=UTC))
-    assert empty["bars"] == [] and empty["collected"] is None and empty["stale"] is False
+    assert empty["ranked"] == [] and empty["ring"] is None and empty["collected"] is None and empty["stale"] is False
+    lone = dashboard.sales_ring([{"appid": 1, "copies": 5}])  # one game: one slice that is the whole ring
+    assert [(part["start"], part["end"], part["share_tenths"]) for part in lone["parts"]] == [(0.0, 360.0, 1_000)]
+    assert dashboard.shares_in_tenths([1, 1, 1]) == [334, 333, 333]
 
 
 # ---------------------------------------------------------------------- the dashboard
@@ -240,7 +253,13 @@ def board(settings, client=LOCAL, headers=None) -> str:
 
 
 def sales_section(html: str) -> str:
-    return re.search(r'<section class="dash-block" id="sales".*?</section>', html, re.S).group(0)
+    """The Estimated Steam copies sold chart of Trending games → Sales & reception."""
+    return re.search(r'<figure class="chart-card sales-chart" id="sales".*?</figure>', html, re.S).group(0)
+
+
+def sources(html: str) -> str:
+    """The page's collapsed "Sources and methodology", where the notes about the estimates are."""
+    return text_of(re.search(r'<details class="method-details" id="sources">.*?</details>', html, re.S).group(0))
 
 
 def trending_with_estimates(settings):
@@ -259,24 +278,30 @@ def test_the_chart_compares_trending_games_on_this_computer_only(games, settings
     trending_with_estimates(settings)
     html = board(settings)
     section = sales_section(html)
-    assert '<a class="view-link" href="#sales">Estimated sales</a>' in html
-    assert "only the Gamalytic chart estimates sales" in text_of(html)
-    assert re.findall(r'data-details="(\d+)"', section) == ["114", "112"]  # free and unestimated games left out
-    values = re.findall(r'class="gb-bar" style="width: ([\d.]+)%"></span><span class="gb-value">([^<]*)', section)
-    assert values == [("100.0", "≈ 2.5M"), ("1.6", "≈ 40K")]
+    canvas = html[html.index('<div class="report-canvas"'):]
+    assert canvas.index('id="sales"') < canvas.index('id="reception"')  # the first chart of Sales & reception
+    assert re.findall(r'data-details="(\d+)"', section) == ["114", "112", "114", "112"]  # the slices, then the list
+    assert re.findall(r'<p class="ring-figure"[^>]*>(≈ [^<]+)<', section) == ["≈ 2.5M", "≈ 40K"]
+    assert "≈ 2.5M estimated copies 2 games" in text_of(section)  # the middle: the cohort's total and size
+    table = text_of(re.search(r"<table.*?</table>", section, re.S).group(0))
+    assert "1 Game 14 2,500,000 98.4%" in table and "2 Game 12 40,000 1.6%" in table
+    assert "Total (2 games, the middle of the doughnut) 2,540,000 100.0%" in table  # the slices reconcile
     words = text_of(section)
-    assert "Estimated Steam copies sold Steam only Local evaluation only" in words
+    assert "Estimated Steam copies sold Steam only Local evaluation only Steam · cumulative estimates" in words
     assert "not sales reported by publishers" in words and "Gamalytic’s terms do not allow sharing them" in words
     assert ("Gamalytic API (free), copiesSold · collected 9 Nov 2026, 12:30 UTC; Gamalytic’s data dated "
             "9 Nov 2026, 06:00 UTC. Left out: 1 free to play, 1 without a Gamalytic estimate.") in words
-    assert "Left out now: Game 13 (free to play); Game 11 (without a Gamalytic estimate)." in words  # in the fold
     assert "Game 10" not in words  # an estimate alone does not put a game in the chart: the Trending page does
-    assert "Popular on Steam right now" in words  # each bar names the Trending list it comes from
+    assert "Popular on Steam right now" in words  # the Trending list each game comes from, in its tooltip and table
     assert "2,500,000" in section  # the table and the tooltip give Gamalytic's figure
     assert 'steam/apps/114/library_600x900.jpg?t=1" alt=""' in section  # the portrait cover beside the name
-    assert "This is not a list of Steam’s best sellers." in words and "No change is shown" in words
-    assert "copies times today’s price would be wrong" in words  # no revenue is calculated
-    assert "Do not publish it or screenshots of it." in words
+    # The notes on the estimates fold under the page's one "Sources and methodology".
+    notes = sources(html)
+    assert "Left out now: Game 13 (free to play); Game 11 (without a Gamalytic estimate)." in notes
+    assert "the 5 largest estimates each have a slice" in notes and "the slices add up to it" in notes
+    assert "This is not a list of Steam’s best sellers." in notes and "No change is shown" in notes
+    assert "copies times today’s price would be wrong" in notes  # no revenue is calculated
+    assert "Do not publish it or screenshots of it." in notes
 
 
 @pytest.mark.parametrize("client, headers", [
@@ -289,9 +314,10 @@ def test_no_other_browser_gets_the_estimates(games, settings, client, headers):
     trending_with_estimates(settings)
     html = board(settings, client, headers)
     assert 'id="sales"' not in html and "#sales" not in html
+    assert "data-sales-ring" not in html and "ring-slice" not in html and "estimated copies" not in text_of(html)  # no payload
     assert "Gamalytic" not in html and "2,500,000" not in html and "2.5M" not in html
-    assert "none is a sales figure" in text_of(html)  # the page reads as it did before 0.11
-    assert "no source here publishes unit sales or revenue per game, and this page shows neither" in text_of(html)
+    assert "No sales figures: Valve publishes no unit sales or revenue per game, so this page compares Steam " \
+           "reception." in text_of(html)  # the reception charts lead instead
 
 
 @pytest.mark.parametrize("address", ["::1", "::ffff:127.0.0.1", "127.0.0.2"])
@@ -325,11 +351,12 @@ def test_the_chart_explains_an_empty_an_old_or_a_failed_collection(games, settin
         store.save_sales_estimates(conn, {114: None}, source="Gamalytic", collected_at="2026-11-09T12:45:00+00:00",
                                    source_cached_at=None)
     with_conn(settings, no_trending_estimate)
-    words = text_of(sales_section(board(settings)))
+    html = board(settings)
+    words = text_of(sales_section(html))
     assert ("None of the 1 catalog games on the Trending page is a released paid game with an estimate in its "
             "newest collection.") in words  # the older estimate is not used once a newer collection has none
     assert "Left out: 1 without a Gamalytic estimate." in words
-    assert "Left out now: Game 14 (without a Gamalytic estimate)." in words
+    assert "Left out now: Game 14 (without a Gamalytic estimate)." in sources(html)
 
 
 # ---------------------------------------------------------------------- the commands

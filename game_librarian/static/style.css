@@ -39,7 +39,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; } /* class rules below must never show a hidden element */
 html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
-html.has-dialog { overflow: hidden; }
+html.has-dialog, html.has-trivia { overflow: hidden; } /* the page keeps its place behind an open popup */
 body {
   margin: 0;
   background: var(--bg);
@@ -112,6 +112,60 @@ h1, h2, h3, h4 { font-weight: 800; line-height: 1.2; }
   text-decoration: none;
 }
 .nav-link:hover, .nav-link[aria-current="page"] { border-color: var(--text); }
+/* The wishlist star and the Daily Trivia lightbulb: black squares with a thin gold border, as tall as the tabs. Each
+   one's name shows as a tip under it on hover and keyboard focus; the tip is part of the control, so the pointer can
+   move onto it, and Escape hides it (app.js). */
+.nav-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--gold);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.nav-icon-art { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.nav-icon:hover, .nav-icon[aria-current="page"], .nav-icon[aria-expanded="true"] { color: var(--gold); }
+.nav-icon[aria-current="page"] { box-shadow: inset 0 0 0 1px var(--gold); }
+.nav-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: -1px;
+  z-index: 30;
+  padding: 4px 8px;
+  border: 1px solid var(--gold);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+  visibility: hidden;
+  pointer-events: none;
+}
+.nav-tip::before { content: ""; position: absolute; left: 0; right: 0; top: -8px; height: 8px; } /* a bridge for the pointer */
+.nav-icon:hover .nav-tip, .nav-icon:focus-visible .nav-tip { visibility: visible; pointer-events: auto; }
+.nav-icon.is-tip-hidden .nav-tip { visibility: hidden; pointer-events: none; }
+/* Today's quiz is finished: a small gold check on the lightbulb's corner. */
+.nav-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--gold);
+}
+.nav-badge svg { fill: none; stroke: var(--bg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .page { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 24px; }
 .hero { padding: 32px 0 24px; }
 .hero h1 { margin: 0; font-size: clamp(2.6rem, 6vw, 4.6rem); font-weight: 900; letter-spacing: -0.03em; line-height: 1; }
@@ -626,12 +680,6 @@ details.more > summary { color: var(--text); font-weight: 700; cursor: pointer; 
 .dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .chart-card { min-width: 0; margin: 0; padding: 16px 18px 18px; border: 1px solid var(--border); background: var(--surface); }
 .chart-card.is-wide { grid-column: 1 / -1; }
-/* Trending games dashboard: one block per Trending section, each with its own heading and scope badge. */
-.dash-block { margin: 0 0 22px; }
-.dash-block > .trend-head { margin: 0 0 10px; }
-.dash-section-title { margin: 0; font-size: 1.35rem; font-weight: 900; }
-.dash-block-note { margin: 16px 0 0; }
-.strip-row.strip-row-plain { grid-template-columns: minmax(0, 1fr); }
 .chart-title { margin: 0; font-size: 1.05rem; font-weight: 800; }
 h3.chart-title { margin-top: 16px; font-size: 0.95rem; }
 h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
@@ -962,70 +1010,126 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
 
 /* ---------------------------------------------------------------- dashboard: trending games */
 
-.key.is-positive, .seg.is-positive { background: var(--review-positive); }
-.key.is-negative, .seg.is-negative { background: var(--review-negative); }
-.split-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.split-row p { margin: 0; }
-.split-name { color: var(--text-2); font-size: 0.84rem; overflow-wrap: anywhere; }
-/* A thin segmented bar: two parts of one whole, a 2px surface gap between them, rounded ends. */
-.split-bar { display: flex; gap: 2px; height: 8px; margin: 4px 0 2px; }
-.split-bar .seg { flex-basis: 0; min-width: 2px; }
-.split-bar .seg:first-child { border-radius: 4px 0 0 4px; }
-.split-bar .seg:last-child { border-radius: 0 4px 4px 0; }
-.split-figures { color: var(--text-2); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
-.spark-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 16px; padding: 0; list-style: none; }
-.spark-card { padding: 10px 12px; border: 1px solid var(--border); background: var(--bg); }
-.spark-name { margin: 0 0 6px; color: var(--text); font-size: 0.84rem; font-weight: 700; overflow-wrap: anywhere; }
-.spark-frame { position: relative; height: 64px; }
-.sparkline { display: block; width: 100%; height: 100%; overflow: visible; }
-.sparkline polyline { fill: none; stroke: var(--series-1); stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; }
-.spark-end { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--bg); }
-.spark-range { margin: 6px 0 0; }
-
-/* Game charts: every row names a game (its link opens the details), beside a small cover; the cover only helps
-   recognition and never carries a value. */
-.dash-section-sub { max-width: 110ch; margin: -4px 0 12px; color: var(--text-2); font-size: 0.88rem; }
+/* The report tabs: three pages of one report. They stay at the top of the window while the page scrolls, so the next
+   report is always one tap away, also on a phone. Underlined, unlike the boxed dashboard page links above them. */
+.report-tabs { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; margin: 0 0 18px; border-bottom: 1px solid var(--border-strong); background: var(--bg); }
+.report-tab { margin-bottom: -1px; padding: 10px 18px; border-bottom: 3px solid transparent; color: var(--text-2); font-size: 0.95rem; font-weight: 800; text-align: center; text-decoration: none; }
+.report-tab:hover { color: var(--text); border-bottom-color: var(--border-strong); }
+.report-tab[aria-current="page"] { border-bottom-color: var(--text); color: var(--text); }
+.report-head { margin: 0 0 14px; }
+.report-title { margin: 0; font-size: 1.5rem; font-weight: 900; }
+.report-question { max-width: 80ch; margin: 4px 0 0; color: var(--text-2); font-size: 1rem; }
+.report-note { max-width: 100ch; margin: 4px 0 0; color: var(--muted); font-size: 0.84rem; }
+/* A report page is a canvas of aligned cards: full width by default; Momentum puts its line chart beside the waterfall. */
+.report-canvas { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.report-canvas.is-momentum { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.report-canvas.is-upcoming { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } /* the radar, then the comparison */
+.report .chart-card { scroll-margin-top: 64px; } /* the sticky tabs never cover a card the page jumps to */
+.chart-scope { max-width: 110ch; margin: 4px 0 12px; color: var(--text-2); font-size: 0.84rem; }
+.chart-scope strong { color: var(--text); }
 .chart-meta { margin: 12px 0 0; color: var(--muted); font-size: 0.76rem; overflow-wrap: anywhere; }
 .chart-meta + .table-view { margin-top: 8px; }
+.chart-note { margin: 10px 0 0; color: var(--text-2); font-size: 0.84rem; }
 .thumb { display: block; flex: none; width: 36px; aspect-ratio: 264 / 374; overflow: hidden; background: var(--surface-raised); }
 .thumb.is-wide { width: 76px; aspect-ratio: 460 / 215; }
 .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; color: transparent; }
 .thumb.is-empty { background: repeating-linear-gradient(135deg, var(--surface-raised) 0 6px, var(--surface) 6px 12px); }
+/* A game's name beside its cover (the game_link macro): it opens the details dialog; long names wrap. */
+.gb-name { color: var(--text); font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; text-decoration-color: var(--border-strong); }
 
-/* Ranked bars: one thin bar per game from a shared baseline, its value printed at the bar's tip. The right
-   padding keeps room for the value of the longest bar. */
-.game-bars { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.game-bar { display: grid; grid-template-columns: 1.4rem auto minmax(0, 1fr); gap: 10px; align-items: center; }
-.gb-rank { color: var(--muted); font-size: 0.85rem; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
-.gb-body { min-width: 0; }
-.gb-name, .rt-name, .split-link { color: var(--text); font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; text-decoration-color: var(--border-strong); }
-.gb-context { margin: 1px 0 4px; color: var(--text-2); font-size: 0.74rem; line-height: 1.35; }
-.gb-line { display: flex; align-items: center; min-height: 14px; margin: 4px 0 0; padding-right: 5.5rem; border-left: 1px solid var(--border-strong); }
-.gb-bar { flex: none; height: 12px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--series-1); }
-.gb-value { flex: none; margin-left: 8px; color: var(--text); font-size: 0.8rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.gb-line.is-missing { padding: 0; border: 0; color: var(--muted); font-size: 0.78rem; }
-.game-bar:hover .gb-bar { filter: brightness(1.25); }
-/* Estimated Steam copies sold (local evaluation only): larger covers and bars than the other ranked charts. */
-.sales-chart .thumb { width: 44px; }
-.sales-chart .gb-name { font-size: 0.95rem; }
-.sales-chart .gb-bar { height: 16px; }
-.sales-notes, .method-notes { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 0.82rem; }
-.sales-notes li, .method-notes li { margin: 0 0 6px; }
-.sales-notes strong, .method-notes strong { color: var(--text); }
-.method-notes { max-width: 120ch; margin-top: 4px; }
+/* Estimated Steam copies sold as a doughnut (dashboard.sales_ring): each slice is an element clipped to its ring
+   segment, so clip-path also limits its pointer target; its cover art is cropped into it, a slice without art is the
+   series blue, "Other tracked games" the de-emphasis gray. A numbered badge on each named slice matches the list
+   beside it, which names every slice with its estimate and share. Selecting a game dims the other slices. */
+.ring-layout { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px 32px; align-items: center; }
+.ring { position: relative; width: 100%; max-width: 320px; aspect-ratio: 1; margin: 0 auto; }
+.ring-slice { position: absolute; inset: 0; display: block; background: var(--series-1); transition: opacity 0.15s; }
+.ring-slice img { position: absolute; display: block; max-width: none; object-fit: cover; }
+.ring-slice.is-other { background: var(--band-none); }
+.ring[data-selected] .ring-slice:not(.is-selected) { opacity: 0.35; }
+.ring-badge, .ring-rank { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--text); font-size: 0.74rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ring-badge { position: absolute; z-index: 1; margin: -11px 0 0 -11px; background: var(--bg); box-shadow: 0 0 0 1px var(--text-2); pointer-events: none; }
+.ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 0; text-align: center; pointer-events: none; }
+.ring-total { color: var(--text); font-size: 1.6rem; font-weight: 800; line-height: 1.15; }
+.ring-sub { color: var(--text-2); font-size: 0.78rem; line-height: 1.35; }
+.ring-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.ring-row { display: grid; grid-template-columns: 22px 28px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 6px; border: 1px solid transparent; }
+.ring-row .thumb { width: 28px; }
+.ring-row.is-selected { border-color: var(--band-1); background: var(--bg); }
+.ring-rank { box-shadow: 0 0 0 1px var(--text-2); }
+.ring-rank.is-other { box-shadow: none; }
+.ring-swatch { background: var(--band-none); }
+.ring-name { margin: 0; color: var(--text); font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; }
+.ring-figure { margin: 1px 0 0; color: var(--text); font-size: 0.84rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ring-share { margin-left: 4px; color: var(--muted); }
+.ring-note { margin: 1px 0 0; color: var(--muted); font-size: 0.74rem; }
+.ring-members > summary { color: var(--text); font-size: 0.88rem; font-weight: 700; cursor: pointer; }
+.ring-members-count { margin-left: 6px; color: var(--muted); font-size: 0.76rem; }
+.ring-member-list { margin: 6px 0 2px; padding-left: 18px; color: var(--text-2); font-size: 0.8rem; }
+.ring-member-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.ring-member-figure { color: var(--text); font-variant-numeric: tabular-nums; }
+.ring-member-note { color: var(--muted); }
+.method-notes { max-width: 120ch; margin: 4px 0 0; padding-left: 18px; color: var(--text-2); font-size: 0.82rem; }
+.method-notes li { margin: 0 0 6px; }
+.method-notes strong { color: var(--text); }
+
+/* Strong-reception scatterplots: both share their axes (dashboard.reception_plots) and the same plot size, so a game
+   sits at the same spot in each. A dot is a link with a 24px target; this year's games wear the accent color, the
+   longer window's other games the de-emphasis gray. A few dots carry their name, on a surface-colored label. */
+.plot { position: relative; height: 260px; margin: 0 14px 34px 46px; }
+.plot-dot { position: absolute; z-index: 1; width: 10px; height: 10px; margin: 0 0 -5px -5px; border-radius: 50%; background: var(--band-none); box-shadow: 0 0 0 2px var(--surface); }
+.plot-dot.is-accent { background: var(--series-1); }
+.plot-dot::before { content: ""; position: absolute; inset: -7px; border-radius: 50%; }
+.plot-dot:hover, .plot-dot:focus-visible { z-index: 3; transform: scale(1.4); }
+.plot-label { position: absolute; z-index: 2; width: max-content; transform: translate(10px, 50%); padding: 0 5px; background: var(--surface); color: var(--text); font-size: 0.76rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; pointer-events: none; }
+.plot-label.is-left { transform: translate(calc(-100% - 10px), 50%); text-align: right; }
+.plot-label-figures { color: var(--text-2); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.key.plot-key { border-radius: 50%; background: var(--band-none); }
+.key.plot-key.is-accent { background: var(--series-1); }
+/* A selected game: its peers wear a ring, their median is a 2px line across the plot, and the dot itself grows with
+   a white ring. The strip above the plot gives its numbers (app.js copies them from the game's <template>). */
+.plot-dot.is-peer { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--text-2); }
+.plot-dot.is-selected { z-index: 4; background: var(--band-1); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); transform: scale(1.3); }
+.plot-median { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--text-2); pointer-events: none; }
+.plot-median-label { position: absolute; right: 0; bottom: 3px; padding: 0 4px; background: var(--surface); color: var(--text); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.key.plot-key.is-peer { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.key.median-key { width: 14px; height: 2px; border-radius: 0; background: var(--text-2); }
+.plot-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 10px; }
+.plot-tools .window-switch, .plot-tools .legend { margin: 0; }
+.bench-strip { min-height: 66px; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--border); background: var(--bg); }
+.bench-prompt { margin: 0; color: var(--muted); font-size: 0.82rem; }
+.bench-name { margin: 0 0 6px; color: var(--text); font-size: 0.95rem; font-weight: 800; overflow-wrap: anywhere; }
+.bench-facts { display: grid; grid-template-columns: repeat(4, max-content) minmax(0, 1fr); gap: 4px 22px; margin: 0; }
+.bench-facts dt { color: var(--muted); font-size: 0.72rem; font-weight: 700; }
+.bench-facts dd { margin: 0; color: var(--text); font-size: 0.9rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bench-peers dd { color: var(--text-2); font-size: 0.8rem; font-weight: 400; }
+
+/* The chart tooltip (app.js), one per card: a mark's name (or value) and its figures, repeating the mark's own text. */
+.plot-card, .players-card { position: relative; } /* the tooltip is placed inside its card */
+.chart-tip { position: absolute; z-index: 5; width: max-content; max-width: min(280px, calc(100% - 16px)); padding: 8px 10px; border: 1px solid var(--border-strong); background: var(--surface-raised); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); pointer-events: none; }
+.chart-tip p { margin: 0; }
+.chart-tip-name { color: var(--text); font-size: 0.86rem; font-weight: 800; overflow-wrap: anywhere; }
+.chart-tip-text { color: var(--text-2); font-size: 0.78rem; }
 
 /* The upcoming release radar: the center is today, each ring a span of time until release, each section a platform
    family. The grid is an SVG that scales with the square (non-scaling strokes keep 1px lines); the points and labels
    are HTML placed in percent of it, so they keep their size on every screen. A point is a link to the game's
-   details; "is-active" marks the game pointed at or focused, in every section (app.js). */
-.radar-card { position: relative; } /* the tooltip is placed inside the card */
-.radar-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 28px; align-items: start; }
+   details; "is-selected" marks the game in the panel beside the radar, in every section (app.js). Where the card is
+   at least 700 px wide, the radar takes about two thirds of it and the panel the rest; otherwise the panel is below. */
+.radar-card { container-type: inline-size; }
+.radar-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 28px; align-items: start; }
+@container (min-width: 700px) {
+  .radar-layout { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+}
 .radar { position: relative; width: 100%; max-width: 560px; aspect-ratio: 1; margin: 0 auto; border-radius: 50%;
   background: radial-gradient(closest-side, rgba(57, 135, 229, 0.16), rgba(57, 135, 229, 0.05) 70%, rgba(255, 255, 255, 0.02)); }
 .radar-grid { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .radar-grid circle, .radar-grid line { fill: none; stroke: var(--border-strong); stroke-width: 1px; vector-effect: non-scaling-stroke; }
 .radar-grid .radar-soon { fill: rgba(57, 135, 229, 0.14); stroke: none; } /* due within a week */
 .radar-grid .is-year { stroke: var(--muted); } /* the end of the first year: "Later" lies beyond it */
+/* A time window dims the bands beyond its last ring; the points there are hidden. */
+.radar-dim { position: absolute; inset: 0; display: none; border-radius: 50%; pointer-events: none; background: radial-gradient(circle closest-side, transparent var(--edge), rgba(0, 0, 0, 0.62) var(--edge)); }
+.radar[data-window="month"] .radar-dim.is-month, .radar[data-window="quarter"] .radar-dim.is-quarter { display: block; }
 .radar-ring, .radar-sector { position: absolute; transform: translate(-50%, -50%); padding: 0 5px; border-radius: 2px; background: var(--surface); line-height: 1.35; white-space: nowrap; pointer-events: none; }
 .radar-ring { left: 50%; color: var(--muted); font-size: 0.7rem; }
 .radar-sector { color: var(--text); font-size: 0.76rem; font-weight: 800; }
@@ -1034,14 +1138,25 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
 .radar-count { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
 .radar-dot { position: absolute; z-index: 1; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); }
 .radar-dot::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; } /* a 24px pointer target */
-.radar-dot:hover, .radar-dot.is-active { z-index: 2; background: var(--band-1); transform: scale(1.35); }
-.radar-card.has-active .radar-dot:not(.is-active) { opacity: 0.35; }
-@media (forced-colors: active) { /* high-contrast modes drop background colors: the points keep system colors */
-  .radar-dot { forced-color-adjust: none; background: CanvasText; box-shadow: 0 0 0 2px Canvas; }
-  .radar-dot:hover, .radar-dot.is-active { background: Highlight; }
+.radar-dot:hover { z-index: 2; transform: scale(1.35); }
+.radar-dot.is-selected { z-index: 2; background: var(--band-1); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); transform: scale(1.2); }
+@media (forced-colors: active) { /* high-contrast modes drop background colors: the marks keep system colors */
+  .radar-dot, .plot-dot, .line-dot, .wf-mark { forced-color-adjust: none; background: CanvasText; box-shadow: 0 0 0 2px Canvas; }
+  .radar-dot:hover, .radar-dot.is-selected, .plot-dot:hover, .plot-dot:focus-visible { background: Highlight; }
+  .wf-bar { forced-color-adjust: none; background: CanvasText; }
+  .compare-block, .key.compare-key, .ring-slice, .ring-badge { forced-color-adjust: none; }
 }
-.chart-note { margin: 10px 0 0; color: var(--text-2); font-size: 0.84rem; }
-.radar-side > h4.chart-title { margin-top: 0; }
+.window-switch { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0 0 12px; }
+.window-link { padding: 5px 12px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--text-2); font-size: 0.8rem; font-weight: 700; text-decoration: none; }
+.window-link:hover { border-color: var(--text); color: var(--text); }
+.window-link[aria-current="true"] { border-color: var(--text); background: var(--text); color: var(--bg); }
+.window-count { margin-left: 3px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.window-link[aria-current="true"] .window-count { color: #4a4a4a; }
+/* The games without an exact day, one click away under the radar, counted in the summary. */
+.radar-more { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--border); }
+.radar-more > summary { color: var(--text); font-size: 0.88rem; font-weight: 800; cursor: pointer; }
+.radar-more[open] > summary { margin-bottom: 6px; }
+.radar-more-count { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
 .radar-groups { display: grid; gap: 8px; margin: 0; }
 .radar-group { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr); gap: 10px; align-items: baseline; padding-top: 8px; border-top: 1px solid var(--border); }
 .radar-group dt { color: var(--text); font-size: 0.8rem; font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -1051,67 +1166,123 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
 .radar-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 8px 2px 2px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.78rem; font-weight: 700; line-height: 1.25; text-decoration: none; }
 .radar-chip .thumb { width: 18px; }
 .radar-chip-name { min-width: 0; overflow-wrap: anywhere; }
-.radar-chip:hover, .radar-chip.is-active { border-color: var(--band-1); }
-/* The tooltip (app.js): one per card, filled from the game's <template>; it repeats the page's own text. */
-.radar-tip { position: absolute; z-index: 5; display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; width: max-content; max-width: min(300px, calc(100% - 16px)); padding: 10px; border: 1px solid var(--border-strong); background: var(--surface-raised); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); }
-.radar-tip .thumb { width: 44px; }
-.radar-tip p { margin: 0; }
-.radar-tip-body { min-width: 0; }
-.radar-tip-name { font-size: 0.9rem; font-weight: 800; overflow-wrap: anywhere; }
-.radar-tip-when { margin: 2px 0 4px !important; color: var(--text); font-size: 0.82rem; font-weight: 700; }
-.radar-tip-platforms { color: var(--text-2); font-size: 0.76rem; }
-.radar-tip-lists { margin-top: 4px !important; color: var(--muted); font-size: 0.72rem; }
-.game-bars.is-columns { display: block; columns: 2 340px; column-gap: 32px; }
-.game-bars.is-columns .game-bar { margin: 0 0 10px; break-inside: avoid; }
-/* Games in both lists (a connected-dot chart): a circle for Steam's place, a diamond for Twitch's, joined by a line.
-   Every row names its game beside a small cover, and the track repeats what the row's text already says. */
-.pair-rows { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
-.thumb-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center; }
-.thumb-row > div { min-width: 0; }
-.pair-axis { position: relative; height: 16px; }
-.pair-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pair-track { position: relative; height: 16px; margin-top: 4px; border-left: 1px solid var(--border-strong); background: linear-gradient(var(--border-strong), var(--border-strong)) center / 100% 1px no-repeat; }
-.pair-body { min-width: 0; }
-.pair-axis-row { margin: 4px 0 0; }
-.pair-tick.is-first { transform: none; }
-.pair-tick.is-last { transform: translateX(-100%); }
-.pair-line { position: absolute; top: 7px; height: 2px; background: var(--band-none); }
-.pair-dot { position: absolute; top: 3px; width: 10px; height: 10px; margin-left: -5px; box-shadow: 0 0 0 2px var(--surface); }
-.pair-dot.is-steam { border-radius: 50%; background: var(--series-1); }
-.pair-dot.is-twitch { background: var(--series-2); transform: rotate(45deg) scale(0.9); }
-.pair-dot::before { content: ""; position: absolute; inset: -7px; } /* a 24px pointer target */
-.key.pair-key.is-steam { border-radius: 50%; background: var(--series-1); }
-.key.pair-key.is-twitch { background: var(--series-2); transform: rotate(45deg) scale(0.75); }
-.gb-context .key.pair-key { width: 9px; height: 9px; vertical-align: -1px; }
-.split-rows.is-columns { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px 28px; }
-/* Twitch's place beside Steam reviews: the place is a link to the category on Twitch. */
-.split-row.has-place { display: grid; grid-template-columns: 3.4rem auto minmax(0, 1fr); gap: 10px; align-items: center; }
-.sr-place { color: var(--text); font-size: 1.05rem; font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; text-decoration-color: var(--border-strong); }
-.sr-unit { display: block; color: var(--muted); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em; }
+.radar-chip:hover, .radar-chip.is-selected { border-color: var(--band-1); }
+/* The selected game beside the radar: its cover, name, soonest release, every platform's date and its list ranks. */
+.radar-panel { min-width: 0; padding: 14px 16px 16px; border: 1px solid var(--border); background: var(--bg); }
+.radar-panel-kicker { margin: 0 0 10px; color: var(--muted); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.rp-head { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; align-items: start; }
+.rp-head .thumb { width: 88px; }
+.rp-name { margin: 0; font-size: 1.15rem; font-weight: 900; line-height: 1.2; }
+.rp-link { color: var(--text); overflow-wrap: anywhere; text-decoration-color: var(--border-strong); }
+.rp-soonest { margin: 6px 0 0; color: var(--text); font-size: 0.92rem; font-weight: 700; }
+.rp-dates { display: grid; gap: 6px; margin: 14px 0 0; }
+.rp-date { padding-top: 6px; border-top: 1px solid var(--border); }
+.rp-date dt { color: var(--text); font-size: 0.84rem; font-weight: 800; }
+.rp-until { color: var(--muted); font-weight: 700; }
+.rp-date dd { margin: 1px 0 0; color: var(--text-2); font-size: 0.8rem; }
+.rp-none { margin: 14px 0 0; color: var(--muted); font-size: 0.84rem; }
+.rp-ranks { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.rp-ranks li { padding: 2px 8px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 0.76rem; }
+.rp-ranks strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.radar-panel-hint { margin: 14px 0 0; color: var(--muted); font-size: 0.74rem; }
 
-/* Tiles of games with places written out, never drawn as bars (the games in both Steam's and Twitch's lists). */
-.rank-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
-.rank-tile { display: flex; gap: 10px; align-items: flex-start; min-width: 0; padding: 8px; border: 1px solid var(--border); background: var(--bg); }
-.rank-tile .thumb { width: 44px; }
-.rt-body { min-width: 0; }
-.rt-name { display: inline-block; margin-top: 2px; font-size: 0.84rem; }
-.rt-watch { display: inline-block; margin-top: 4px; font-size: 0.72rem; }
-.split-row.has-thumb { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: center; }
-.split-link { font-size: 0.84rem; }
+/* What a player would miss on Steam's list alone (list_comparison.py): the finding, each capture's date and depth,
+   three blocks sized by their number of games (a 2 rem minimum keeps a tiny group readable and tappable) under and
+   over brackets for the two captures, and the open group's games. The block colors are the first three categorical
+   slots, validated together on the page's surface; each count inside is white, bold and large (3:1 or more). */
+.compare-finding { max-width: 72ch; margin: 6px 0 12px; color: var(--text); font-size: 1.02rem; font-weight: 700; line-height: 1.45; }
+.compare-captures { display: grid; gap: 6px; margin: 0 0 12px; }
+.compare-capture { padding-top: 6px; border-top: 1px solid var(--border); }
+.compare-capture dt { color: var(--text); font-size: 0.8rem; font-weight: 800; }
+.compare-scope { margin-left: 6px; color: var(--muted); font-weight: 700; }
+.compare-capture dd { margin: 1px 0 0; color: var(--text-2); font-size: 0.8rem; }
+.compare-sum { margin: 4px 0 10px; color: var(--text-2); font-size: 0.84rem; }
+.compare-sum strong { color: var(--text); }
+.compare-bar { display: grid; gap: 4px 2px; margin: 0 0 10px; }
+.compare-span { position: relative; grid-row: 1; min-width: 0; padding: 0 2px 8px; color: var(--text-2); font-size: 0.74rem; font-weight: 700; }
+.compare-span::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 5px; border: 1px solid var(--muted); border-bottom: 0; }
+.compare-span.is-steam { grid-row: 3; padding: 8px 2px 0; text-align: right; }
+.compare-span.is-steam::after { top: 0; bottom: auto; border: 1px solid var(--muted); border-top: 0; }
+.compare-block { grid-row: 2; display: flex; align-items: center; justify-content: center; min-width: 0; height: 44px; border-radius: 4px; color: #ffffff; text-decoration: none; }
+.compare-block.is-igdb_only, .key.compare-key.is-igdb_only { background: var(--series-2); }
+.compare-block.is-both, .key.compare-key.is-both { background: var(--series-3); }
+.compare-block.is-steam_only, .key.compare-key.is-steam_only { background: var(--series-1); }
+.compare-block:hover { filter: brightness(1.15); }
+.compare-block[aria-current="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+.compare-count { font-size: 1.2rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.compare-zeros { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; }
+.compare-zero { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 2px 10px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font-size: 0.8rem; text-decoration: none; }
+.compare-zero .compare-count { color: var(--text); font-size: 0.95rem; }
+.compare-zero[aria-current="true"] { border-color: var(--text); color: var(--text); }
+.compare-group, .compare-unresolved { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.compare-group-title { margin: 0 0 4px; font-size: 0.92rem; font-weight: 800; }
+.compare-note { margin: 0 0 8px; color: var(--text-2); font-size: 0.8rem; }
+.compare-sub { margin: 12px 0 4px; color: var(--text); font-size: 0.84rem; font-weight: 800; }
+.compare-sub-note { color: var(--muted); font-weight: 700; }
+.cmp-rows { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.cmp-row { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: center; padding: 4px 6px; border: 1px solid transparent; }
+.cmp-row .thumb { width: 28px; }
+.cmp-row:hover, .cmp-row.is-selected { border-color: var(--band-1); background: var(--bg); }
+.cmp-name { margin: 0; color: var(--text); font-size: 0.86rem; font-weight: 700; overflow-wrap: anywhere; }
+.cmp-facts { margin: 1px 0 0; color: var(--text-2); font-size: 0.76rem; overflow-wrap: anywhere; }
+.cmp-rank { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.cmp-tag { padding: 0 5px; border: 1px solid var(--border-strong); color: var(--text); white-space: nowrap; }
 
-.steam-facts { margin-top: 16px; }
-.change-gaps { max-width: 120ch; margin: 12px 0 0; color: var(--muted); font-size: 0.82rem; }
-.change-gaps p { margin: 0 0 6px; }
-.change-gaps strong { color: var(--text-2); }
+/* The review waterfall: one row per step (a label, the bar on an axis of change, the signed value). Zero, a vertical
+   line through every row, is the earlier total; each bar starts where the one above ended, and short connectors in
+   the gaps between rows carry the running total down. Rises wear the series blue, falls the series orange, the net
+   change the de-emphasis gray; every value is also written out with its sign. */
+.wf-rows { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.wf-row, .wf-axis-row { display: grid; grid-template-columns: minmax(9rem, 15rem) minmax(0, 1fr) 7.5rem; gap: 12px; }
+.wf-row { align-items: center; min-height: 34px; }
+.wf-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wf-label .thumb { width: 24px; }
+.wf-name { color: var(--text); font-size: 0.86rem; font-weight: 700; overflow-wrap: anywhere; text-decoration-color: var(--border-strong); }
+.wf-when { color: var(--muted); font-size: 0.74rem; white-space: nowrap; }
+.wf-row.is-total .wf-label { flex-wrap: wrap; gap: 0 8px; }
+.wf-plot { position: relative; align-self: stretch; min-height: 34px; }
+.wf-plot::before { content: ""; position: absolute; top: -3px; bottom: -3px; left: var(--zero); width: 1px; background: var(--border-strong); }
+.wf-bar { position: absolute; top: 50%; height: 14px; min-width: 2px; margin-top: -7px; border-radius: 4px; background: var(--series-1); }
+.wf-row.is-down .wf-bar { background: var(--series-2); }
+.wf-row.is-total .wf-bar { background: var(--band-none); }
+a.wf-bar:hover { filter: brightness(1.25); }
+a.wf-bar::before { content: ""; position: absolute; inset: -5px 0; } /* a 24px tall target */
+a.wf-bar[aria-current="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+.wf-mark { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--band-none); }
+.wf-in, .wf-out { position: absolute; width: 1px; margin-left: -0.5px; background: var(--muted); }
+.wf-in { top: -3px; height: calc(50% - 4px); } /* from the middle of the gap above down to this row's bar */
+.wf-out { top: calc(50% + 7px); bottom: -3px; } /* from this row's bar down to the middle of the gap below */
+.wf-row.is-total .wf-out { top: calc(50% + 5px); }
+.wf-value { color: var(--text); font-size: 0.86rem; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.wf-net { display: block; color: var(--text-2); font-size: 0.76rem; font-weight: 700; }
+.wf-axis-row { margin-top: 6px; }
+.wf-axis { position: relative; height: 16px; }
+.wf-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wf-tick.is-first { transform: none; }
+.wf-tick.is-last { transform: translateX(-100%); }
+.key.wf-key.is-up { background: var(--series-1); }
+.key.wf-key.is-down { background: var(--series-2); }
+.key.wf-key.is-total { background: var(--band-none); }
 
-/* The collapsed "Sources and methodology" at the bottom of Trending games. */
-.method-details { margin: 8px 0 0; border: 1px solid var(--border); background: var(--surface); scroll-margin-top: 12px; }
+/* The player line beside the waterfall: Steam snapshots at their actual times, a 2px line that breaks at gaps, an
+   8px marker per snapshot, and a y axis from zero. */
+.line-plot { position: relative; height: 180px; margin: 8px 10px 30px 40px; }
+.line-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.line-svg polyline { fill: none; stroke: var(--series-1); stroke-width: 2px; stroke-linejoin: round; stroke-linecap: round; }
+.line-dot { position: absolute; z-index: 1; width: 8px; height: 8px; margin: 0 0 -4px -4px; border-radius: 50%; background: var(--series-1); box-shadow: 0 0 0 2px var(--surface); }
+.line-dot::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; }
+.line-dot:hover { z-index: 2; transform: scale(1.4); }
+.line-tick { position: absolute; top: calc(100% + 8px); transform: translateX(-50%); color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.coverage-note { max-width: 110ch; margin: 0; padding: 14px 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 0.88rem; }
+.coverage-note strong { color: var(--text); }
+
+/* The collapsed "Sources and methodology" at the bottom of each report page. */
+.method-details { margin: 16px 0 0; border: 1px solid var(--border); background: var(--surface); scroll-margin-top: 64px; }
 .method-details > summary { padding: 14px 18px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
 .method-details > summary:hover { color: var(--focus); }
 .method-details[open] > summary { border-bottom: 1px solid var(--border); }
 .method-body { padding: 4px 18px 18px; }
 .method-body > h3.chart-title { margin-top: 22px; }
-.method-body .kpis { margin-top: 10px; }
 
 /* About the data: each topic folds under its name. */
 .about-topic { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--border); }
@@ -1159,12 +1330,158 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
 .critic-label { padding: 0 5px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 0.72rem; }
 .critic-table, .critic-source { font-size: 0.74rem; }
 
+/* ---------------------------------------------------------------- Daily Trivia */
+
+/* A compact popup with the lightbulb's thin gold border: one question or fact at a time, its cover art beside it.
+   The content scrolls inside the popup when a window is short; the page behind keeps its place. */
+.trivia-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--gold);
+  background: var(--surface);
+  color: var(--text);
+}
+.trivia-dialog[open] { display: flex; flex-direction: column; }
+.trivia-dialog::backdrop { background: rgba(0, 0, 0, 0.8); }
+.trivia-frame { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
+.trivia-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 0 20px; }
+.trivia-title { margin: 0; color: var(--gold); font-size: 0.8rem; letter-spacing: 0.16em; text-transform: uppercase; }
+.trivia-title:focus { outline: none; }
+.trivia-top .dialog-close { position: static; flex: 0 0 auto; }
+.trivia-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 20px 16px; }
+.trivia-tabs { display: flex; margin: 0 0 12px; border-bottom: 1px solid var(--border-strong); }
+.trivia-tab {
+  margin: 0 0 -1px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.trivia-tab:hover { color: var(--text); }
+.trivia-tab[aria-selected="true"] { border-bottom-color: var(--gold); color: var(--text); }
+.trivia-status { margin: 0 0 12px; }
+.trivia-meta, .trivia-played { margin: 0 0 4px; color: var(--text-2); font-size: 0.82rem; }
+.trivia-meta strong { color: var(--gold); }
+.trivia-progress { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trivia-count { margin: 0; font-size: 0.86rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.trivia-steps { display: flex; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.trivia-steps li { width: 22px; height: 6px; background: var(--border-strong); }
+.trivia-steps li.is-current { background: var(--text); }
+.trivia-steps li.is-right { background: var(--positive); }
+.trivia-steps li.is-wrong { background: var(--negative); }
+/* A question or fact: the cover (or a plain box without one) on the left, the text on the right. */
+.trivia-card { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 18px; align-items: start; }
+.trivia-art { aspect-ratio: 264 / 374; overflow: hidden; border: 1px solid var(--border); background: var(--surface-raised); }
+.trivia-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.trivia-main { min-width: 0; }
+.trivia-kicker { margin: 0 0 4px; color: var(--gold); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.trivia-question, .trivia-fact-title { margin: 0 0 12px; font-size: 1.15rem; line-height: 1.3; }
+.trivia-question:focus, .trivia-fact-title:focus, .trivia-verdict:focus, .trivia-results-title:focus { outline: none; }
+.trivia-choices { display: grid; gap: 6px; }
+.trivia-choice {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+.trivia-choice:hover { border-color: var(--text); }
+.trivia-choice[aria-disabled="true"] { color: var(--text-2); cursor: default; }
+.trivia-choice[aria-disabled="true"]:hover { border-color: var(--border-strong); }
+.trivia-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.trivia-mark { font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.trivia-choice.is-correct, .trivia-choice.is-correct:hover { border-color: var(--positive); color: var(--text); }
+.trivia-choice.is-correct .trivia-letter { border-color: var(--positive); background: var(--positive); color: var(--bg); }
+.trivia-choice.is-correct .trivia-mark { color: var(--positive); }
+.trivia-choice.is-wrong, .trivia-choice.is-wrong:hover { border-color: var(--negative); color: var(--text); }
+.trivia-choice.is-wrong .trivia-letter { border-color: var(--negative); background: var(--negative); color: var(--bg); }
+.trivia-choice.is-wrong .trivia-mark { color: var(--negative); }
+.trivia-feedback { margin: 12px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border); }
+.trivia-verdict { margin: 0 0 6px; color: var(--positive); font-weight: 800; }
+.trivia-verdict.is-wrong { color: var(--negative); }
+.trivia-explanation { margin: 0 0 8px; color: var(--text-2); font-size: 0.92rem; line-height: 1.5; }
+.trivia-links { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0 0 12px; color: var(--muted); font-size: 0.78rem; }
+.trivia-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+/* The score, the personal best and the quiz's games, each with its details when it is in the catalog. */
+.trivia-results-title { margin: 0 0 6px; font-size: 1.5rem; font-weight: 900; }
+.trivia-results-line { margin: 0 0 4px; color: var(--text-2); font-size: 0.9rem; }
+.trivia-games-title { margin: 14px 0 8px; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; }
+.trivia-games { display: grid; gap: 6px; margin: 0 0 14px; padding: 0; list-style: none; }
+.trivia-game {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.trivia-thumb { display: block; width: 30px; aspect-ratio: 90 / 128; overflow: hidden; background: var(--surface-raised); }
+.trivia-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.trivia-game-name { font-size: 0.88rem; font-weight: 700; overflow-wrap: anywhere; }
+.trivia-game-note { color: var(--muted); font-size: 0.76rem; }
+.trivia-game .trivia-details { padding: 3px 10px; font-size: 0.78rem; }
+.trivia-rules { margin: 16px 0 0; padding: 8px 0 0; border-top: 1px solid var(--border); color: var(--text-2); font-size: 0.82rem; }
+.trivia-rules summary { color: var(--text); font-weight: 700; cursor: pointer; }
+.trivia-rules ul { margin: 8px 0 0; padding-left: 18px; }
+.trivia-rules li { margin: 0 0 4px; }
+/* Browse Facts: one fact between a previous and a next arrow. */
+.trivia-browse-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.trivia-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--gold);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.trivia-arrow:hover { color: var(--gold); }
+.trivia-arrow svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.trivia-hint { margin: 12px 0 0; color: var(--muted); font-size: 0.76rem; }
+.trivia-empty { padding: 16px 18px; border: 1px dashed var(--border-strong); color: var(--text-2); }
+.trivia-empty p { margin: 0 0 10px; }
+.trivia-empty p:last-child { margin: 0; }
+.trivia-foot { margin: 14px 0 0; color: var(--muted); font-size: 0.74rem; }
+.trivia-saved { color: var(--text-2); font-weight: 700; }
+.trivia-saved.is-warning { color: var(--warn-text); }
+.trivia-missing { padding: 8px 0 16px; color: var(--text-2); }
+
 /* ---------------------------------------------------------------- smaller screens */
 
 @media (max-width: 1100px) {
   .trend-list, .trend-columns { grid-template-columns: minmax(0, 1fr); }
-  .spark-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .radar-layout { grid-template-columns: minmax(0, 1fr); } /* "Date TBA or approximate" below the radar */
+  .report-canvas.is-upcoming { grid-template-columns: minmax(0, 1fr); } /* the comparison below the radar */
+  .report-canvas.is-momentum { grid-template-columns: minmax(0, 1fr); } /* the player line below the waterfall */
 }
 
 @media (max-width: 720px) {
@@ -1172,6 +1489,7 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
   /* The tabs fill whole rows on a phone, with touch targets about 40 px tall. */
   .site-nav { width: 100%; justify-content: flex-start; }
   .nav-link { flex: 1 1 auto; padding: 9px 10px; font-size: 0.84rem; text-align: center; }
+  .nav-icon { flex: 0 0 auto; width: 40px; height: 40px; } /* squares beside the stretched tabs, as tall as them */
   .trend-item { grid-template-columns: 1.4rem 84px minmax(0, 1fr); gap: 10px; }
   .trend-thumb { width: 84px; }
   .upcoming-list .trend-item { grid-template-columns: 1.4rem 56px minmax(0, 1fr); }
@@ -1183,15 +1501,30 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
   .strip-row { grid-template-columns: minmax(0, 1fr); }
   .strip-label { margin-top: 6px; }
   .strip-axis-row > span:first-child { display: none; }
-  .spark-grid { grid-template-columns: minmax(0, 1fr); }
+  /* The report tabs share one row of equal tabs, about 44 px tall, and stay at the top of the window. */
+  .report-tab { flex: 1 1 0; padding: 11px 6px; font-size: 0.84rem; }
+  .report-title { font-size: 1.3rem; }
+  .report-question { font-size: 0.92rem; }
   .radar-ring { font-size: 0.62rem; line-height: 1.15; } /* "1 year" and "Later" sit 13 px apart on a phone */
   .radar-sector { font-size: 0.7rem; }
   .radar-dot { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
   .radar-dot::before { inset: -7px; } /* still a 24px pointer target */
   .radar-group { grid-template-columns: minmax(0, 1fr); gap: 4px; } /* each date above its games */
-  .game-bar { grid-template-columns: 1.1rem auto minmax(0, 1fr); gap: 8px; }
+  .rp-head { grid-template-columns: 64px minmax(0, 1fr); }
+  .rp-head .thumb { width: 64px; }
   .thumb.is-wide { width: 60px; }
-  .gb-line { padding-right: 4.8rem; }
+  .ring-layout { grid-template-columns: minmax(0, 1fr); } /* the doughnut above its list */
+  .ring { max-width: 280px; }
+  .compare-block { height: 40px; }
+  .bench-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* two numbers per row; the peers below */
+  .bench-peers { grid-column: 1 / -1; }
+  .plot { height: 220px; margin: 0 10px 34px 40px; }
+  .plot-label { font-size: 0.7rem; }
+  .wf-row, .wf-axis-row { grid-template-columns: minmax(0, 7.5rem) minmax(0, 1fr) 4.6rem; gap: 8px; }
+  .wf-label .thumb { display: none; } /* the name needs the room; the cover only helps recognition */
+  .wf-name { font-size: 0.8rem; }
+  .wf-value { font-size: 0.78rem; }
+  .line-plot { height: 160px; }
   .method-details > summary { padding: 12px 14px; }
   .method-body { padding: 4px 14px 14px; }
   .tl-year { grid-template-columns: 2.8rem minmax(0, 1fr); gap: 0 8px; }
@@ -1248,6 +1581,10 @@ h4.chart-title { margin-top: 20px; font-size: 0.88rem; }
   .card { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 12px; }
   .excerpt-columns { grid-template-columns: minmax(0, 1fr); }
   .game-dialog { width: 100vw; max-height: 100vh; border: 0; }
+  .trivia-dialog { width: 100vw; max-height: 100vh; border: 0; }
+  .trivia-content { padding: 6px 16px 16px; }
+  .trivia-card { grid-template-columns: 84px minmax(0, 1fr); gap: 12px; }
+  .trivia-progress { flex-wrap: wrap; }
   .pagination { flex-wrap: wrap; }
 }
 

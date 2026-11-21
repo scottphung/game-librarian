@@ -1,0 +1,74 @@
+{# Shared pieces of the Trending games report pages (dashboard_trending.html and its _trending_*.html pages). #}
+
+{# A small cover (portrait, from IGDB or Steam) or header image (wide, from Steam) beside a game's name. It only helps
+   recognition: the name is always written next to it. A gray box stands for a missing or broken image (app.js). #}
+{% macro thumb(url, wide=false) -%}
+<span class="thumb{% if wide %} is-wide{% endif %}{% if not url %} is-empty{% endif %}" aria-hidden="true">
+  {%- if url %}<img src="{{ url }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-image-fallback>{% endif -%}
+</span>
+{%- endmacro %}
+
+{# A game's name; it opens the details dialog (app.js), or the details page without JavaScript. #}
+{% macro game_link(key, name, url, class="gb-name") -%}
+<a class="{{ class }} text-link" href="{{ url }}" data-details="{{ key }}">{{ name }}</a>
+{%- endmacro %}
+
+{# A pair of times as one span: "9 Nov 2026, 12:00 UTC", or "first – last" when they differ. #}
+{% macro time_span(span, dates=false) -%}
+  {%- if dates %}{{ span[0]|date }}{% if span[1]|date != span[0]|date %} – {{ span[1]|date }}{% endif %}
+  {%- else %}{{ span[0]|datetime }}{% if span[1] != span[0] %} – {{ span[1]|datetime }}{% endif %}{% endif -%}
+{%- endmacro %}
+
+{# Capture days in words: "16 Nov 2026, 19 Nov 2026 and 20 Nov 2026"; more than five: "8 days, 7 Nov – 20 Nov 2026". #}
+{% macro days_text(days) -%}
+  {%- if days|length > 5 %}{{ days|length }} days, {{ days[0]|day }} – {{ days[-1]|day }}{% else %}{{ days|map("day")|listing }}{% endif -%}
+{%- endmacro %}
+
+{# A link to a game's category on Twitch: Twitch's terms ask for a clear path to the source of its data. #}
+{% macro twitch_link(item) -%}
+<a class="text-link" href="{{ item.twitch_url }}" target="_blank" rel="noopener">{% if item.name_differs %}“{{ item.twitch_name }}” on Twitch{% else %}Watch on Twitch{% endif %}<span class="visually-hidden"> (opens in a new tab)</span></a>
+{%- endmacro %}
+
+{# A game's comparison with its peers in words (dashboard.peer_benchmark), for its dot's text: "; RPG peers’ median
+   91.5%, +1.7 points". #}
+{% macro versus_text(b) -%}
+  {%- if b.enough %}; {{ b.genre }} peers’ median {{ b.median|tenths }}%, {{ b.gap|tenths(true) }} points
+  {%- elif b.genre %}; too few comparable {{ b.genre }} games ({{ b.count }})
+  {%- else %}; no gameplay genre to compare by{% endif -%}
+{%- endmacro %}
+
+{# The strong-reception scatterplot (dashboard.reception_chart), shown in `view` ("all" or "year"). Each dot is a link
+   that opens its game's details; with JavaScript the plot is one Tab stop, the left and right arrow keys move between
+   its shown dots by number of reviews, and selecting a dot (pointing, focusing or tapping) lights up its peers and
+   draws their median (app.js). A dot's text gives its name, share, count and comparison with its peers; the tooltip,
+   the median line and the names written beside a few dots repeat it, so they are hidden from assistive technology.
+   A dot or a name its view does not show is hidden, never removed, so both views keep the same axes. #}
+{% macro reception_plot(chart, view, label) -%}
+<p class="axis-title">Positive reviews</p>
+<div class="plot" role="group" aria-label="{{ label }}: {{ chart.points|length }} {{ 'game' if chart.points|length == 1 else 'games' }}. The left and right arrow keys move between them by number of reviews, and Enter opens a game’s details." data-roving data-chart-tips data-reception-plot>
+  {%- for tick in chart.y_ticks %}<span class="grid-line is-y{% if loop.first %} is-base{% endif %}" style="bottom: {{ tick.position }}%" aria-hidden="true"><span class="tick-label">{{ tick.label }}</span></span>{% endfor %}
+  {%- for tick in chart.x_ticks %}<span class="grid-line is-x{% if loop.first %} is-base{% endif %}" style="left: {{ tick.position }}%" aria-hidden="true"><span class="tick-label">{{ tick.label }}</span></span>{% endfor %}
+  <span class="plot-median" data-plot-median aria-hidden="true" hidden><span class="plot-median-label" data-plot-median-label></span></span>
+  {%- for p in chart.points %}{% set words %}{{ p.benchmark.share|tenths }}% positive of {{ p.total|number }} Steam reviews{% endset %}
+  <a class="plot-dot{% if p.this_year %} is-accent{% endif %}" href="{{ p.details_url }}" data-details="{{ p.appid }}" data-game="{{ p.appid }}" data-roving-item data-genres="{{ p.gameplay_genres|join(' ') }}" data-views="{{ p.views|join(' ') }}" style="left: {{ p.x }}%; bottom: {{ p.y }}%" aria-label="{{ p.name }}: {{ words }}, released {{ p.released_on|day }}{{ versus_text(p.benchmark) }}" title="{{ p.name }}: {{ words }}" data-tip-name="{{ p.name }}" data-tip-text="{{ words }} · released {{ p.released_on|day }}"{% if view not in p.views %} hidden{% endif %}></a>
+  {%- endfor %}
+  {%- for p in chart.points|selectattr("label_views")|sort(attribute="label_rank") %}
+  {#- A label wraps within the room on its side of the dot, so a long name never runs past the plot. #}
+  <span class="plot-label is-{{ p.label_side }}" data-views="{{ p.label_views|join(' ') }}" style="left: {{ p.x }}%; bottom: {{ p.y }}%; max-width: calc({{ ((100 - p.x) if p.label_side == 'right' else p.x)|round(2) }}% - 12px)" aria-hidden="true"{% if view not in p.label_views %} hidden{% endif %}>{{ p.name }} <span class="plot-label-figures">{{ p.benchmark.share|tenths }}% of {{ p.total|compact }}</span></span>
+  {%- endfor %}
+</div>
+<p class="axis-title is-x">Steam reviews{% if chart.log %} (log scale: each step is 10 times more){% endif %}</p>
+{%- endmacro %}
+
+{# The numbers behind the strong-reception scatterplot, most reviewed first, with every game's comparison. #}
+{% macro reception_table(chart) -%}
+<details class="table-view">
+  <summary>Show as a table</summary>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th scope="col">Game</th><th scope="col">Released on Steam</th><th scope="col" class="num">Steam reviews</th><th scope="col" class="num">Positive</th><th scope="col">Steam’s summary</th><th scope="col">Peer genre</th><th scope="col" class="num">Peers</th><th scope="col" class="num">Peer median</th><th scope="col" class="num">Gap (points)</th></tr></thead>
+      <tbody>{% for p in chart.points|sort(attribute="total", reverse=true) %}{% set b = p.benchmark %}<tr><td>{{ p.name }}</td><td>{{ p.released_on|day }}</td><td class="num">{{ p.total|number }}</td><td class="num">{{ b.share|tenths }}%</td><td>{{ p.review_label }}</td><td>{{ b.genre or "None" }}</td><td class="num">{{ b.count }}</td><td class="num">{{ b.median|tenths ~ "%" if b.enough else "Too few" }}</td><td class="num">{{ b.gap|tenths(true) if b.enough else "" }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</details>
+{%- endmacro %}

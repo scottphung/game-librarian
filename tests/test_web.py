@@ -150,7 +150,7 @@ def test_the_wishlist_explains_that_it_is_browser_local_and_not_steam(client):
                    "It is not your Steam wishlist", "Clearing this site's browser data", "can erase it",
                    "Nothing about it is sent to the Game Librarian server", "The wishlist needs JavaScript"):
         assert phrase in page, phrase
-    assert re.search(r'<a class="nav-link" href="/wishlist"\s*>Wishlist</a>', client.get("/").text)
+    assert '<a class="nav-icon" href="/wishlist" aria-label="Wishlist">' in client.get("/").text  # the header's star
     panel = client.get("/games/101/panel").text
     assert 'aria-describedby="wishlist-note-101"' in panel and "saved in this browser only" in panel
     assert '<script src="/static/wishlist.js?v=' in client.get("/").text

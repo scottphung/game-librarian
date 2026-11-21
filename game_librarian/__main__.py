@@ -19,6 +19,7 @@ from .report_export import export_report, point_report_at
 from .steam import SteamClient
 from .stories import load_stories
 from .sync import SyncOptions, run_sync
+from .trivia import RESET_LABEL, load_trivia
 from .twitch import KEEP_FOR as TWITCH_KEEP_FOR, TwitchClient
 from .wikipedia import WikimediaClient, WikimediaError
 
@@ -342,6 +343,7 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
 def _check_curated(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
     story_collection = load_stories(settings.curated_dir)
+    trivia_collection = load_trivia(settings.curated_dir)
     shown_awards = sum(len(awards) for awards in curated.awards_by_appid.values())
     shown_labels = sum(len(labels) for labels in curated.labels_by_appid.values())
     promoted = sum(1 for game in curated.games if game.catalog_source == PROMOTED)
@@ -356,7 +358,10 @@ def _check_curated(args: argparse.Namespace, settings: Settings) -> int:
     for story in story_collection.stories.values():
         print(f"stories/{story.slug}.json: {len(story.entries)} games ({len(story.main_entries)} main), "
               f"checked {story.checked_on}")
-    problems = curated.problems + story_collection.problems
+    if trivia_collection.quizzes:
+        print(f"trivia.json: {len(trivia_collection.quizzes)} quizzes ({len(trivia_collection.questions)} questions), "
+              f"one a day from {trivia_collection.start_day}, new quiz at {RESET_LABEL}")
+    problems = curated.problems + story_collection.problems + trivia_collection.problems
     for problem in problems:
         print(f"problem: {problem}")
     print("No problems found." if not problems else f"{len(problems)} problem(s) found.")

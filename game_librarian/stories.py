@@ -284,8 +284,10 @@ def _source(value, problems: list[str], where: str) -> Source | None:
     return Source(title=title, revision=revision, revision_time=moment, used_for=_text(value.get("used_for")))
 
 
-def _image(value, problems: list[str], where: str) -> StoryImage | None:
-    """An entry's image record, or None. An invalid record is reported and left out; the entry itself stays."""
+def parse_image(value, problems: list[str], where: str) -> StoryImage | None:
+    """An entry's image record, or None. An invalid record is reported and left out; the entry itself stays.
+
+    Daily Trivia questions use the same record format and checks (trivia.py)."""
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -356,7 +358,7 @@ def _entry(value, checked_on: date, problems: list[str], where: str) -> StoryEnt
                       region=_text(value.get("first_release_region")), platforms=platforms,
                       note=_text(value.get("note")), source=source, catalog_appid=appid,
                       catalog_note=_text(value.get("catalog_note")),
-                      image=_image(value.get("image"), problems, f"{where} ({title})"))
+                      image=parse_image(value.get("image"), problems, f"{where} ({title})"))
 
 
 def load_story(path: Path, problems: list[str]) -> Story | None:

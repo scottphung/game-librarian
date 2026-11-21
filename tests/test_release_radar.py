@@ -1,11 +1,13 @@
-"""The Upcoming Release Radar on the Trending games dashboard (version 0.14).
+"""The Upcoming Release Radar, the main chart of Trending games → Upcoming releases (versions 0.14-0.15).
 
 The tracked upcoming games (the upcoming games saved from Most wanted on IGDB and Most wishlisted on Steam) are placed
 by how soon each is due: the center is today, the rings end 1 week, 1 month, 3 months, 6 months and 1 year later, and
 an outer band holds what is due later. Each section is a platform family. Only exact release days are placed; a
 month, quarter, year, TBA or no date at all is listed apart, so no day is guessed. A game on several platforms has a
-point in each section where it has an exact day, and only its first point is a tab stop. Every point opens the
-game's details dialog.
+point in each section where it has an exact day, and only its soonest point is a tab stop. Since 0.15 the radar takes
+two thirds of its card and a panel beside it shows the selected game (pointing, focusing or tapping selects one;
+selecting it again opens its details); time windows end on its rings; the games without an exact day fold under one
+counted control.
 
 Uses the fourteen synced catalog games of test_web.py (app ids 101-114); every name and date is made up.
 """
@@ -174,12 +176,66 @@ def test_a_game_in_both_lists_counts_once_and_empty_lists_give_an_empty_radar():
     radar = dashboard.release_radar([tracked(shared, signal=WANT_TO_PLAY), tracked(shared)], TODAY)
     assert [(game["name"], game["lists"]) for game in radar["games"]] == [
         ("Shared", ["Most wanted on IGDB", "Most wishlisted on Steam"])]
-    assert radar["in_both"] == 1 and len(radar["points"]) == 1
+    assert len(radar["points"]) == 1
+    # The radar counts games as the comparison beside it does: one verified Steam app under two keys is one game.
+    twin = item("igdb-2", "Twin", shared["availability"], steam_verified=True, steam_appid=900, igdb_id=2)
+    again = item("igdb-3", "Twin (second record)", shared["availability"], steam_verified=True, steam_appid=900,
+                 igdb_id=3)
+    merged = dashboard.release_radar([tracked(twin, signal=WANT_TO_PLAY), tracked(again)], TODAY)
+    assert [(game["name"], game["igdb_ids"]) for game in merged["games"]] == [("Twin", [2, 3])]
+    assert len(merged["points"]) == 1
     assert [(entry["title"], entry["games"]) for entry in radar["lists"]] == [("Most wanted on IGDB", 1),
                                                                               ("Most wishlisted on Steam", 1)]
     empty = dashboard.release_radar([tracked(signal=WANT_TO_PLAY), tracked()], TODAY)
     assert empty["games"] == empty["points"] == empty["groups"] == empty["sectors"] == []
     assert dashboard.release_radar([], TODAY)["games"] == []
+
+
+def test_a_games_soonest_point_is_its_tab_stop_so_a_window_never_hides_it_alone():
+    console_first = listed("igdb-1", "Console First", entry("PC", day=date(2027, 3, 1)),
+                           entry("PlayStation 5", day=date(2026, 11, 20)), platforms=("PC", "PlayStation 5"))
+    radar = dashboard.release_radar([tracked(console_first)], TODAY)
+    # PC comes first among the sections, but the PlayStation 5 day is sooner: that point is the game's tab stop.
+    assert [(point["family"], point["primary"], point["windows"]) for point in radar["points"]] == [
+        ("PlayStation", True, ["month", "quarter", "all"]), ("PC", False, ["all"])]
+    pc = radar["points"][1]
+    assert distance(pc) > distance(radar["points"][0])  # a later day on PC: further out in its own section
+
+
+def test_the_time_windows_end_on_rings_and_count_the_games_they_show():
+    days = (date(2026, 11, 12), date(2026, 12, 9), date(2026, 12, 10), date(2027, 2, 9), date(2027, 2, 10))
+    radar = dashboard.release_radar([tracked(*(listed(f"igdb-{number}", f"Game {number}", entry("PC", day=day))
+                                               for number, day in enumerate(days, start=1)))], TODAY)
+    assert [(window["key"], window["label"], window["until"], window["games"], window["radius"])
+            for window in radar["windows"]] == [
+        ("month", "Next month", date(2026, 12, 9), 2, 33.33),  # the "1 month" ring, 9 Dec, is the last day shown
+        ("quarter", "Next 3 months", date(2027, 2, 9), 4, 50.0),
+        ("all", "All tracked", None, 5, 100.0)]
+    assert [point["windows"] for point in radar["points"]] == [
+        ["month", "quarter", "all"], ["month", "quarter", "all"], ["quarter", "all"], ["quarter", "all"], ["all"]]
+    assert [window[0] for window in dashboard.RADAR_WINDOWS] == ["month", "quarter", "all"]
+
+
+def test_the_panel_gets_each_games_dates_by_platform_and_its_rank_in_each_list():
+    shared = listed("igdb-1", "Shared", entry("PC", day=date(2027, 2, 23)),
+                    entry("Nintendo Switch 2", fmt=1, y=2027, m=6),
+                    entry("PC", day=date(2025, 1, 1), status=3), platforms=("PC", "Nintendo Switch 2", "Mac"))
+    someday = listed("igdb-2", "Someday", entry("PC", fmt=7))
+    radar = dashboard.release_radar([tracked(someday, shared, signal=WANT_TO_PLAY), tracked(shared)], TODAY)
+    game = radar["selected"]
+    assert game["name"] == "Shared" and game["soonest_text"] == "23 Feb 2027 (in 106 days)"  # the soonest release
+    assert game["timing"] == [
+        {"when": "23 Feb 2027", "platforms": "PC", "until": "in 106 days"},
+        {"when": "Jun 2027", "platforms": "Nintendo Switch 2", "until": ""},  # a month: no days are counted
+        {"when": "Early access since 1 Jan 2025", "platforms": "PC", "until": ""},
+        {"when": "No date yet", "platforms": "Mac", "until": ""}]
+    # The place the Trending page gives the game in each list it is in.
+    assert game["ranks"] == [{"list": "Most wanted on IGDB", "place": 2},
+                             {"list": "Most wishlisted on Steam", "place": 1}]
+    assert [(undated["name"], undated["when"]) for undated in radar["undated"]] == [
+        ("Someday", "Release date to be announced")]
+    assert dashboard.release_radar([tracked(someday)], TODAY)["selected"]["name"] == "Someday"  # no exact day at all
+    assert dashboard.release_radar([], TODAY)["selected"] is None
 
 
 # ---------------------------------------------------------------------- the page
@@ -228,19 +284,23 @@ def save_radar(settings):
 
 
 def dots(card: str) -> list[str]:
-    return re.findall(r'<a class="radar-dot"[^>]*>.*?</a>', card, re.S)
+    return re.findall(r'<a class="radar-dot[^"]*"[^>]*>.*?</a>', card, re.S)
 
 
-def test_the_radar_places_the_tracked_games_by_platform_and_lists_the_rest(games, settings):
+def upcoming_page(client, **params) -> str:
+    return client.get("/dashboard", params={"report": "upcoming", **params}).text
+
+
+def test_the_radar_places_the_tracked_games_by_platform_and_folds_the_rest(games, settings):
     save_radar(settings)
     client = dashboard_client(settings)
-    board = client.get("/dashboard").text
+    board = upcoming_page(client)
     card = chart(board, "chart-radar")
     text = text_of(card)
     assert "Upcoming Release Radar All platforms" in text
-    assert ("Upcoming games in our tracked lists: the 4 saved from Most wanted on IGDB and the 14 saved from Most "
-            "wishlisted on Steam, 17 games (1 in both). Not every announced game. The center is today: the closer a "
-            "point, the sooner the release.") in text
+    assert ("The upcoming games of both tracked lists, placed by when each is due: not every announced game. The center "
+            "is today: the closer a point, the sooner the release.") in text  # the comparison beside it counts them
+    assert len(re.findall(r'<template id="radar-game-', board)) == 17  # 4 + 14 saved games, 1 in both
     # Rings and sections, each section with its number of placed games.
     rings = r'<span class="radar-ring[^"]*" style="top: ([\d.]+)%" aria-hidden="true">([^<]+)</span>'
     assert re.findall(rings, card) == [("41.67", "1 week"), ("33.33", "1 month"), ("25.0", "3 months"),
@@ -251,56 +311,84 @@ def test_the_radar_places_the_tracked_games_by_platform_and_lists_the_rest(games
         ("start", "Other", "1")]  # labels on the right end at their spot, on the left start there: inside the circle
     assert "5 games have an exact release day: 8 points, one in each section where the game has one" in text
     assert "Other: Mac." in text
-    # Every point is a link that opens the game's details; only a game's first point is a tab stop.
+    # Every point is a link that opens the game's details; only a game's soonest point is a tab stop.
     points = dots(card)
     assert len(points) == 8 and all('href="/games/igdb-' in point and "data-details=" in point for point in points)
     first = [point for point in points if 'tabindex="-1"' not in point]
     assert [re.search(r'data-details="([^"]+)"', point).group(1) for point in first] == [
         "igdb-401", "igdb-403", "igdb-410", "igdb-402", "igdb-404"]  # soonest first: the tab order
     assert all('aria-hidden="true"' in point for point in points if point not in first)
-    assert all('aria-hidden' not in point for point in first)
+    assert all('aria-hidden' not in point and " hidden" not in point for point in first)  # all tracked: none hidden
     assert ("Moon Port: 23 Feb 2027, in 106 days, on PC, PlayStation 5, Xbox Series X|S; 20 May 2027, in 192 days, on "
             "Nintendo Switch 2") in text_of("".join(first))  # the full text, once per game
-    assert 'data-when="20 May 2027 · in 192 days · Nintendo Switch 2"' in card  # the Switch point's own date
-    assert 'title="Far Frontier: 1 Feb 2028 · in 449 days · PC"' in card  # a hint without JavaScript
-    # Date TBA or approximate: by the date IGDB states, never placed.
-    side = card[card.index('id="radar-approximate"'):]
-    groups = re.findall(r'<div class="radar-group"><dt>([^<]+)</dt>(.*?)</dd></div>', side, re.S)
+    assert 'title="Far Frontier: 1 Feb 2028 · in 449 days · PC"' in card  # each point's own date, as a hint
+    assert 'data-windows="month quarter all"' in first[0] and 'data-windows="all"' in first[-1]
+    # The selected game, at first the soonest one: its cover, dates by platform and ranks, beside the radar.
+    panel = card[card.index('<aside class="radar-panel"'):card.index("</aside>")]
+    assert 'data-selected="igdb-401"' in panel
+    assert text_of(panel).startswith("Selected game Soon Saga 12 Nov 2026 (in 3 days) 12 Nov 2026 · in 3 days PC "
+                                     "#13 in Most wishlisted on Steam")
+    assert points[0].startswith('<a class="radar-dot is-selected"')
+    # Each game's panel copy, for app.js; Moon Port's with its cover, every platform's date and both ranks.
+    moon = re.search(r'<template id="radar-game-igdb-402">(.*?)</template>', card, re.S).group(1)
+    assert 'src="https://images.igdb.com/igdb/image/upload/t_cover_big/co4abc.jpg"' in moon
+    assert text_of(moon) == ("Moon Port 23 Feb 2027 (in 106 days) 23 Feb 2027 · in 106 days PC, PlayStation 5, Xbox "
+                             "Series X|S 20 May 2027 · in 192 days Nintendo Switch 2 #1 in Most wanted on IGDB #10 in "
+                             "Most wishlisted on Steam")
+    assert len(re.findall(r'<template id="radar-game-', card)) == 17  # every tracked game
+    # Date TBA or approximate: one counted control under the radar, by the date IGDB states, never placed.
+    more = card[card.index('<details class="radar-more">'):card.index("</details>", card.index('class="radar-more"'))]
+    assert text_of(more).startswith("Date TBA or approximate 12 games Not on the radar")
+    groups = re.findall(r'<div class="radar-group"><dt>([^<]+)</dt>(.*?)</dd></div>', more, re.S)
     assert [(label, [text_of(name) for name in re.findall(r'<span class="radar-chip-name">(.*?)</span>', body)])
             for label, body in groups] == [
         ("Q1 2027", ["Quarter Quest"]), ("Mar 2027", ["Month Mystery"]), ("2027", ["Year Yonder"]),
         ("TBA", [*(f"Filler {number}" for number in range(1, 8)), "Someday"]), ("No date yet", ["Early Bird"])]
     assert "Released Already" not in card  # out since 1 Nov: not upcoming
-    # A tooltip per game, filled by app.js: the cover, the name, every platform with its date, the lists.
-    tip = re.search(r'<template id="radar-tip-igdb-402">(.*?)</template>', card, re.S).group(1)
-    assert 'src="https://images.igdb.com/igdb/image/upload/t_cover_big/co4abc.jpg"' in tip
-    assert ("Moon Port Announced for PC, PlayStation 5, Xbox Series X|S · 23 Feb 2027 Announced for Nintendo Switch 2 "
-            "· 20 May 2027 Most wanted on IGDB · Most wishlisted on Steam") in text_of(tip)
-    marks = re.findall(r'data-tip="([^"]+)"', card)
-    assert set(marks) == {f"radar-tip-{key}" for key in re.findall(r'<template id="radar-tip-([^"]+)">', card)}
     # The table view holds the same facts without the picture.
     table = text_of(re.search(r"<table.*?</table>", card, re.S).group(0))
     assert ("Moon Port 23 Feb 2027 (in 106 days) PC, Xbox, PlayStation, Switch Announced for PC, PlayStation 5, Xbox "
-            "Series X|S · 23 Feb 2027 Announced for Nintendo Switch 2 · 20 May 2027 Most wanted on IGDB, Most "
-            "wishlisted on Steam") in table
-    assert "Console Dawn 1 Dec 2026 (in 22 days) PlayStation Announced for PlayStation 5 · 1 Dec 2026 Announced for PC" \
-        in table  # PC's "2027" is listed, not placed
+            "Series X|S · 23 Feb 2027 Announced for Nintendo Switch 2 · 20 May 2027 #1 in Most wanted on IGDB; #10 in "
+            "Most wishlisted on Steam") in table
     assert "Quarter Quest Q1 2027 Not placed" in table and "Early Bird No date yet Not placed" in table
     assert ("IGDB release dates and platforms of the games in IGDB PopScore types 2 and 10 · lists saved 9 Nov 2026, "
             "12:00 UTC; days counted from 9 Nov 2026.") in text
     method = text_of(methodology(board))
     assert ("The rings end 1 week (16 Nov 2026), 1 month (9 Dec 2026), 3 months (9 Feb 2027), 6 months (9 May 2027), "
             "1 year (9 Nov 2027) later, and the outer band, “Later”, holds what is due after 9 Nov 2027") in method
-    assert "Other (Mac)" in method and "Tab moves from game to game, soonest first, and Enter opens its details" in method
+    assert "“Next month” shows the exact release days up to 9 Dec 2026; “Next 3 months” shows the exact release days " \
+           "up to 9 Feb 2027, each ending on a ring" in method
+    assert "Other (Mac)" in method and "focusing it with Tab (on the radar, soonest game first)" in method
     # The radar reaches past the 10 games the Trending page shows: Far Frontier and Soon Saga are 12th and 13th.
     steam_list = part(client.get("/trending").text, "upcoming-steam_wishlists-title", "</section>")
     assert "igdb-404" not in details_keys(steam_list) and "igdb-404" in details_keys(card)
 
 
+def test_a_time_window_keeps_only_the_points_it_covers_and_works_without_javascript(games, settings):
+    save_radar(settings)
+    client = dashboard_client(settings)
+    links = re.findall(r'<a class="window-link" href="([^"]+)" data-radar-window="(\w+)"([^>]*)>(.*?)</a>',
+                       chart(upcoming_page(client), "chart-radar"), re.S)
+    assert [(href, key, "aria-current" in rest, text_of(label)) for href, key, rest, label in links] == [
+        ("/dashboard?report=upcoming&amp;window=month", "month", False, "Next month 2 games"),
+        ("/dashboard?report=upcoming&amp;window=quarter", "quarter", False, "Next 3 months 3 games"),
+        ("/dashboard?report=upcoming", "all", True, "All tracked 5 games")]
+    month = chart(upcoming_page(client, window="month"), "chart-radar")
+    assert '<div class="radar" data-radar data-window="month">' in month
+    shown = [point for point in dots(month) if " hidden>" not in point]  # the hidden attribute ends the tag
+    assert sorted(set(re.findall(r'data-details="([^"]+)"', "".join(shown)))) == ["igdb-401", "igdb-403"]
+    assert len(dots(month)) == 8  # the other points stay in the page, hidden, for app.js to show again
+    assert '<span class="radar-dim is-month" style="--edge: 33.33%" aria-hidden="true"></span>' in month
+    assert 'data-radar-window="month" aria-current="true"' in month
+    assert "window=quarter" in month and "<template id=\"radar-game-igdb-404\">" in month  # nothing else is lost
+    unknown = chart(upcoming_page(client, window="decade"), "chart-radar")
+    assert 'data-window="all"' in unknown and " hidden>" not in "".join(dots(unknown))
+
+
 def test_every_radar_game_opens_its_details(games, settings):
     save_radar(settings)
     client = dashboard_client(settings)
-    card = chart(client.get("/dashboard").text, "chart-radar")
+    card = chart(upcoming_page(client), "chart-radar")
     keys = sorted(set(details_keys(card)))
     assert len(keys) == 17
     for key in keys:  # what app.js loads into the dialog, and the page a link opens without JavaScript
@@ -313,12 +401,12 @@ def test_every_radar_game_opens_its_details(games, settings):
 
 def test_the_radar_explains_missing_data(games, settings):
     client = dashboard_client(settings)
-    empty = text_of(chart(client.get("/dashboard").text, "chart-radar"))
+    empty = text_of(chart(upcoming_page(client), "chart-radar"))
     assert "Not refreshed yet: run python -m game_librarian upcoming." in empty and "radar-dot" not in empty
     assert "IGDB release dates and platforms of the games in IGDB PopScore types 2 and 10 · not refreshed yet." in empty
-    # Saved lists whose games all lack an exact day: no points, every game listed by its stated date.
+    # Saved lists whose games all lack an exact day: no points and no windows, every game listed by its stated date.
     save_upcoming(settings)
-    card = chart(client.get("/dashboard").text, "chart-radar")
+    card = chart(upcoming_page(client), "chart-radar")
     assert len(dots(card)) == 2  # Moon Garden on PC and PlayStation 5 (23 Feb 2027)
     conn = store.connect(settings.db_path)
     try:
@@ -326,11 +414,14 @@ def test_the_radar_explains_missing_data(games, settings):
         conn.commit()
     finally:
         conn.close()
-    undated = chart(client.get("/dashboard").text, "chart-radar")
-    assert ("None of these games has an exact release day yet, so the radar has no points. Each is listed by the "
-            "date IGDB states.") in text_of(undated)
-    assert not dots(undated) and '<div class="radar-group"><dt>Mar 2027</dt>' in undated
-    assert '<div class="radar-group"><dt>TBA</dt>' in undated  # Console Quest, PlayStation 5 only, TBA
+    undated = chart(upcoming_page(client), "chart-radar")
+    assert ("None of these games has an exact release day yet, so the radar has no points. Each is listed below by "
+            "the date IGDB states.") in text_of(undated)
+    assert not dots(undated) and 'class="window-switch"' not in undated
+    assert '<details class="radar-more" open>' in undated  # then the list is open: it is all there is
+    assert '<div class="radar-group"><dt>Mar 2027</dt>' in undated
+    assert '<div class="radar-group"><dt>TBA</dt>' in undated
+    assert 'data-selected="101"' in undated  # the panel shows the first listed game instead: Game 01 Saga, Mar 2027
     # Saved lists whose games are all out: nothing upcoming to place.
     conn = store.connect(settings.db_path)
     try:
@@ -338,25 +429,38 @@ def test_the_radar_explains_missing_data(games, settings):
         conn.commit()
     finally:
         conn.close()
-    out = text_of(chart(client.get("/dashboard").text, "chart-radar"))
+    out = text_of(chart(upcoming_page(client), "chart-radar"))
     assert "None of the games saved by the last refresh is still upcoming." in out
 
 
-def test_the_radar_reflows_and_works_with_a_keyboard():
-    # Points keep a 24 px pointer target, the dated list moves below the radar under 1,100 px, and on a phone the
-    # labels shrink and each date sits above its games.
+def test_the_radar_reflows_and_works_with_a_keyboard_pointer_and_touch():
+    # Points keep a 24 px pointer target; the radar card is a size container, so the panel sits beside the radar (two
+    # thirds and one third) only where the card is 700 px wide or more, and below it otherwise. The radar card and
+    # the comparison share a row (3 : 2) down to 1,100 px, then the comparison goes below; on a phone the labels
+    # shrink and each date sits above its games.
     assert "inset: -6px;" in rule(".radar-dot::before")
-    assert ".radar-layout { grid-template-columns: minmax(0, 1fr); }" in media(1100)
+    assert "container-type: inline-size;" in rule(".radar-card")
+    assert "grid-template-columns: minmax(0, 1fr);" in rule(".radar-layout")
+    assert re.search(r"@container \(min-width: 700px\) \{\s*\.radar-layout \{ grid-template-columns: minmax\(0, 2fr\) "
+                     r"minmax\(0, 1fr\); \}", CSS)
+    assert "grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);" in rule(".report-canvas.is-upcoming")
+    assert ".report-canvas.is-upcoming { grid-template-columns: minmax(0, 1fr); }" in media(1100)
     phone = media(720)
     for selector in (".radar-ring {", ".radar-sector {", ".radar-dot {", ".radar-dot::before { inset: -7px; }",
-                     ".radar-group {"):
+                     ".radar-group {", ".rp-head {"):
         assert selector in phone, selector
     assert "aspect-ratio: 1;" in rule(".radar") and "max-width: 560px;" in rule(".radar")
     high_contrast = re.search(r"@media \(forced-colors: active\) \{(.*?)\n\}", CSS, re.S).group(1)
-    assert ".radar-dot { forced-color-adjust: none; background: CanvasText;" in high_contrast  # points stay visible
-    # app.js: focus shows the same tooltip as the pointer, Escape closes it, and its text goes in as text.
-    radar_js = APP_JS[APP_JS.index('querySelectorAll("[data-radar-card]")'):APP_JS.index("var reducedMotion")]
-    for needed in ('addEventListener("focusin"', 'addEventListener("focusout"', 'event.key === "Escape"',
-                   "when.textContent =", 'tip.setAttribute("aria-hidden", "true")', 'removeAttribute("title")'):
+    assert ".radar-dot, .plot-dot, .line-dot, .wf-mark { forced-color-adjust: none; background: CanvasText;" \
+        in high_contrast  # points stay visible
+    assert '.radar[data-window="month"] .radar-dim.is-month' in CSS
+    # app.js: a mouse or pen selects on hover, focus selects, a first tap selects without opening, and a click on the
+    # selected game opens its details; the panel's copy is cloned from Jinja's escaped <template>, never a string.
+    start = APP_JS.index("function trackSelection")
+    radar_js = APP_JS[start:APP_JS.index('querySelectorAll("[data-chart-tips]")')]  # the shared selection and radar
+    for needed in ('event.pointerType === "mouse" || event.pointerType === "pen"', 'addEventListener("focusin"',
+                   'addEventListener("pointerdown"', "before.selected !== key", "event.preventDefault()",
+                   'document.getElementById("radar-game-" + key)', "template.content.cloneNode(true)",
+                   "point.hidden =", 'link.setAttribute("aria-current", "true")', "history.replaceState"):
         assert needed in radar_js, needed
-    assert "innerHTML" not in radar_js  # the tooltip clones Jinja's escaped <template>, never a string of HTML
+    assert "innerHTML" not in radar_js

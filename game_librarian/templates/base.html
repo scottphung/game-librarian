@@ -7,7 +7,10 @@
   <title>{% block title %}Game Librarian{% endblock %}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
+  {# Daily Trivia needs JavaScript (like the wishlist), so without it the lightbulb is not shown at all. #}
+  <noscript><style>.nav-trivia { display: none; }</style></noscript>
   <script src="/static/wishlist.js?v={{ app_version }}" defer></script>
+  <script src="/static/trivia.js?v={{ app_version }}" defer></script>
   <script src="/static/app.js?v={{ app_version }}" defer></script>
 </head>
 <body>
@@ -19,8 +22,21 @@
       <a class="nav-link" href="/trending"{% if active == "trending" %} aria-current="page"{% endif %}>Trending</a>
       <a class="nav-link" href="/stories"{% if active == "stories" %} aria-current="page"{% endif %}>Data Stories</a>
       <a class="nav-link" href="/dashboard"{% if active == "dashboard" %} aria-current="page"{% endif %}>Dashboard</a>
-      <a class="nav-link" href="/wishlist"{% if active == "wishlist" %} aria-current="page"{% endif %}>Wishlist</a>
+      {# Two icon controls end the header. Each one's name is its accessible name and shows as a tip on hover and
+         keyboard focus (Escape hides the tip). The lightbulb's badge marks today's quiz as finished (app.js). #}
+      <a class="nav-icon" href="/wishlist"{% if active == "wishlist" %} aria-current="page"{% endif %} aria-label="Wishlist">
+        <svg class="nav-icon-art" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M12 3.4l2.29 6.34 6.74.22-5.32 4.15 1.87 6.48L12 16.8l-5.58 3.79 1.87-6.48-5.32-4.15 6.74-.22z"/></svg>
+        <span class="nav-tip" aria-hidden="true">Wishlist</span>
+      </a>
+      <button class="nav-icon nav-trivia" type="button" aria-label="Daily Trivia" aria-haspopup="dialog" aria-controls="trivia-dialog" data-trivia-open data-trivia-day="{{ trivia_day() }}">
+        <svg class="nav-icon-art" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M9.5 16.75c0-1.4-.6-2.5-1.92-3.58a6.25 6.25 0 1 1 8.84 0c-1.32 1.08-1.92 2.18-1.92 3.58z"/><path d="M9.5 19.25h5M10.5 21.5h3M10.25 11.25L12 13l1.75-1.75"/></svg>
+        <span class="nav-badge" data-trivia-badge hidden><svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true" focusable="false"><path d="M2.5 6.25l2.25 2.25L9.5 3.75"/></svg></span>
+        <span class="nav-tip" aria-hidden="true">Daily Trivia</span>
+      </button>
     </nav>
+    {# The lightbulb's description once today's quiz is finished (app.js sets aria-describedby). A hidden element still
+       gives its text to a description that points to it, and nothing reads it otherwise. #}
+    <span id="trivia-done-note" hidden>Today’s quiz is finished</span>
   </header>
 
   {% block body %}{% endblock %}
@@ -59,5 +75,21 @@
       </p>
     </div>
   </footer>
+
+  {# Daily Trivia, opened by the lightbulb above: app.js loads its content from /trivia/panel when it opens. #}
+  <dialog class="trivia-dialog" id="trivia-dialog" aria-labelledby="trivia-title">
+    <div class="trivia-frame">
+      <div class="trivia-top">
+        <h2 class="trivia-title" id="trivia-title" tabindex="-1" autofocus>Daily Trivia</h2>
+        <button class="dialog-close" type="button" data-trivia-close>
+          <span aria-hidden="true">×</span><span class="visually-hidden">Close Daily Trivia</span>
+        </button>
+      </div>
+      <div class="trivia-content" data-trivia-content></div>
+    </div>
+  </dialog>
+  {# The game details dialog, on every page so that Daily Trivia can open a game's details anywhere. The full
+     details page (game.html) leaves it out: there, links to other games open their own pages, as before. #}
+  {% if details_dialog is not defined or details_dialog %}{% include "_dialog.html" %}{% endif %}
 </body>
 </html>

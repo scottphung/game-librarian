@@ -133,14 +133,20 @@ def test_the_discover_intro_is_two_short_lines_and_the_rules_open_from_a_labeled
 
 
 def test_the_dashboard_keeps_its_details_one_click_away(games, settings):
-    html = igdb_site(settings).get("/dashboard").text
-    visible = text_of(without_details(html))
-    assert "Lists, measures and update times" not in visible and "Snapshots, positions, trends and sales" not in visible
-    assert "Sources and methodology" in visible  # the jump link and the summary
-    assert 'href="#sources">Sources and methodology</a>' in html  # app.js opens the details for this link
-    # Every chart keeps a one-line source and time in view: the release radar, Want to Play, new releases and the
-    # games in both lists.
-    assert visible.count("IGDB PopScore type") == 4 and "Twitch API, Get Top Games" in visible
+    site = igdb_site(settings)
+    for report, folded in (("sales", "Every such game is drawn"), ("upcoming", "Every band has the same width"),
+                           ("momentum", "A fall is kept as it is")):
+        html = site.get("/dashboard", params={"report": report}).text
+        visible = text_of(without_details(html))
+        assert visible.count("Sources and methodology") == 1, report  # one summary, closed
+        assert folded in text_of(html) and folded not in visible, report  # the definitions, one click away
+    # Every chart keeps its source and date in view: on Upcoming releases, the radar's IGDB lists, and each capture the
+    # comparison uses, with its observation time and depth.
+    visible = text_of(without_details(site.get("/dashboard", params={"report": "upcoming"}).text))
+    assert visible.count("IGDB PopScore type") == 2
+    assert "IGDB Want to Play all platforms 3 upcoming games, down to place #12 of its ranking · saved 9 Nov 2026" in visible
+    assert "Steam most wishlisted Steam only 2 upcoming games, down to place #2 of its ranking" in visible
+    assert "lists saved 9 Nov 2026, 12:00 UTC; days counted from 9 Nov 2026." in visible
 
 
 # ---------------------------------------------------------------------- phone layouts
@@ -148,10 +154,13 @@ def test_the_dashboard_keeps_its_details_one_click_away(games, settings):
 
 def test_charts_and_lists_reflow_for_phones():
     phone = media(720)
-    for selector in (".game-bar {", ".thumb.is-wide {", ".gb-line {", ".method-body {", ".footer-grid {",
-                     ".nav-link {", ".card-grid {", ".radar-dot {", ".radar-group {"):
+    for selector in (".ring-layout {", ".ring {", ".thumb.is-wide {", ".bench-facts {", ".compare-block {",
+                     ".method-body {", ".footer-grid {", ".nav-link {", ".card-grid {", ".radar-dot {", ".radar-group {",
+                     ".report-tab {", ".plot {", ".wf-row, .wf-axis-row {", ".line-plot {"):
         assert selector in phone, selector
-    assert "grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));" in rule(".rank-tiles")  # 1 column on a phone
     assert ".dash-grid { grid-template-columns: minmax(0, 1fr); }" in media(1100)  # charts stack below 1,100 px
-    assert "padding-right: 5.5rem;" in rule(".gb-line")  # room for the value at the longest bar's tip
-    assert "overflow-wrap: anywhere;" in rule(".gb-name, .rt-name, .split-link")  # long names wrap, never overflow
+    assert ".report-canvas.is-momentum { grid-template-columns: minmax(0, 1fr); }" in media(1100)
+    assert "position: sticky;" in rule(".report-tabs") and "top: 0;" in rule(".report-tabs")  # always in reach
+    assert ".report-canvas.is-upcoming { grid-template-columns: minmax(0, 1fr); }" in media(1100)
+    assert "overflow-wrap: anywhere;" in rule(".gb-name")  # long names wrap, never overflow
+    assert "overflow-wrap: anywhere;" in rule(".wf-name")

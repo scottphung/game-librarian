@@ -1,13 +1,13 @@
 """Support for prices and snapshots: the Steam client's new reads, the store-region setting, the snapshot
-seeding of an existing catalog, curated publisher aliases, and the Trending games dashboard calculations."""
+seeding of an existing catalog and curated publisher aliases. (The dashboard's review splits and sparklines that
+were tested here were replaced in 0.15: see test_dashboard_trending.py and test_momentum.py.)"""
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 
-from game_librarian import config, dashboard, store
+from game_librarian import config, store
 from game_librarian.config import DEFAULT_CURATED_DIR
 from game_librarian.curated import load_curated
 from game_librarian.steam import SteamError, SteamNotFound
@@ -94,21 +94,3 @@ def test_publisher_aliases_are_optional_and_only_valid_verified_rows_are_used(tm
     assert load_curated(DEFAULT_CURATED_DIR).publisher_aliases == {
         "warner bros interactive entertainment": "Warner Bros. Games", "wb games": "Warner Bros. Games"}
 
-
-# ---------------------------------------------------------------------- Trending games dashboard
-
-
-def test_a_review_split_needs_usable_counts():
-    split = dashboard.review_split({"positive_reviews": 30, "negative_reviews": 70})
-    assert (split["positive"], split["negative"], split["positive_width"], split["share"]) == (30, 70, 30.0, 0.3)
-    assert dashboard.review_split({"positive_reviews": 0, "negative_reviews": 0}) is None
-    assert dashboard.review_split({"positive_reviews": None, "negative_reviews": 5}) is None
-
-
-def test_a_sparkline_needs_two_snapshots_and_uses_its_own_scale():
-    end = datetime(2026, 11, 19, tzinfo=timezone.utc)
-    start = end - timedelta(days=30)
-    assert dashboard.sparkline([(end, 10)], start, end) is None
-    line = dashboard.sparkline([(start, 100), (start + timedelta(days=15), 300), (end, 200)], start, end)
-    assert line["points"] == "0.0,36.0 50.0,4.0 100.0,20.0" and (line["low"], line["high"]) == (100, 300)
-    assert dashboard.sparkline([(start, 50), (end, 50)], start, end)["points"] == "0.0,20.0 100.0,20.0"

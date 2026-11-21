@@ -1,0 +1,216 @@
+{% from "_platforms.html" import scope_badge %}
+{% from "_trending_macros.html" import thumb, game_link, time_span, reception_plot, reception_table %}
+{# Sales & reception (web._sales_report): does a game stand out among similar releases? Gamalytic's estimates exist only
+   for a browser on the computer that runs the site (web.is_local_request): any other request has no dash.sales, so the
+   doughnut and every word and figure about Gamalytic are not in the page at all, and the reception chart leads. The
+   doughnut's games link to their dots on the reception chart (app.js); the chart's view switch changes only the
+   chart. #}
+
+{# The Trending games that the copies-sold doughnut leaves out, by reason (dashboard.sales_chart), never counted as
+   zero: counted ("Left out: 7 free to play, ..."), or named with `names` ("Left out now: Dota 2, ... (free to play);
+   ..."). Prints nothing when no game is left out. #}
+{% macro left_out_text(groups, names=false) -%}
+  {%- set reasons = [("free", "free to play"), ("no_estimate", "without a Gamalytic estimate"), ("not_asked", "not asked yet"), ("no_price", "without a current Steam price"), ("not_released", "not released yet")] -%}
+  {%- for key, reason in reasons if groups[key] -%}
+    {%- if loop.first %} {{ "Left out now: " if names else "Left out: " }}{% endif -%}
+    {%- if names %}{{ groups[key]|join(", ") }} ({{ reason }}){{ "." if loop.last else "; " }}{% else %}{{ groups[key]|length }} {{ reason }}{{ "." if loop.last else ", " }}{% endif -%}
+  {%- endfor -%}
+{%- endmacro %}
+
+{# Whether a doughnut game is on the reception chart below it, and why not (web._chart_status); `labels` names the
+   strong-reception summaries. #}
+{% macro chart_status_text(item, rc, labels) -%}
+  {%- if item.chart_status == "drawn" %}On the reception chart below
+  {%- elif item.chart_status == "before_window" %}Not on the reception chart: released {{ item.game.released_on|day }}, before {{ rc.window[0]|day }}
+  {%- elif item.chart_status == "below_threshold" and item.game.review_label %}Not on the reception chart: Steam’s summary is {{ item.game.review_label }}, not {{ labels }}
+  {%- elif item.chart_status == "below_threshold" %}Not on the reception chart: Steam gives no review summary label
+  {%- elif item.chart_status == "no_reviews" %}Not on the reception chart: no usable Steam review summary
+  {%- else %}Not on the reception chart: no exact Steam release date{% endif -%}
+{%- endmacro %}
+
+{# The detail strip of one selected game (dashboard.peer_benchmark): its Steam reviews, its positive share, its peers'
+   median, the gap in percentage points and its peers, with their genre and release window. app.js copies it from the
+   game's <template> into the strip above the chart. #}
+{% macro bench_strip(p, rc) -%}{% set b = p.benchmark %}
+<p class="bench-name">{{ p.name }}</p>
+<dl class="bench-facts">
+  <div><dt>Steam reviews</dt><dd>{{ p.total|number }}</dd></div>
+  <div><dt>Positive</dt><dd>{{ b.share|tenths }}%</dd></div>
+  <div><dt>Peer median</dt><dd>{{ b.median|tenths ~ "%" if b.enough else "Too few comparable games" }}</dd></div>
+  <div><dt>Gap</dt><dd>{{ b.gap|tenths(true) ~ " points" if b.enough else "None" }}</dd></div>
+  <div class="bench-peers"><dt>Peers</dt><dd>{% if b.genre %}{{ b.count }} other {{ b.genre }} {{ "game" if b.count == 1 else "games" }} released {{ rc.window[0]|day }} – {{ rc.window[1]|day }}{% if not b.enough %} (at least {{ rc.min_peers }} needed){% endif %}{% else %}None: Steam lists no gameplay genre for it{% endif %}</dd></div>
+</dl>
+{%- endmacro %}
+
+{% set rc = dash.reception %}{% set chart = rc.chart %}{% set year = rc.this_year_window[0].year %}{% set start = rc.window[0] %}
+{% set labels = dash.strong_labels|join(" or ") %}
+<section class="report" aria-labelledby="report-title">
+  <header class="report-head">
+    <h2 class="report-title" id="report-title">Sales &amp; reception</h2>
+    <p class="report-question">Does this game stand out among similar releases?</p>
+    {% if not dash.sales %}<p class="report-note">No sales figures: Valve publishes no unit sales or revenue per game, so this page compares Steam reception.</p>{% endif %}
+  </header>
+
+  <div class="report-canvas" data-sales-report>
+    {% if dash.sales %}{% set sales = dash.sales %}{% set ring = sales.ring %}
+    {# The cohort's estimates as a doughnut (dashboard.sales_ring): the five largest each a slice with its cover art,
+       numbered like the list beside it, the rest one "Other tracked games" slice, the total in the middle. A slice is
+       a pointer target only; the list is the keyboard path, and every number is in its table. #}
+    <figure class="chart-card sales-chart" id="sales" aria-labelledby="chart-sales" data-sales-ring>
+      <figcaption>
+        <div class="trend-head"><h3 class="chart-title" id="chart-sales">Estimated Steam copies sold</h3>{{ scope_badge("steam") }}<span class="scope-badge is-local">Local evaluation only</span></div>
+        <p class="chart-scope"><strong>Steam · cumulative estimates</strong>, all time up to their collection: the released paid games on the Trending page{% if ring %}, {{ ring.games }} {{ "game" if ring.games == 1 else "games" }}, as shares of their total{% endif %}. Gamalytic’s model estimates, not sales reported by publishers. Shown on this computer only: Gamalytic’s terms do not allow sharing them.</p>
+      </figcaption>
+      {% if sales.last_run and sales.last_run.status in ("failed", "partial") and sales.last_problem %}
+      <p class="data-note">The last collection ({{ sales.last_run.started_at|datetime }}) {{ "failed" if sales.last_run.status == "failed" else "was partial" }}: {{ sales.last_problem }}{% if sales.summary.last %} The estimates collected before are shown.{% endif %}</p>
+      {% endif %}
+      {% if sales.stale %}
+      <p class="data-note">Some estimates below were collected more than {{ sales.stale_days }} days ago. <code>python -m game_librarian sales-estimates</code> collects them again.</p>
+      {% endif %}
+      {% if ring %}
+      <div class="ring-layout">
+        <div class="ring" data-ring>
+          {%- for part in ring.parts %}{% set share = part.share_tenths|tenths %}
+          {%- if part.kind == "game" %}
+          <a class="ring-slice{% if not part.image_url %} is-empty{% endif %}" href="{{ part.details_url }}" data-details="{{ part.appid }}" data-game="{{ part.appid }}" style="clip-path: {{ part.clip }}" tabindex="-1" aria-hidden="true" title="{{ part.name }}: ≈ {{ part.copies|compact }} estimated copies, {{ share }}% of the total">{% if part.image_url %}<img src="{{ part.image_url }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-image-fallback style="left: {{ part.box.left }}%; top: {{ part.box.top }}%; width: {{ part.box.width }}%; height: {{ part.box.height }}%">{% endif %}</a>
+          {%- else %}
+          <span class="ring-slice is-other" data-game="other" style="clip-path: {{ part.clip }}" aria-hidden="true" title="Other tracked games: {{ part.members|length }} games, ≈ {{ part.copies|compact }} estimated copies, {{ share }}% of the total"></span>
+          {%- endif %}
+          {%- endfor %}
+          {%- for part in ring.parts if part.badge %}<span class="ring-badge" style="left: {{ part.badge[0] }}%; top: {{ part.badge[1] }}%" aria-hidden="true">{{ part.number }}</span>{% endfor %}
+          <p class="ring-center"><span class="ring-total">≈ {{ ring.total|compact }}</span><span class="ring-sub">estimated copies</span><span class="ring-sub">{{ ring.games }} {{ "game" if ring.games == 1 else "games" }}</span></p>
+        </div>
+        <ol class="ring-list" aria-label="Estimated Steam copies sold, largest first: the slices of the doughnut">
+          {%- for part in ring.parts %}{% set share = part.share_tenths|tenths %}
+          {%- if part.kind == "game" %}
+          <li class="ring-row" data-game="{{ part.appid }}">
+            <span class="ring-rank" aria-hidden="true">{{ part.number }}</span>
+            {{ thumb(part.image_url) }}
+            <div class="ring-body">
+              <p class="ring-name">{{ game_link(part.appid, part.name, part.details_url) }}</p>
+              <p class="ring-figure" title="{{ part.name }}: about {{ part.copies|number }} copies on Steam (Gamalytic estimate, collected {{ part.collected_at|datetime }}; on Trending: {{ part.lists|join(', ') }})">≈ {{ part.copies|compact }}<span class="visually-hidden"> estimated copies sold on Steam,</span> <span class="ring-share">{{ share }}%<span class="visually-hidden"> of the total</span></span></p>
+              <p class="ring-note">{{ chart_status_text(part, rc, labels) }}</p>
+            </div>
+          </li>
+          {%- else %}
+          <li class="ring-row is-other" data-game="other">
+            <span class="ring-rank is-other" aria-hidden="true"></span>
+            <span class="thumb ring-swatch" aria-hidden="true"></span>
+            <div class="ring-body">
+              <details class="ring-members">
+                <summary>Other tracked games <span class="ring-members-count">{{ part.members|length }} games</span></summary>
+                <ul class="ring-member-list">{% for item in part.members %}<li data-game="{{ item.appid }}">{{ game_link(item.appid, item.name, item.details_url) }} <span class="ring-member-figure">≈ {{ item.copies|compact }}</span>{% if item.chart_status != "drawn" %} <span class="ring-member-note">· not on the reception chart</span>{% endif %}</li>{% endfor %}</ul>
+              </details>
+              <p class="ring-figure">≈ {{ part.copies|compact }}<span class="visually-hidden"> estimated copies sold on Steam,</span> <span class="ring-share">{{ share }}%<span class="visually-hidden"> of the total</span></span></p>
+            </div>
+          </li>
+          {%- endif %}
+          {%- endfor %}
+        </ol>
+      </div>
+      {% elif not sales.summary.last %}
+      <p class="chart-empty">No estimates collected yet. Run <code>python -m game_librarian sales-estimates</code>: Gamalytic’s free API, no key{% if sales.catalog_games %}, about {{ sales.requests_needed }} {{ "request" if sales.requests_needed == 1 else "requests" }} for the {{ sales.catalog_games }} catalog games{% endif %}.</p>
+      {% elif not sales.trending_games %}
+      <p class="chart-empty">The Trending page shows no catalog game yet, so there is nothing to compare.</p>
+      {% else %}
+      <p class="chart-empty">None of the {{ sales.trending_games }} catalog games on the Trending page is a released paid game with an estimate in its newest collection.</p>
+      {% endif %}
+      <p class="chart-meta">Gamalytic API (free), copiesSold · {% if sales.collected %}collected {{ time_span(sales.collected) }}{% if sales.cached %}; Gamalytic’s data dated {{ sales.cached[1]|datetime }}{% endif %}{% elif sales.summary.last %}last collected {{ sales.summary.last|datetime }}{% else %}not collected yet{% endif %}.{% if sales.summary.last %}{{ left_out_text(sales.left_out) }}{% endif %}</p>
+      {% if ring %}
+      <details class="table-view">
+        <summary>Show as a table</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th scope="col">Slice</th><th scope="col">Game</th><th scope="col" class="num">Estimated copies sold</th><th scope="col" class="num">Share of the total</th><th scope="col">On the Trending page</th><th scope="col">Collected</th></tr></thead>
+            <tbody>
+              {% for part in ring.parts if part.kind == "game" %}<tr><td>{{ part.number }}</td><td>{{ part.name }}</td><td class="num">{{ part.copies|number }}</td><td class="num">{{ part.share_tenths|tenths }}%</td><td>{{ part.lists|join(", ") }}</td><td>{{ part.collected_at|datetime }}</td></tr>{% endfor %}
+              {% if ring.other %}{% for item in ring.other.members %}<tr><td>Other</td><td>{{ item.name }}</td><td class="num">{{ item.copies|number }}</td><td class="num"></td><td>{{ item.lists|join(", ") }}</td><td>{{ item.collected_at|datetime }}</td></tr>{% endfor %}
+              <tr><td>Other</td><td>Other tracked games ({{ ring.other.members|length }} games)</td><td class="num">{{ ring.other.copies|number }}</td><td class="num">{{ ring.other.share_tenths|tenths }}%</td><td></td><td></td></tr>{% endif %}
+              <tr><td></td><td>Total ({{ ring.games }} {{ "game" if ring.games == 1 else "games" }}, the middle of the doughnut)</td><td class="num">{{ ring.total|number }}</td><td class="num">100.0%</td><td></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endif %}
+    </figure>
+    {% endif %}
+
+    {# Every strong-reception game of the five-year window once, this year's in the accent color. The view links show
+       every game or this year's only, in place with JavaScript (?view= without); the axes never change. Selecting a
+       game fills the strip above the plot from its <template> and lights up its peers and their median. #}
+    <figure class="chart-card plot-card" id="reception" aria-labelledby="chart-reception" data-reception data-view="{{ rc.view }}">
+      <figcaption>
+        <div class="trend-head"><h3 class="chart-title" id="chart-reception">Strong Steam reception since {{ start.year }}</h3>{{ scope_badge("steam") }}</div>
+        <p class="chart-sub">Each dot is a game with a Steam review summary of {{ labels }}, released {{ start|day }} – {{ rc.window[1]|day }}: <strong>{{ rc.games }} {{ "game" if rc.games == 1 else "games" }}</strong>{% if rc.this_year %}, {{ rc.this_year }} of them released in {{ year }}{% endif %}. Further right: more Steam reviews; higher: a larger share of them positive.</p>
+      </figcaption>
+      {% if chart %}
+      <div class="plot-tools">
+        {% if chart.views.year and chart.views.year < chart.views.all %}
+        <nav class="window-switch" aria-label="Games shown">
+          <a class="window-link" href="/dashboard#reception" data-reception-view="all"{% if rc.view == "all" %} aria-current="true"{% endif %}>Since {{ start.year }} <span class="window-count">{{ chart.views.all }}<span class="visually-hidden"> games</span></span></a>
+          <a class="window-link" href="/dashboard?view=year#reception" data-reception-view="year"{% if rc.view == "year" %} aria-current="true"{% endif %}>{{ year }} only <span class="window-count">{{ chart.views.year }}<span class="visually-hidden"> {{ "game" if chart.views.year == 1 else "games" }}</span></span></a>
+        </nav>
+        {% endif %}
+        <ul class="legend">{% if rc.this_year %}<li><span class="key plot-key is-accent"></span>Released in {{ year }}</li>{% endif %}{% if rc.this_year < rc.games %}<li><span class="key plot-key"></span>Released {{ start.year }}–{{ year - 1 }}</li>{% endif %}<li><span class="key plot-key is-peer"></span>Peers of the selected game</li><li><span class="key median-key"></span>Their median</li></ul>
+      </div>
+      <div class="bench-strip" data-bench-strip>
+        <p class="bench-prompt">Select a dot to compare its game with similar releases: the median positive share of the other games in its genre released since {{ start|day }}. The table below lists every comparison.</p>
+      </div>
+      {{ reception_plot(chart, rc.view, "Strong Steam reception since " ~ start.year) }}
+      {% for p in chart.points %}
+      <template id="bench-{{ p.appid }}" data-peer-genre="{{ p.benchmark.genre if p.benchmark.genre else '' }}"{% if p.median_y is not none %} data-median-y="{{ p.median_y }}" data-median-label="{{ p.benchmark.genre }} median {{ p.benchmark.median|tenths }}%"{% endif %}>{{ bench_strip(p, rc) }}</template>
+      {% endfor %}
+      {% else %}
+      <p class="chart-empty">No catalog game released on Steam since {{ start|day }} has a review summary of {{ labels }} yet.</p>
+      {% endif %}
+      <p class="chart-meta">Steam review summaries (all languages, Steam purchasers) · released {{ start|day }} – {{ rc.window[1]|day }}, the five-year ranking’s window · {{ rc.games }} {{ "game" if rc.games == 1 else "games" }} drawn, compared with {{ rc.comparable }} comparable {{ "game" if rc.comparable == 1 else "games" }}{% if rc.saved %} · saved {{ time_span(rc.saved) }}{% endif %}.</p>
+      {% if chart %}{{ reception_table(chart) }}{% endif %}
+    </figure>
+  </div>
+
+  <details class="method-details" id="sources">
+    <summary>Sources and methodology</summary>
+    <div class="method-body">
+      {% if dash.sales %}{% set sales = dash.sales %}
+      <h3 class="chart-title">Estimated Steam copies sold (this computer only)</h3>
+      <ul class="method-notes">
+        <li><strong>What a value is:</strong> Gamalytic’s estimate of copies bought directly on Steam, all time up to the collection. Not sales reported by publishers, other platforms or stores, key activations, or revenue.</li>
+        <li><strong>How it is made:</strong> a model built on Steam’s top-seller rank, concurrent players, a regression on release year, review score and playtime, and publicly disclosed sales. Gamalytic reports 77% of single-game estimates within 30% of actual sales and 98% within 50%; smaller and free-to-play games are less accurate (<a class="text-link" href="{{ sales.about_url }}" target="_blank" rel="noopener">Gamalytic’s method<span class="visually-hidden"> (opens in a new tab)</span></a>).</li>
+        <li><strong>Which games:</strong> the catalog games on the Trending page ({{ sales.trending_games }} now) that are released, sold on Steam for a price (Steam’s free flag leaves out free-to-play games) and estimated in their newest collection. This is not a list of Steam’s best sellers.{% if sales.summary.last %}{{ left_out_text(sales.left_out, names=true) }}{% endif %}</li>
+        <li><strong>The doughnut:</strong> the {{ sales.named }} largest estimates each have a slice, largest first and clockwise from the top, with the game’s Steam cover art cropped into it (a plain blue slice when there is none); every other game of the cohort is in “Other tracked games”. A slice’s angle is its share of the total, and every slice has the same ring thickness. The middle gives the total of every estimate of the cohort and its number of games; the slices add up to it, as the table shows. Shares are rounded so that they add up to 100.0%.</li>
+        <li><strong>Times:</strong> “collected” is when this site asked; “Gamalytic’s data dated” is the cacheTimestamp in Gamalytic’s answer, which its documentation does not describe. Each game is asked again after {{ sales.max_age_days }} days and older collections are kept ({{ sales.summary.collections }} so far), so the total can add estimates collected on different days of that week. No change is shown: Gamalytic revises its model, so a difference between two collections is not a number of copies sold in between.</li>
+        <li><strong>No revenue:</strong> Gamalytic’s free answers leave revenue out, and copies times today’s price would be wrong (discounts, regional prices, bundles).</li>
+        <li><strong>Terms:</strong> Gamalytic’s <a class="text-link" href="{{ sales.terms_url }}" target="_blank" rel="noopener">Terms of Service<span class="visually-hidden"> (opens in a new tab)</span></a> (23 Mar 2026) license its data for internal use and prohibit redistribution without written approval, so only a browser on this computer gets this chart. Do not publish it or screenshots of it.</li>
+      </ul>
+      {% endif %}
+      <h3 class="chart-title">Strong Steam reception</h3>
+      <ul class="method-notes">
+        <li><strong>Which games:</strong> catalog games with an exact Steam release date from {{ start|day }} to {{ rc.window[1]|day }} (the five-year ranking’s window, which moves on 1 January) and a Steam review summary of {{ labels }}, the Trending page’s rule. Every such game is drawn once, not only the first {{ rc.listed }} the Trending page lists: {{ rc.games }} now, {{ rc.this_year }} of them released this year, in the accent color.</li>
+        <li><strong>Views:</strong> “Since {{ start.year }}” shows every game; “{{ year }} only” shows this year’s releases. Both use the same axes, so a game never moves, and the comparison with peers never changes with the view.</li>
+        <li><strong>Axes:</strong> right, the game’s total Steam reviews (all languages, Steam purchasers){% if chart and chart.log %}, on a log scale because the counts span more than ten times: each step is ten times more, so 1,000 and 100,000 sit two steps apart{% endif %}; up, the share of them that is positive, to one decimal (Steam’s store rounds it down). Together the two numbers tell 98% of 100 reviews from 98% of 100,000.</li>
+        <li><strong>Named dots:</strong> the game with the highest positive share, the most reviewed game, and the best received of the games with fewer reviews than the median, in each view; a view of three games or fewer names them all. Every dot opens its game’s details, and the table lists every game.</li>
+        <li><strong>Not sales or players:</strong> a review count is the number of reviews Steam purchasers wrote, not copies sold or people playing, and Steam reviews say nothing about other platforms. Steam’s Top Sellers chart is not collected, and a chart position is not a number of copies sold.</li>
+      </ul>
+      <h3 class="chart-title">Compared with similar releases</h3>
+      <ul class="method-notes">
+        <li><strong>Comparable games:</strong> every catalog game with a usable Steam review summary and an exact Steam release date in the same window, strong reception or not: {{ rc.comparable }} now. The {{ rc.below|length }} below the strong-reception threshold are not drawn but count in the medians; they are listed below.</li>
+        <li><strong>Peers:</strong> the other comparable games that share the selected game’s peer genre, one of Steam’s gameplay genres ({{ rc.gameplay_genres|join(", ") }}). Casual, Indie, Free To Play, Early Access and Massively Multiplayer describe the audience, the production, the price, the release state or the scale, so they never make games comparable. A game with several gameplay genres is compared within its most specific one: the genre the fewest other comparable games share, among those at least {{ rc.min_peers }} share (ties A–Z); when none reaches {{ rc.min_peers }}, the genre most of them share, so the count shown is the largest there is. The game itself is never its own peer.</li>
+        <li><strong>The benchmark:</strong> the median positive share of the peers, each game counting once whatever its number of reviews, drawn as a line across the chart. With fewer than {{ rc.min_peers }} peers there is none: the strip shows the count and “Too few comparable games”, and still gives the game’s own reviews and share.</li>
+        <li><strong>The gap:</strong> the game’s share minus the median, in percentage points. Each share is rounded half up to one decimal from the exact count of reviews, and the gap is the difference of the two numbers shown, so the strip always adds up.</li>
+        <li><strong>Limits:</strong> the catalog is curated, so these are not every game on Steam: a median compares a game with the other catalog games of its genre and window. The window is wide: a game released this year is compared with games out since {{ start.year }}.</li>
+      </ul>
+      {% if rc.below %}
+      <details class="table-view">
+        <summary>Comparable games below the strong-reception threshold ({{ rc.below|length }})</summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th scope="col">Game</th><th scope="col">Released on Steam</th><th scope="col" class="num">Steam reviews</th><th scope="col" class="num">Positive</th><th scope="col">Steam’s summary</th><th scope="col">Steam genres</th></tr></thead>
+            <tbody>{% for game in rc.below %}<tr><td>{{ game.name }}</td><td>{{ game.released_on|day }}</td><td class="num">{{ game.total|number }}</td><td class="num">{{ game.share_tenths|tenths }}%</td><td>{{ game.review_label or "None" }}</td><td>{{ game.genres|join(", ") }}</td></tr>{% endfor %}</tbody>
+          </table>
+        </div>
+      </details>
+      {% endif %}
+      <p class="chart-sub">Data from Steam (store release dates, genres and review summaries, saved by <code>python -m game_librarian sync</code>){% if dash.sales %} and Gamalytic’s free API (on this computer only){% endif %}. Hand-picked (curated) games: none; each chart is ordered by its own measure.</p>
+    </div>
+  </details>
+</section>

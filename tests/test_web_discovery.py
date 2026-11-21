@@ -210,27 +210,6 @@ def test_trending_sections_say_what_they_measure_and_explain_missing_history(gam
     assert '<dialog class="game-dialog" id="game-dialog"' in html  # names open the details dialog
 
 
-def test_the_trending_games_dashboard_shows_counts_splits_and_history_only_when_it_exists(games, settings):
-    client = app_client(settings)
-    empty = client.get("/dashboard").text
-    assert "No player counts have been collected yet" not in empty  # the sync saved snapshots without counts
-    assert "No catalog game had players in game at its newest snapshot" in empty
-    assert ("Not available yet: Steam players over the last 30 days, most added players on Steam, most new Steam "
-            "reviews") in text_of(empty)
-    save_players(settings, {114: 3_000, 113: 1_500}, moment=NOW - timedelta(days=9))
-    save_players(settings, {114: 4_000, 113: 1_000})
-    html = client.get("/dashboard").text
-    assert re.search(r'href="/dashboard" aria-current="page">Trending games</a>', html)
-    assert 'title="Game 14: 4,000 players at 9 Nov 2026, 12:00 UTC"' in html
-    assert "1,400 positive · 300 negative · 82.4% positive" in html  # Game 14's reviews (1,400 of 1,700)
-    assert html.count('<li class="spark-card">') == 2 and "<polyline points=" in html  # snapshots 9 days apart
-    rises = re.search(r'<ol class="game-bars" aria-label="Most added players on Steam">.*?</ol>', html, re.S).group(0)
-    assert text_of(rises) == "1 Game 14 3,000 at 31 Oct 2026, 13:00 UTC → 4,000 at 9 Nov 2026, 12:00 UTC +1,000"
-    gaps = text_of(re.search(r'<div class="change-gaps">.*?</div>', html, re.S).group(0))
-    assert "Steam players over the last 30 days" not in gaps and "most added players" not in gaps  # now charted
-    assert "a chart position is not a number of copies sold" in html
-
-
 def test_new_pages_render_without_network_access_and_the_navigation_links_them(games, settings, monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("page requests must not call Steam or any other network service")
@@ -242,7 +221,7 @@ def test_new_pages_render_without_network_access_and_the_navigation_links_them(g
                 "/dashboard/trending", "/?publisher=Test+Publisher&reception=Mixed&sort=players"):
         assert client.get(url).status_code == 200, url
     nav = re.search(r'<nav class="site-nav".*?</nav>', client.get("/trending").text, re.S).group(0)
-    assert text_of(nav) == "Discover Trending Data Stories Dashboard Wishlist"
+    assert text_of(nav) == "Discover Trending Data Stories Dashboard Wishlist Daily Trivia"  # icons' tips since 0.17
     assert 'href="/trending" aria-current="page"' in nav and 'href="/stories"' in nav
 
 
