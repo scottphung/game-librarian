@@ -28,13 +28,13 @@ Pages, in the order of the site navigation:
   _sales_report, _upcoming_report and _momentum_report); then the Power BI report's measures as HTML
   (dashboard.py): Player reception (/dashboard/reception), Awards and About the data. Old addresses redirect (see
   dashboard_home). Sales & reception leads with Gamalytic's estimated Steam copies sold once they are collected.
-- Wishlist (/wishlist), behind the header's star icon: in the browser (static/wishlist.js), or, for a visitor signed
-  in with an email account (accounts.py, supabase_auth.py; /account), in their account on the server, read and
-  changed only through /api/wishlist for that account. A list saved in the browser is imported only when its owner
-  asks, and the browser's copy stays until they remove it.
-- Accounts (/account, /account/..., /auth/confirm), behind the header's person icon when Supabase is configured:
-  sign in, create an account, confirm the email address, forgotten password, new password and sign out. The forms
-  post to this server, which alone talks to Supabase Auth.
+- Wishlist (/wishlist), behind the header's star icon: in the browser (static/wishlist.js), or, for a signed-in
+  visitor (accounts.py, supabase_auth.py; /account), in their account on the server, read and changed only through
+  /api/wishlist for that account. A list saved in the browser is imported only when its owner asks, and the browser's
+  copy stays until they remove it.
+- Accounts (/account, /account/sign-up, /auth/google, /auth/callback), behind the header's person icon when Supabase
+  is configured: Continue with Google (the first Google sign-in creates the account), then sign out. There are no
+  passwords and no email codes. This server alone talks to Supabase Auth.
 - Daily Trivia: the header's lightbulb opens a popup on any page. Its content comes from /trivia/panel: today's
   quiz from curated/trivia.json, the same for everyone that quiz day (UTC; trivia.py), and the facts open for
   browsing. The visitor's answers and scores stay in the browser (static/trivia.js); the server never sees them.
@@ -191,17 +191,14 @@ SECURITY_HEADERS = {
 }
 HSTS = "max-age=31536000"  # the hosted site answers only over HTTPS; browsers then never try plain HTTP
 MAX_JSON_BODY = 256 * 1024  # a wishlist import of WISHLIST_LIMIT games is well under this
-MAX_FORM_BODY = 16 * 1024  # an account form (an email address, two passwords, a token) is well under this
+MAX_FORM_BODY = 16 * 1024  # the sign-out form (its form token) is well under this
 MAX_FORM_FIELDS = 12
 # What /account says after a redirect (?notice=): fixed sentences, so nothing that a link supplies is shown.
 ACCOUNT_NOTICES = {
-    "confirmed": "Your email address is confirmed, and you are signed in.",
-    "signed_up": "Your account is ready, and you are signed in.",
-    "password_changed": "Your new password is saved.",
     "signed_out": "You are signed out.",
-    "deleted": "Your account and saved games on this site were deleted, and you are signed out. Your sign-in (email "
-               "address and password) is kept by Supabase, the site’s sign-in service; ask the site’s owner to remove "
-               "it too.",
+    "deleted": "Your account and saved games on this site were deleted, and you are signed out. Your sign-in (your "
+               "Google identity and its email address) is kept by Supabase, the site’s sign-in service; ask the "
+               "site’s owner to remove it too.",
 }
 
 
@@ -214,6 +211,13 @@ def _security_headers(response: Response, *, hosted: bool, personal: bool) -> No
         response.headers.setdefault("Strict-Transport-Security", HSTS)
     if personal:
         response.headers["Cache-Control"] = "no-store"
+
+
+def _error_word(value: str | None) -> str:
+    """An error value from an address such as /auth/callback?error=access_denied: its first 64 characters, keeping
+    only ASCII letters, digits and underscores ("access_denied", "signup_disabled"), so a crafted address can neither
+    write anything else into the log nor match another value."""
+    return "".join(char for char in (value or "")[:64] if char.isascii() and (char.isalnum() or char == "_"))
 
 
 def _json_error(status: int, code: str, message: str) -> JSONResponse:
@@ -1294,7 +1298,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
 
     `twitch_client` makes the Twitch client for "Watch it live" (tests pass a fake). By default it is
     built from the IGDB credentials when they are set; the client and its token live in this process only.
-    `supabase` is the Supabase Auth client of the email accounts (tests pass one backed by an in-memory Supabase); by
+    `supabase` is the Supabase Auth client of the accounts (tests pass one backed by an in-memory Supabase); by
     default it is built from GAME_LIBRARIAN_SUPABASE_URL and GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY when both are set,
     and without them the site has no accounts.
 
@@ -1313,7 +1317,8 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     access_cookie = accounts.cookie_name(accounts.ACCESS_COOKIE, secure_cookies)
     refresh_cookie = accounts.cookie_name(accounts.REFRESH_COOKIE, secure_cookies)
     csrf_cookie = accounts.cookie_name(accounts.CSRF_COOKIE, secure_cookies)
-    attempts = accounts.AttemptLimiter()
+    oauth_cookie = accounts.cookie_name(accounts.OAUTH_COOKIE, secure_cookies)
+    google_attempts = accounts.AttemptLimiter(*accounts.GOOGLE_SIGN_INS)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -1331,9 +1336,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         tenths=dashboard.format_tenths,
     )
     templates.env.globals["app_version"] = __version__  # cache-busts the stylesheet and script after an upgrade
-    templates.env.globals.update(wishlist_limit=accounts.WISHLIST_LIMIT,
-                                 min_password_length=accounts.MIN_PASSWORD_LENGTH,
-                                 sign_in_unavailable=accounts.UNAVAILABLE)
+    templates.env.globals.update(wishlist_limit=accounts.WISHLIST_LIMIT, sign_in_unavailable=accounts.UNAVAILABLE)
 
     def open_db():
         """A connection to the catalog for one page request (a pooled one for PostgreSQL)."""
@@ -1677,11 +1680,13 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         """The wishlist: app.js fills it from the browser, or from /api/wishlist for a signed-in visitor."""
         return templates.TemplateResponse(request, "wishlist.html", {"active": "wishlist"})
 
-    # ------------------------------------------------------------------ email accounts (accounts.py, supabase_auth.py)
+    # ------------------------------------------------------------------ accounts (accounts.py, supabase_auth.py)
     #
-    # Every form below posts to this server, which alone talks to Supabase. Each page carries this browser's form token
-    # (account_response); each post is checked for it (read_account_form), counted per visitor (attempts), and answered
-    # with words of this site, never Supabase's. A route that signs someone in or out writes the cookies itself.
+    # One way in: Continue with Google, through Supabase Auth, which only this server talks to (OAuth with PKCE; the
+    # first Google sign-in creates the account). Each page carries this browser's form token (account_response) for
+    # the sign-out form, which is checked for it (read_account_form). Google sign-ins are counted per visitor
+    # (google_attempts), and every answer uses words of this site, never Supabase's. A route that signs someone in or
+    # out writes the cookies itself.
 
     def account_response(request: Request, template: str, context: dict, status_code: int = 200):
         """An account page with this browser's form token in its forms (a new token, and its cookie, if it has none)."""
@@ -1737,8 +1742,9 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             refused("checking a new session", exc)
             return None
         if user is None:
-            LOG.error("Supabase Auth: a new session's access token could not be verified with the project's published "
-                      "signing keys; the project must sign with an asymmetric key (ES256 or RS256; DEPLOYMENT.md).")
+            LOG.error("Supabase Auth: a new session's access token failed this site's check: the project must sign "
+                      "with an asymmetric key (ES256 or RS256; DEPLOYMENT.md), and the person needs a verified email "
+                      "address.")
             return None
         response = RedirectResponse(target, status_code=303)
         write_session(request, response, session)
@@ -1746,24 +1752,42 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
 
     def refused(action: str, exc: supabase_auth.AuthError) -> tuple[int, str]:
         """The status and sentence for a refused Supabase request, logging what the site's owner must know about
-        (Supabase not answering, email not set up) by its error code only, never with an email address."""
-        if exc.service_problem or exc.code in ("email_address_not_authorized", "signup_disabled",
-                                               "email_provider_disabled"):
+        (Supabase not answering, or answering strangely) by its error code only, never with an email address."""
+        if exc.service_problem:
             LOG.warning("Supabase Auth: %s failed with %s (HTTP %s).", action, exc.code, exc.status)
         return accounts.auth_problem(exc)
 
-    def typed_email(form: dict[str, str]) -> str:
-        """The address as typed, to fill the form in again after a problem (shortened; the page escapes it)."""
-        return (form.get("email") or "").strip()[:accounts.MAX_EMAIL_LENGTH]
+    def return_path(value: str | None) -> str:
+        """Where a sign-in goes back to: a path on this site, the wishlist by default."""
+        return accounts.safe_return_path(value or "/wishlist")
 
-    @app.get("/account", response_class=HTMLResponse)
-    def account_page(request: Request):
-        """Sign in; or, signed in, the account: its wishlist's size, a new password, sign out, and deleting its data.
-        ?next= is where signing in goes back to (a path on this site; the wishlist by default) and ?notice= picks one
-        of ACCOUNT_NOTICES."""
-        if auth is None:
-            return no_accounts(request)
+    def google_offer() -> str:
+        """How the sign-in pages show Continue with Google: "on" when the Supabase project offers Google; "off" when
+        its Google provider is off, and "unavailable" when Supabase has not said: both a disabled button with the
+        reason, because Google is the only way in. It may ask Supabase (auth.google_enabled, cached), so async routes
+        run it in a worker thread."""
+        enabled = auth.google_enabled()
+        return "unavailable" if enabled is None else ("on" if enabled else "off")
+
+    def start_page(request: Request, page: str, status_code: int = 200, **context):
+        """The sign-in page ("sign_in", /account) or the create-account page ("sign_up"): Continue with Google. Both
+        lead to the same sign-in; only the words differ."""
+        return account_response(request, "sign_in.html", {"page": page, "google": google_offer(), **context},
+                                status_code)
+
+    def callback_url(request: Request) -> str:
+        """This site's /auth/callback as the browser reaches it: the address the browser asked for (its Host), with
+        https on the hosted site, whose ingress ends TLS before the request arrives here. Supabase sends the browser
+        there only if it matches the project's Site URL or one of its Redirect URLs (DEPLOYMENT.md)."""
+        base = request.base_url
+        return f"{'https' if settings.hosted else base.scheme}://{base.netloc}/auth/callback"
+
+    def account_home(request: Request, status_code: int = 200, **context):
+        """/account: signed out, the sign-in page; signed in, the account (its wishlist's size, sign out, and deleting
+        its data). Blocking (the database, and perhaps Supabase's settings), so async routes run it in a thread."""
         state: accounts.AccountState = request.state.account
+        if state.identity is None:
+            return start_page(request, "sign_in", status_code, **context)
         count = None
         if state.signed_in:
             conn = open_db()
@@ -1772,197 +1796,100 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
                 count = len(store.wishlist_items(conn, row["id"])) if row else 0
             finally:
                 conn.close()
-        context = {"count": count, "notice": ACCOUNT_NOTICES.get(request.query_params.get("notice") or ""),
-                   "return_to": accounts.safe_return_path(request.query_params.get("next") or "/wishlist")}
-        return account_response(request, "account.html", context)
+        return account_response(request, "account.html", {"count": count, **context}, status_code)
 
-    @app.post("/account/sign-in", response_class=HTMLResponse)
-    async def account_sign_in(request: Request):
-        """Sign in with an email address and a password, then go to the form's `next` (a path on this site)."""
+    @app.get("/account", response_class=HTMLResponse)
+    def account_page(request: Request):
+        """The sign-in page, or the signed-in person's account. ?next= is where signing in goes back to (a path on this
+        site; the wishlist by default) and ?notice= picks one of ACCOUNT_NOTICES."""
         if auth is None:
             return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        email, password = accounts.clean_email(form.get("email")), form.get("password", "")
-        context = {"email": typed_email(form), "return_to": accounts.safe_return_path(form.get("next") or "/wishlist")}
-        if not problem and (email is None or not password):
-            status, problem = 400, "Enter your email address and your password."
-        if not problem and not attempts.allow("sign_in", visitor(request), email):
-            status, problem = 429, accounts.TOO_MANY
-        if problem:
-            return account_response(request, "account.html", {**context, "error": problem}, status)
-        try:
-            session = await run_in_threadpool(auth.sign_in, email, password)
-        except supabase_auth.AuthError as exc:
-            status, message = refused("sign-in", exc)
-            return account_response(request, "account.html", {
-                **context, "error": message, "unconfirmed": exc.code == "email_not_confirmed"}, status)
-        return (await signed_in(request, session, context["return_to"])
-                or account_response(request, "account.html", {**context, "error": accounts.UNAVAILABLE}, 503))
+        return account_home(request, notice=ACCOUNT_NOTICES.get(request.query_params.get("notice") or ""),
+                            return_to=return_path(request.query_params.get("next")))
 
     @app.get("/account/sign-up", response_class=HTMLResponse)
     def account_sign_up_page(request: Request):
-        """The form that creates an account: an email address and a password, typed twice."""
+        """Create an account: Continue with Google, whose first sign-in creates it (the same sign-in as /account)."""
         if auth is None:
             return no_accounts(request)
-        return account_response(request, "account_flow.html", {"page": "sign_up"})
+        if request.state.account.identity is not None:
+            return RedirectResponse("/account", status_code=303)
+        return start_page(request, "sign_up", return_to=return_path(request.query_params.get("next")))
 
-    @app.post("/account/sign-up", response_class=HTMLResponse)
-    async def account_sign_up(request: Request):
-        """Create an account; Supabase emails the link that confirms the address. The answer is the same whether or not
-        the address already has an account, so this page never tells anyone who has one."""
+    @app.get("/auth/google")
+    def auth_google(request: Request):
+        """Continue with Google: keep a new PKCE code verifier in an HttpOnly cookie and send the browser to Supabase,
+        which sends it on to Google and then back to /auth/callback.
+
+        A link, not a form: starting changes nothing on this site, and only the browser holding the verifier can finish
+        (auth_callback), so a page elsewhere that sends someone here cannot sign them in to another account. (A form
+        would also need Supabase's and Google's addresses in the pages' form-action policy, which covers redirects.)"""
         if auth is None:
             return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        email, password = accounts.clean_email(form.get("email")), form.get("password", "")
-        context = {"page": "sign_up", "email": typed_email(form)}
-        if not problem and email is None:
-            status, problem = 400, "Enter a valid email address."
-        if not problem:
-            weak = accounts.password_problem(password, form.get("password_confirm", ""))
-            status, problem = (400, weak) if weak else (status, None)
-        if not problem and not attempts.allow("sign_up", visitor(request), email):
-            status, problem = 429, accounts.TOO_MANY
-        if problem:
-            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
-        session = None
-        try:
-            session = await run_in_threadpool(auth.sign_up, email, password)
-        except supabase_auth.AuthError as exc:
-            if exc.code not in ("user_already_exists", "email_exists"):  # an existing account: the same answer
-                status, message = refused("sign-up", exc)
-                return account_response(request, "account_flow.html", {**context, "error": message}, status)
-        if session is not None:  # the Supabase project does not ask for confirmation: signed in at once
-            return (await signed_in(request, session, "/account?notice=signed_up")
-                    or account_response(request, "account_flow.html", {**context, "error": accounts.UNAVAILABLE}, 503))
-        return account_response(request, "account_flow.html", {"page": "sent", "sent": "confirmation", "email": email})
+        return_to = return_path(request.query_params.get("next"))
+        offer = google_offer()
+        if offer != "on":
+            problem = ("Google sign-in cannot be reached right now. Try again in a minute."
+                       if offer == "unavailable" else "Signing in is turned off on this site for now.")
+            return start_page(request, "sign_in", 503 if offer == "unavailable" else 404, error=problem,
+                              return_to=return_to)
+        verifier = supabase_auth.new_code_verifier()
+        response = RedirectResponse(auth.google_authorize_url(callback_url(request),
+                                                              supabase_auth.code_challenge(verifier)), status_code=303)
+        accounts.set_oauth_cookie(response, verifier, return_to, secure=secure_cookies)
+        return response
 
-    @app.post("/account/resend", response_class=HTMLResponse)
-    async def account_resend(request: Request):
-        """Send a new confirmation link to an account that waits for its address to be confirmed (the same answer
-        whether or not one does)."""
-        if auth is None:
-            return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        email = accounts.clean_email(form.get("email"))
-        context = {"email": typed_email(form), "unconfirmed": True, "return_to": "/wishlist"}
-        if not problem and email is None:
-            status, problem = 400, "Enter the email address of your account."
-        if not problem and not attempts.allow("email_link", visitor(request), email):
-            status, problem = 429, accounts.TOO_MANY
-        if not problem:
-            try:
-                await run_in_threadpool(auth.resend_confirmation, email)
-            except supabase_auth.AuthError as exc:
-                status, problem = refused("resend", exc)
-        if problem:
-            return account_response(request, "account.html", {**context, "error": problem}, status)
-        return account_response(request, "account_flow.html", {"page": "sent", "sent": "resend", "email": email})
+    @app.get("/auth/callback")
+    async def auth_callback(request: Request):
+        """Where Supabase sends the browser back after Google: ?code=<one-time code>, or ?error=... when Google or
+        Supabase refused. The code is exchanged, with this browser's verifier, for a session; then the browser goes
+        to the page the sign-in started from.
 
-    @app.get("/account/forgot-password", response_class=HTMLResponse)
-    def account_forgot_page(request: Request):
-        """The form that asks for a password-reset link."""
-        if auth is None:
-            return no_accounts(request)
-        return account_response(request, "account_flow.html", {"page": "forgot"})
+        Without the verifier cookie (another browser, a link from elsewhere, or more than OAUTH_MAX_AGE later) the code
+        cannot be used, which is what stops another person's code from signing someone in. The cookie is deleted in
+        every case, and nothing from the address (such as Supabase's error_description) is shown.
 
-    @app.post("/account/forgot-password", response_class=HTMLResponse)
-    async def account_forgot(request: Request):
-        """Email a link to choose a new password (the same answer whether or not the address has an account)."""
-        if auth is None:
-            return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        email = accounts.clean_email(form.get("email"))
-        context = {"page": "forgot", "email": typed_email(form)}
-        if not problem and email is None:
-            status, problem = 400, "Enter the email address of your account."
-        if not problem and not attempts.allow("email_link", visitor(request), email):
-            status, problem = 429, accounts.TOO_MANY
-        if not problem:
-            try:
-                await run_in_threadpool(auth.send_password_reset, email)
-            except supabase_auth.AuthError as exc:
-                status, problem = refused("password reset", exc)
-        if problem:
-            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
-        return account_response(request, "account_flow.html", {"page": "sent", "sent": "reset", "email": email})
-
-    @app.get("/auth/confirm", response_class=HTMLResponse)
-    def auth_confirm_page(request: Request):
-        """Where the emails' links lead (?token_hash=...&type=email or recovery; DEPLOYMENT.md, "Email templates").
-
-        The page only shows a button: the link is used when its owner presses it (a POST), because some email
-        services open every link of a message in advance, and that would use up a one-time link before its owner
-        sees it (Supabase's guide, "Email prefetching"). A link that Supabase sends back with an error says so."""
+        An error from Google itself (the person chose Cancel) has no error_code. Supabase adds its error_code to its
+        own refusals, even those it reports as access_denied (sign-ups turned off, a banned user, an address Google
+        has not verified), so only an access_denied without one is a cancellation."""
         if auth is None:
             return no_accounts(request)
         params = request.query_params
-        token_hash, link_type = params.get("token_hash") or "", params.get("type") or ""
-        if (params.get("error") or params.get("error_code") or not accounts.TOKEN_HASH.fullmatch(token_hash)
-                or link_type not in supabase_auth.EMAIL_LINK_TYPES):
-            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
-        return account_response(request, "account_flow.html",
-                                {"page": "confirm", "token_hash": token_hash, "link_type": link_type})
-
-    @app.post("/auth/confirm", response_class=HTMLResponse)
-    async def auth_confirm(request: Request):
-        """Use an email link (Supabase checks its token_hash) and sign its owner in: a confirmed address goes to the
-        account page, a password reset to the form that sets the new password."""
-        if auth is None:
-            return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        token_hash, link_type = form.get("token_hash") or "", form.get("type") or ""
-        context = {"page": "confirm", "token_hash": token_hash, "link_type": link_type}
-        if not problem and (not accounts.TOKEN_HASH.fullmatch(token_hash)
-                            or link_type not in supabase_auth.EMAIL_LINK_TYPES):
-            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
-        if not problem and not attempts.allow("confirm", visitor(request)):
+        pending = accounts.read_oauth_cookie(request.cookies.get(oauth_cookie))
+        return_to = pending[1] if pending else "/wishlist"
+        status, problem, response = 400, None, None
+        error, error_code = _error_word(params.get("error")), _error_word(params.get("error_code"))
+        if error or error_code:
+            LOG.warning("Supabase Auth: Google sign-in came back with %s.", error_code or error)
+            if error == "access_denied" and not error_code:
+                problem = accounts.GOOGLE_CANCELLED
+            else:
+                if error == "server_error":  # Supabase could not finish with Google, such as a wrong client secret
+                    LOG.error("Supabase Auth could not finish a Google sign-in (%s). Check the Client ID and Client "
+                              "Secret of its Google provider, and its Auth logs (DEPLOYMENT.md, section 7).",
+                              error_code or error)
+                # Supabase's refusal, by its error code (the address carries no HTTP status: 400 stands for "refused")
+                status, problem = accounts.auth_problem(supabase_auth.AuthError(error_code or error, 400))
+        elif pending is None:
+            problem = accounts.GOOGLE_EXPIRED
+        elif not accounts.AUTH_CODE.fullmatch(params.get("code") or ""):
+            problem = accounts.GOOGLE_UNFINISHED
+        elif not google_attempts.allow(visitor(request)):
             status, problem = 429, accounts.TOO_MANY
-        if problem:
-            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
-        try:
-            session = await run_in_threadpool(auth.verify_email_link, token_hash, link_type)
-        except supabase_auth.AuthError as exc:
-            status, message = refused("email link", exc)
-            if exc.service_problem or status == 429:  # Supabase did not decide: the link may still work, so it stays
-                return account_response(request, "account_flow.html", {**context, "error": message}, status)
-            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
-        target = "/account/password?notice=recovery" if link_type == "recovery" else "/account?notice=confirmed"
-        return (await signed_in(request, session, target)
-                or account_response(request, "account_flow.html", {"page": "link_used", "link_type": link_type}, 503))
-
-    @app.get("/account/password", response_class=HTMLResponse)
-    def account_password_page(request: Request):
-        """The form that sets a new password, for a signed-in person (after a password-reset link, or by choice)."""
-        if auth is None:
-            return no_accounts(request)
-        if request.state.account.identity is None:
-            return RedirectResponse("/account?next=/account/password", status_code=303)
-        return account_response(request, "account_flow.html",
-                                {"page": "password", "recovery": request.query_params.get("notice") == "recovery"})
-
-    @app.post("/account/password", response_class=HTMLResponse)
-    async def account_password(request: Request):
-        """Save the signed-in person's new password at Supabase."""
-        if auth is None:
-            return no_accounts(request)
-        form, status, problem = await read_account_form(request)
-        token = current_access_token(request)
-        if not problem and token is None:
-            return RedirectResponse("/account?next=/account/password", status_code=303)
-        password = form.get("password", "")
-        if not problem:
-            weak = accounts.password_problem(password, form.get("password_confirm", ""))
-            status, problem = (400, weak) if weak else (status, None)
-        if not problem and not attempts.allow("password", visitor(request)):
-            status, problem = 429, accounts.TOO_MANY
-        if not problem:
+        else:
             try:
-                await run_in_threadpool(auth.set_password, token, password)
+                session = await run_in_threadpool(auth.exchange_code, params["code"], pending[0])
             except supabase_auth.AuthError as exc:
-                status, problem = refused("new password", exc)
-        if problem:
-            return account_response(request, "account_flow.html", {"page": "password", "error": problem}, status)
-        return RedirectResponse("/account?notice=password_changed", status_code=303)
+                status, problem = refused("Google sign-in", exc)
+            else:
+                response = await signed_in(request, session, return_to)
+                if response is None:
+                    status, problem = 503, "Google sign-in did not finish on this site. Try again later."
+        if response is None:
+            response = await run_in_threadpool(start_page, request, "sign_in", status, error=problem,
+                                               return_to=return_to)
+        accounts.clear_oauth_cookie(response, secure=secure_cookies)
+        return response
 
     @app.post("/account/sign-out")
     async def account_sign_out(request: Request):
@@ -1971,7 +1898,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             return no_accounts(request)
         form, status, problem = await read_account_form(request)
         if problem:
-            return account_response(request, "account.html", {"error": problem, "return_to": "/wishlist"}, status)
+            return await run_in_threadpool(account_home, request, status, error=problem, return_to="/wishlist")
         token = current_access_token(request)
         if token:
             try:

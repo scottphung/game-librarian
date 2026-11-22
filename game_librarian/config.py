@@ -38,8 +38,8 @@ TRAILER_BASE_URL = "https://video.akamai.steamstatic.com/store_trailers/"
 
 USER_AGENT = "GameLibrarian/0.1 (personal game discovery app)"
 
-# An email address as accounts and the allow list take it: one @, no spaces, and a dot in the domain, such as
-# "ada@example.com". Supabase checks the address itself; this only turns away what cannot be one.
+# An email address as the allow list takes it: one @, no spaces, and a dot in the domain, such as "ada@example.com".
+# Google verifies a person's address; this only turns away an entry that cannot be one.
 EMAIL_ADDRESS = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 TRUE_WORDS = {"1", "true", "yes", "on"}
 # The setting of Container Apps' built-in authentication (GitHub sign-in) before 0.21; it is no longer read.
@@ -74,12 +74,12 @@ class Settings:
     # no credentials, instead of skipping it quietly.
     hosted: bool = False
     # GAME_LIBRARIAN_SUPABASE_URL and GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY: the Supabase project whose Auth keeps
-    # the email-and-password accounts (supabase_auth.py). Both set: accounts are offered; neither: the wishlist stays
-    # in the browser. The publishable key is meant to be public, but it is only ever used by the server.
+    # the accounts (supabase_auth.py: Continue with Google). Both set: accounts are offered; neither: the wishlist
+    # stays in the browser. The publishable key is meant to be public, but only the server uses it.
     supabase_url: str | None = None
     supabase_publishable_key: str | None = field(default=None, repr=False)
     # GAME_LIBRARIAN_ALLOWED_USERS: the email addresses that may keep an account (compared without case); empty:
-    # everyone who confirms an address.
+    # everyone who signs in.
     allowed_users: frozenset[str] = frozenset()
 
     @property
@@ -94,7 +94,7 @@ class Settings:
 
     @property
     def accounts_enabled(self) -> bool:
-        """Email-and-password accounts are offered: the Supabase project is configured."""
+        """Accounts are offered (Continue with Google through Supabase Auth): the project is configured."""
         return bool(self.supabase_url and self.supabase_publishable_key)
 
 
@@ -136,14 +136,14 @@ def supabase_project_url(value: str | None) -> str | None:
 
 def allowed_emails(value: str | None) -> frozenset[str]:
     """The allow list's email addresses, compared without case. SettingsError for an entry that is not an email
-    address, such as a GitHub user name from before 0.21: accounts are now found by their confirmed address, so such an
-    entry would let nobody in, silently."""
+    address, such as a GitHub user name from before 0.21: the list is matched against a signed-in person's verified
+    address, so such an entry would let nobody in, silently."""
     emails = set()
     for item in _words(value):
         if not EMAIL_ADDRESS.fullmatch(item):
             raise SettingsError(f"GAME_LIBRARIAN_ALLOWED_USERS: {item!r} is not an email address. Since version "
                                 "0.21 the allow list holds the email addresses of the accounts that may keep a "
-                                "wishlist (sign-in is by email and password); remove other entries.")
+                                "wishlist (the verified address of their Google sign-in); remove other entries.")
         emails.add(item.casefold())
     return frozenset(emails)
 
@@ -175,11 +175,11 @@ def load_settings() -> Settings:
                             "GAME_LIBRARIAN_DATABASE_URL (and PGPASSWORD). A SQLite file inside a container is lost "
                             "when the container restarts.")
     if bool(settings.supabase_url) != bool(settings.supabase_publishable_key):
-        raise SettingsError("Email accounts need both GAME_LIBRARIAN_SUPABASE_URL and "
+        raise SettingsError("Accounts need both GAME_LIBRARIAN_SUPABASE_URL and "
                             "GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY (or neither, for no accounts).")
     if settings.database_url:
         settings.database.parameters()  # a malformed URL or a weak sslmode stops here, with a DatabaseConfigError
     if (values.get(RETIRED_SIGN_IN_SETTING) or "").strip():
-        LOG.warning("%s is set but no longer used: sign-in is by email and password through Supabase since 0.21 "
+        LOG.warning("%s is set but no longer used: sign-in goes through Supabase Auth since 0.21 "
                     "(GAME_LIBRARIAN_SUPABASE_URL). Remove it.", RETIRED_SIGN_IN_SETTING)
     return settings

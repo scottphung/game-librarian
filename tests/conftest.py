@@ -6,7 +6,9 @@ All names, texts, addresses, passwords and numbers here are made up for tests. T
 
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
 import json
 import os
 import secrets
@@ -14,6 +16,7 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import jwt
@@ -357,40 +360,52 @@ def public_jwk(private_key, algorithm: str, key_id: str) -> dict:
 
 
 class FakeSupabase:
-    """Supabase Auth's REST API in memory, for the email accounts (supabase_auth.py, accounts.py).
+    """Supabase Auth's REST API in memory, for the accounts (supabase_auth.py, accounts.py).
 
-    It answers like Supabase's openapi.yaml and error codes (read 2026-11-22): sign-up with email confirmation (an
-    address that already has a confirmed account gets the same answer as a new one, and no email), password sign-in
-    (refused until the address is confirmed), refresh tokens that work once, email links by token_hash that work once,
-    password resets, new passwords, sign-out and the published keys. Its access tokens are real JWTs signed with a key
-    made for the test run (RS256 unless `algorithm` says ES256), so the site checks them as it checks Supabase's.
+    It answers like Supabase Auth's source and guides (github.com/supabase/auth, read 2026-11-22):
+    * Google: google_sign_in plays the browser's part between /auth/google and /auth/callback (Supabase's /authorize,
+      Google's consent, Supabase's callback). The first sign-in of an address creates its user. Like Supabase's
+      automatic linking, a Google account whose verified address already has a user (such as one made with a password
+      in 0.21) gets that user, unless `link_identities` is False; for a user that never confirmed its address,
+      Supabase drops the unconfirmed email identity and its password. POST /token with grant_type=pkce exchanges the
+      one-time code once, within 5 minutes, given the verifier whose S256 challenge started it.
+    * Refusals come back to the site's callback as Supabase sends them: Google's Cancel as error=access_denied alone;
+      Supabase's own with its error_code, also under access_denied for sign-ups turned off (`signups_closed`, for a new
+      person only) and for an address Google has not verified (`verified=False`); a failure at Supabase's end, such as
+      a wrong Google client secret, as error=server_error (`supabase_error`). A Google account without an address
+      signs in only while "Allow users without an email" is on (`allow_no_email`).
+    * GET /settings says whether the Google provider is on (`google`); refresh tokens work once; /logout ends a session;
+      the published keys (JWKS). Nothing else is answered: the site never calls Supabase's email endpoints.
+    Its access tokens are real JWTs signed with a key made for the test run (RS256 unless `algorithm` says ES256), so
+    the site checks them as it checks Supabase's.
 
-    `sent` lists the emails it would send ({"type": "email" or "recovery", "email", "token_hash"}). `down` makes every
-    request fail to connect; `responses` are consumed one per request before normal answers (an HTTP status, or
-    "timeout"); `publish_keys` False publishes no key, like a project still on a shared HS256 secret; `team_only`
-    refuses to email, like Supabase's built-in email service for an address outside the project's team. `clock` is the
-    site's clock for its cache of the keys. Every request is kept in `requests`.
+    `down` makes every request fail to connect; `responses` are consumed one per request before normal answers (an
+    HTTP status, a (status, error code) pair, or "timeout"); `publish_keys` False publishes no key, like a project
+    still on a shared HS256 secret. `clock` is the site's clock for its caches and this fake's for Google sign-ins.
+    Every request is kept in `requests`.
     """
 
     URL = "https://test-project.supabase.co"
     KEY = "sb_publishable_made-up-for-tests"
-    MIN_PASSWORD = 6  # Supabase's default minimum length
+    FLOW_LIFETIME = 300  # seconds Supabase keeps a Google sign-in's one-time code
 
     def __init__(self, algorithm: str = "RS256") -> None:
         self.algorithm = algorithm
         self.key_id = f"test-key-{algorithm.lower()}"
         self.private_key = signing_key(algorithm)
-        self.users: dict[str, dict] = {}  # by email address, compared without case
+        self.users: list[dict] = []  # {"id", "email", "confirmed", "password", "providers"}
         self.sessions: dict[str, str] = {}  # session id -> user id, while signed in
         self.refresh_tokens: dict[str, str] = {}  # refresh token -> session id; each works once
-        self.sent: list[dict] = []
-        self.used_links: set[str] = set()
+        self.flows: dict[str, dict] = {}  # Google sign-ins waiting for their exchange, by one-time code
         self.signed_out: list[str] = []  # the session ids ended by /logout
         self.requests: list[httpx.Request] = []
-        self.responses: list[int | str] = []
+        self.responses: list = []
         self.down = False
         self.publish_keys = True
-        self.team_only = False
+        self.google = True
+        self.link_identities = True
+        self.signups_closed = False  # "Allow new users to sign up" off
+        self.allow_no_email = False  # the Google provider's "Allow users without an email" on
         self.token_lifetime = 3600
         self.clock = 0.0
 
@@ -413,15 +428,59 @@ class FakeSupabase:
         return jwt.encode(payload, private_key or self.private_key, algorithm=algorithm or self.algorithm,
                           headers={"kid": key_id or self.key_id})
 
-    def link(self, email: str, kind: str = "email") -> str:
-        """The token_hash of the newest email of `kind` sent to `email`."""
-        return [mail for mail in self.sent if mail["email"] == email and mail["type"] == kind][-1]["token_hash"]
+    def add_user(self, email: str, *, confirmed: bool = True, password: str | None = None,
+                 providers: tuple[str, ...] = ("email",)) -> dict:
+        """A user in the project, such as one that version 0.21 made with a password (confirmed or not)."""
+        user = {"id": str(uuid.uuid4()), "email": email.casefold(), "confirmed": confirmed, "password": password,
+                "providers": list(providers)}
+        self.users.append(user)
+        return user
 
     def user(self, email: str) -> dict:
-        return self.users[email.casefold()]
+        """The first user with this address."""
+        return next(user for user in self.users if user["email"] == email.casefold())
 
     def count(self, method: str, path: str) -> int:
         return sum(1 for request in self.requests if request.method == method and request.url.path == path)
+
+    def google_sign_in(self, authorize_url: str, email: str, *, verified: bool = True, cancel: bool = False,
+                       supabase_error: tuple[str, str] | None = None) -> str:
+        """What happens in the browser between /auth/google and /auth/callback, for the Google account `email`:
+        Supabase's /authorize (provider, PKCE challenge, redirect_to), Google's consent and Supabase's callback.
+        Returns the address Supabase sends the browser back to: redirect_to with ?code=, or with ?error= for a
+        refusal (the class docstring lists them)."""
+        parts = urlsplit(authorize_url)
+        assert f"{parts.scheme}://{parts.netloc}{parts.path}" == f"{self.URL}/auth/v1/authorize", authorize_url
+        query = {name: values[0] for name, values in parse_qs(parts.query).items()}
+        assert query["provider"] == "google" and query["code_challenge_method"] == "s256" and self.google
+        back = f"{query['redirect_to']}{'&' if '?' in query['redirect_to'] else '?'}"
+        if cancel:  # Google's own refusal: an OAuth error, which Supabase passes on without an error_code
+            return back + urlencode({"error": "access_denied", "error_description": "The user denied access"})
+        if supabase_error is not None:
+            error, code = supabase_error
+            return back + urlencode({"error": error, "error_code": code, "error_description": f"{code} (test)"})
+        if not verified:
+            return back + self._refusal("provider_email_needs_verification")
+        if not email and not self.allow_no_email:  # Supabase: "Error getting user email from external provider"
+            return back + urlencode({"error": "server_error", "error_code": "unexpected_failure"})
+        user = next((user for user in self.users if email and user["email"] == email.casefold()), None)
+        if user is None or not self.link_identities:
+            if self.signups_closed:
+                return back + self._refusal("signup_disabled")
+            user = self.add_user(email, providers=("google",))
+        elif "google" not in user["providers"]:  # automatic linking to the user with the same verified address
+            if user["confirmed"]:
+                user["providers"].append("google")
+            else:  # Supabase removes the unconfirmed identity, and with it the password, then confirms the address
+                user["confirmed"], user["password"], user["providers"] = True, None, ["google"]
+        auth_code = str(uuid.uuid4())
+        self.flows[auth_code] = {"challenge": query["code_challenge"], "user_id": user["id"], "at": self.clock}
+        return back + urlencode({"code": auth_code})
+
+    @staticmethod
+    def _refusal(code: str) -> str:
+        """The query of one of Supabase's own refusals at its callback, which it reports as access_denied."""
+        return urlencode({"error": "access_denied", "error_code": code, "error_description": f"{code} (test)"})
 
     # ------------------------------------------------------------------ the API
 
@@ -431,22 +490,19 @@ class FakeSupabase:
 
     def _user_json(self, user: dict) -> dict:
         return {"id": user["id"], "aud": "authenticated", "role": "authenticated", "email": user["email"],
-                "email_confirmed_at": "2026-11-22T10:00:00Z" if user["confirmed"] else None}
+                "email_confirmed_at": "2026-11-22T10:00:00Z" if user["confirmed"] else None,
+                "app_metadata": {"provider": user["providers"][0], "providers": user["providers"]}}
 
     def _session(self, user: dict, session_id: str | None = None) -> dict:
         session_id = session_id or str(uuid.uuid4())
         self.sessions[session_id] = user["id"]
         refresh = secrets.token_urlsafe(16)
         self.refresh_tokens[refresh] = session_id
-        return {"access_token": self.access_token(user["id"], user["email"], session_id), "token_type": "bearer",
-                "expires_in": self.token_lifetime, "expires_at": int(time.time()) + self.token_lifetime,
-                "refresh_token": refresh, "user": self._user_json(user)}
-
-    def _send(self, kind: str, email: str) -> httpx.Response | None:
-        if self.team_only:
-            return self._error(400, "email_address_not_authorized")
-        self.sent.append({"type": kind, "email": email, "token_hash": secrets.token_hex(28)})
-        return None
+        token = self.access_token(user["id"], user["email"], session_id,
+                                  app_metadata={"provider": user["providers"][0], "providers": user["providers"]})
+        return {"access_token": token, "token_type": "bearer", "expires_in": self.token_lifetime,
+                "expires_at": int(time.time()) + self.token_lifetime, "refresh_token": refresh,
+                "user": self._user_json(user)}
 
     def _bearer(self, request: httpx.Request) -> tuple[dict, str] | None:
         """The user and session of the request's access token, when it is valid and its session still exists."""
@@ -456,7 +512,7 @@ class FakeSupabase:
                                 audience="authenticated")
         except jwt.InvalidTokenError:
             return None
-        user = next((user for user in self.users.values() if user["id"] == claims["sub"]), None)
+        user = next((user for user in self.users if user["id"] == claims["sub"]), None)
         if user is None or claims.get("session_id") not in self.sessions:
             return None
         return user, claims["session_id"]
@@ -469,6 +525,8 @@ class FakeSupabase:
             planned = self.responses.pop(0)
             if planned == "timeout":
                 raise httpx.ReadTimeout("Supabase did not answer (test)", request=request)
+            if isinstance(planned, tuple):
+                return self._error(*planned)
             if planned != 200:
                 return httpx.Response(planned, json={"code": planned, "msg": f"planned answer {planned} (test)"})
         if request.headers.get("apikey") != self.KEY:
@@ -478,19 +536,12 @@ class FakeSupabase:
         if method == "GET" and path == "/.well-known/jwks.json":
             keys = [public_jwk(self.private_key, self.algorithm, self.key_id)] if self.publish_keys else []
             return httpx.Response(200, json={"keys": keys})
-        if method == "POST" and path == "/signup":
-            return self._signup(body)
+        if method == "GET" and path == "/settings":
+            return httpx.Response(200, json={"external": {"email": True, "google": self.google, "github": False,
+                                                          "phone": False}, "disable_signup": self.signups_closed,
+                                             "mailer_autoconfirm": False})
         if method == "POST" and path == "/token":
             return self._token(request.url.params.get("grant_type"), body)
-        if method == "POST" and path == "/verify":
-            return self._verify(body)
-        if method == "POST" and path in ("/recover", "/resend"):
-            user = self.users.get(str(body.get("email", "")).casefold())
-            wanted = user is not None and (path == "/recover" or not user["confirmed"])
-            refused = self._send("recovery" if path == "/recover" else "email", user["email"]) if wanted else None
-            return refused or httpx.Response(200, json={})
-        if method == "PUT" and path == "/user":
-            return self._update_user(request, body)
         if method == "POST" and path == "/logout":
             found = self._bearer(request)
             if found is None:
@@ -502,65 +553,27 @@ class FakeSupabase:
             return httpx.Response(204)
         return self._error(404, "not_found")
 
-    def _password_problem(self, password: str) -> httpx.Response | None:
-        if len(password) < self.MIN_PASSWORD:
-            return self._error(422, "weak_password", weak_password={"reasons": ["length"]})
-        if not any(character.isdigit() for character in password):  # this fake project asks for a digit
-            return self._error(422, "weak_password", weak_password={"reasons": ["characters"]})
-        return None
-
-    def _signup(self, body: dict) -> httpx.Response:
-        email, password = str(body.get("email", "")).strip(), str(body.get("password", ""))
-        problem = self._password_problem(password)
-        if problem:
-            return problem
-        user = self.users.get(email.casefold())
-        if user is not None and user["confirmed"]:  # the same answer as for a new address, and no email
-            return httpx.Response(200, json={"id": str(uuid.uuid4()), "email": email, "identities": []})
-        if user is None:
-            user = self.users[email.casefold()] = {"id": str(uuid.uuid4()), "email": email, "password": password,
-                                                   "confirmed": False}
-        return self._send("email", user["email"]) or httpx.Response(200, json=self._user_json(user))
-
     def _token(self, grant: str | None, body: dict) -> httpx.Response:
-        if grant == "password":
-            user = self.users.get(str(body.get("email", "")).casefold())
-            if user is None or user["password"] != body.get("password"):
-                return self._error(400, "invalid_credentials")
-            if not user["confirmed"]:
-                return self._error(400, "email_not_confirmed")
+        if grant == "pkce":
+            auth_code = str(body.get("auth_code", ""))
+            flow = self.flows.get(auth_code)
+            if flow is None:
+                return self._error(404, "flow_state_not_found")
+            if self.clock - flow["at"] > self.FLOW_LIFETIME:
+                return self._error(422, "flow_state_expired")
+            digest = hashlib.sha256(str(body.get("code_verifier", "")).encode()).digest()
+            if base64.urlsafe_b64encode(digest).rstrip(b"=").decode() != flow["challenge"]:
+                return self._error(400, "bad_code_verifier")  # Supabase keeps the code for its rightful owner
+            del self.flows[auth_code]
+            user = next(user for user in self.users if user["id"] == flow["user_id"])
             return httpx.Response(200, json=self._session(user))
         if grant == "refresh_token":
             session_id = self.refresh_tokens.pop(str(body.get("refresh_token")), None)
             if session_id is None or session_id not in self.sessions:
                 return self._error(400, "refresh_token_not_found", error="invalid_grant")
-            user = next(user for user in self.users.values() if user["id"] == self.sessions[session_id])
+            user = next(user for user in self.users if user["id"] == self.sessions[session_id])
             return httpx.Response(200, json=self._session(user, session_id))
         return self._error(400, "validation_failed")
-
-    def _verify(self, body: dict) -> httpx.Response:
-        kind = "recovery" if body.get("type") == "recovery" else "email"
-        mail = next((mail for mail in self.sent if mail["token_hash"] == body.get("token_hash")
-                     and mail["type"] == kind), None)
-        if mail is None or mail["token_hash"] in self.used_links:
-            return self._error(403, "otp_expired")
-        self.used_links.add(mail["token_hash"])
-        user = self.user(mail["email"])
-        user["confirmed"] = True  # a password-reset link proves the address too
-        return httpx.Response(200, json=self._session(user))
-
-    def _update_user(self, request: httpx.Request, body: dict) -> httpx.Response:
-        found = self._bearer(request)
-        if found is None:
-            return self._error(401, "bad_jwt")
-        user, password = found[0], str(body.get("password", ""))
-        problem = self._password_problem(password)
-        if problem:
-            return problem
-        if password == user["password"]:
-            return self._error(422, "same_password")
-        user["password"] = password
-        return httpx.Response(200, json=self._user_json(user))
 
 
 @pytest.fixture

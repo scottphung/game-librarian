@@ -1,3 +1,3 @@
 """Game Librarian: browse games with sourced context from Steam and curated awards."""
 
-__version__ = "0.21.0"
+__version__ = "0.22.0"

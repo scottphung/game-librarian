@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{# The sign-in pages (web.py): one compact card, styled like a game's save-file slot. `page` is "sign_in" (/account,
+   signed out) or "sign_up" (/account/sign-up). Both offer the one way in, Continue with Google, through Supabase Auth
+   on this site's server; the first Google sign-in creates the account, so only the words differ. `google` is "on"
+   (the link), "unavailable" (Supabase has not answered) or "off" (the project's Google provider is off): the last two
+   show a disabled button that says why. #}
+{# A path with ?next= when the sign-in should go back somewhere other than the wishlist. #}
+{% macro with_next(path) -%}
+{{ path }}{% if return_to and return_to != "/wishlist" %}?next={{ return_to|urlencode }}{% endif %}
+{%- endmacro %}
+{# Google's "G", unmodified, as its sign-in branding guidelines ask for the button. #}
+{% macro google_logo() -%}
+<svg class="google-logo" viewBox="0 0 48 48" width="18" height="18" aria-hidden="true" focusable="false"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></svg>
+{%- endmacro %}
+{% block title %}{% if page == "sign_up" %}Create your account{% else %}Sign in{% endif %} | Game Librarian{% endblock %}
+{% block body %}
+{% set state = request.state.account %}
+<main class="page save-page" id="main">
+  <section class="save-card" aria-labelledby="save-title">
+    <p class="save-eyebrow"><svg class="save-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M2.5 1.5h9l3 3v9a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1zM4.5 1.5v4h6v-4M4.5 14.5v-5h7v5"/></svg>{{ "New save file" if page == "sign_up" else "Save file" }}</p>
+    <h1 id="save-title" class="save-title">{{ "Create your account" if page == "sign_up" else "Welcome back" }}</h1>
+    <p class="save-sub">{{ "Save games you love and find your wishlist on any device." if page == "sign_up" else "Your wishlist is waiting." }}</p>
+    {% if notice %}<p class="account-message" role="status">{{ notice }}</p>{% endif %}
+    {% if error %}<p class="account-error" role="alert">{{ error }}</p>
+    {% elif state and state.unavailable %}<p class="account-error" role="alert">{{ sign_in_unavailable }}</p>{% endif %}
+    {% if google == "on" %}
+    <a class="button google-button" href="{{ with_next('/auth/google') }}">{{ google_logo() }}<span>Continue with Google</span></a>
+    {% else %}
+    <button class="button google-button" type="button" disabled aria-describedby="google-note">{{ google_logo() }}<span>Continue with Google</span></button>
+    <p class="hint" id="google-note">{% if google == "unavailable" %}Google sign-in cannot be reached right now. Try again in a minute.{% else %}Signing in is turned off on this site for now.{% endif %} Your wishlist still works in this browser.</p>
+    {% endif %}
+    {% if page == "sign_up" %}
+    <p class="save-switch">Already have an account? <a class="text-link" href="{{ with_next('/account') }}">Sign in</a></p>
+    {% else %}
+    <p class="save-switch">New to Game Librarian? <a class="text-link" href="{{ with_next('/account/sign-up') }}">Create an account</a></p>
+    {% endif %}
+  </section>
+  <details class="about-list account-about save-about">
+    <summary>How signing in works</summary>
+    <ul>
+      <li>You continue with your Google account, through Supabase, the site’s sign-in service. Your first sign-in creates your account; Game Librarian never asks for a password.</li>
+      <li>Made an account with your email address before? Continue with the Google account that uses that same address: it opens the same account, with its saved games.</li>
+      <li>Game Librarian keeps Supabase’s id for you, your email address and the games you save, and nothing else about you.</li>
+      <li>Signing in is optional: without it, the wishlist works in this browser only. A wishlist saved in this browser stays there, and you can add it to your account afterwards.</li>
+    </ul>
+  </details>
+</main>
+{% endblock %}

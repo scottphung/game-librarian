@@ -645,26 +645,28 @@ details.more > summary { color: var(--text); font-weight: 700; cursor: pointer; 
 .account-about ul { margin: 6px 0 0; padding-left: 20px; color: var(--text-2); }
 .account-delete { max-width: 95ch; margin: 22px 0 28px; }
 .account-delete p { margin: 6px 0; }
-/* The account forms (account.html, account_flow.html) and the sentence that follows a step or a problem. */
-.account-panel { max-width: 52ch; margin: 0 0 22px; }
-.account-panel > p { margin: 0 0 10px; }
-.account-form .field { margin: 0 0 14px; }
-.account-form input[type="email"], .account-form input[type="password"] {
-  display: block;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.95rem;
-}
-.account-form .hint { display: block; }
+/* The sign-out form (account.html) and the sentence that follows an action or a problem. */
 .inline-form { display: inline-flex; margin: 0; }
 .account-message, .account-error { max-width: 95ch; margin: 0 0 14px; padding: 8px 12px; font-size: 0.92rem; }
 .account-message { border-left: 3px solid var(--positive); background: var(--surface); }
 .account-error { border-left: 3px solid var(--focus); background: var(--warn-bg); color: var(--warn-text); }
+/* The sign-in pages (sign_in.html): one compact card, like a game's save-file slot, with the details under it. */
+.save-page { display: flex; flex-direction: column; align-items: center; padding-top: 40px; padding-bottom: 48px; }
+.save-card { width: 100%; max-width: 420px; padding: 24px 24px 22px; border: 1px solid var(--border-strong); border-top: 3px solid var(--gold); background: var(--surface); }
+.save-card .account-message, .save-card .account-error { margin: 0 0 16px; }
+.save-eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--gold); font-size: 0.7rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
+.save-icon { flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
+.save-title { margin: 0; font-size: 1.9rem; font-weight: 900; letter-spacing: -0.02em; line-height: 1.1; }
+.save-sub { margin: 6px 0 20px; color: var(--text-2); }
+/* Continue with Google, in the colours of Google's dark sign-in button. */
+.google-button { width: 100%; gap: 10px; padding: 10px 14px; border-color: #8e918f; background: #131314; color: #e3e3e3; font-size: 0.95rem; }
+.google-button:hover { border-color: #e3e3e3; }
+.google-button[disabled] { opacity: 0.55; cursor: not-allowed; }
+.google-button[disabled]:hover { border-color: #8e918f; }
+.google-logo { flex: none; }
+.save-card .hint { display: block; }
+.save-switch { margin: 18px 0 0; color: var(--text-2); font-size: 0.9rem; }
+.save-about { width: 100%; max-width: 420px; margin-top: 18px; font-size: 0.9rem; }
 .wishlist-list { display: flex; flex-direction: column; gap: 6px; max-width: 95ch; margin: 0 0 20px; padding: 0; list-style: none; }
 .wishlist-item {
   display: flex;

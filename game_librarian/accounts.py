@@ -1,20 +1,24 @@
 """Accounts on the hosted site: who is signed in, who may keep an account, and what keeps the sign-in safe.
 
-Sign-in is by email address and password through Supabase Auth (supabase_auth.py), which only the server talks to.
-The session it returns is kept in two HttpOnly cookies (ACCESS_COOKIE, REFRESH_COOKIE), read again on every request
-(check_session): the access token is verified with Supabase's published keys, and renewed with the refresh token when
-it has expired. A person is identified by Supabase's id for them, never by an email address or anything else a browser
-sends; GAME_LIBRARIAN_ALLOWED_USERS can limit accounts to a small circle of confirmed addresses.
+Sign-in is Continue with Google through Supabase Auth (supabase_auth.py), which only the server talks to; the first
+Google sign-in creates the account. There is no password and no email code. The session Supabase returns is kept in
+two HttpOnly cookies (ACCESS_COOKIE, REFRESH_COOKIE), read again on every request (check_session): the access token is
+verified with Supabase's published keys, and renewed with the refresh token when it has expired. A person is
+identified by Supabase's id for them, never by an email address or anything else a browser sends; Supabase itself
+links a Google sign-in to the existing user with the same verified address. GAME_LIBRARIAN_ALLOWED_USERS can limit
+accounts to a small circle of addresses.
 
 Protection, in short:
 * Cookies: HttpOnly (page scripts cannot read them), SameSite=Lax, and on the hosted site Secure with the __Host-
   prefix, which browsers accept only from this exact host. That matters here: azurecontainerapps.io is not on the
   Public Suffix List, so other apps under it count as the same site and could otherwise plant cookies.
-* Forms: each carries this browser's form token, the value of its CSRF cookie (the double-submit pattern), and a
-  browser's Sec-Fetch-Site must say the post came from this site (form_from_this_site). The wishlist API takes JSON
-  only, which another site's page cannot send without a CORS preflight that this app never approves.
-* Attempts: AttemptLimiter counts sign-ins, sign-ups and emails per visitor address and per email address, because
-  Supabase sees this server's address for every visitor.
+* Forms (sign-out): each carries this browser's form token, the value of its CSRF cookie (the double-submit pattern),
+  and a browser's Sec-Fetch-Site must say the post came from this site (form_from_this_site). The wishlist API takes
+  JSON only, which another site's page cannot send without a CORS preflight that this app never approves.
+* Google: the PKCE code verifier waits in an HttpOnly cookie (OAUTH_COOKIE) for at most OAUTH_MAX_AGE, so only the
+  browser that started a Google sign-in can finish it.
+* Attempts: AttemptLimiter counts Google sign-ins per visitor address, because Supabase sees this server's address
+  for every visitor (GOOGLE_SIGN_INS).
 * Redirects: only to a path on this site (safe_return_path).
 """
 
@@ -28,32 +32,36 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
+from urllib.parse import quote, unquote
 
-from .config import EMAIL_ADDRESS
 from .supabase_auth import AuthError, Session, SupabaseAuth
 
-PROVIDER = "supabase"  # accounts.provider of an email account; rows from 0.20 say "github" (the `accounts` command)
+PROVIDER = "supabase"  # accounts.provider of a Supabase account; rows from 0.20 say "github" (the `accounts` command)
 WISHLIST_LIMIT = 500  # games one account can save
 MAX_NAME_LENGTH = 200  # characters of a game name kept with a saved game
 MAX_ALIASES = 10
-MAX_EMAIL_LENGTH = 254
-MIN_PASSWORD_LENGTH = 8  # Supabase's own minimum is 6 unless the project asks for more
-MAX_PASSWORD_BYTES = 72  # Supabase keeps a bcrypt hash of the password, and bcrypt reads only 72 bytes
 SESSION_MAX_AGE = 30 * 24 * 3600  # the session cookies' lifetime in seconds; every renewal starts it again
+OAUTH_MAX_AGE = 600  # seconds a Google sign-in may take before it has to start again
 ACCESS_COOKIE = "gl_access"  # Supabase's access token (a signed JWT, valid one hour by default)
 REFRESH_COOKIE = "gl_refresh"  # Supabase's refresh token, which gets the next access token
 CSRF_COOKIE = "gl_csrf"  # this browser's form token
+OAUTH_COOKIE = "gl_oauth"  # a Google sign-in under way: its PKCE code verifier, then "~" and the page to go back to
 # A game key (identity.py), as static/wishlist.js accepts it: a Steam app id such as "271590", or "igdb-52189".
 GAME_KEY = re.compile(r"(?:\d{1,10}|igdb-\d{1,10})")
 # A form token as new_csrf_token makes it: 43 URL-safe characters (32 random bytes).
 CSRF_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
-# The token_hash of an email link (Supabase's hashed one-time code, such as 56 hex digits): letters, digits, - and _.
-TOKEN_HASH = re.compile(r"[A-Za-z0-9_-]{8,256}")
+# The one-time code that Supabase adds to /auth/callback after Google (a UUID today): URL-safe characters only.
+AUTH_CODE = re.compile(r"[A-Za-z0-9._~-]{8,256}")
+# A PKCE code verifier as supabase_auth.new_code_verifier makes it: 43 to 128 URL-safe characters.
+CODE_VERIFIER = re.compile(r"[A-Za-z0-9_-]{43,128}")
 
 UNAVAILABLE = ("The sign-in service is not answering right now. Your wishlist in this browser still works; try again "
                "in a minute.")
 TOO_MANY = "Too many attempts. Wait a few minutes, then try again."
-LINK_PROBLEM = "This link has expired or was already used. Ask for a new one below."
+GOOGLE_EXPIRED = ("That Google sign-in took too long, or it was started in another browser. Choose Continue with "
+                  "Google again.")
+GOOGLE_CANCELLED = "Google sign-in was cancelled. Choose Continue with Google to try again."
+GOOGLE_UNFINISHED = "Google sign-in did not finish. Try again in a minute."
 
 
 @dataclass(frozen=True)
@@ -61,7 +69,7 @@ class Identity:
     """A signed-in person, from a verified access token."""
 
     user_id: str  # Supabase's id for them (a UUID): it never changes, so it identifies the account (accounts.subject)
-    email: str  # their confirmed email address, shown and matched by the allow list
+    email: str  # their verified email address, shown and matched by the allow list
 
 
 @dataclass(frozen=True)
@@ -99,25 +107,8 @@ NO_SESSION = SessionCheck(None)
 
 def is_allowed(identity: Identity, allowed_users: frozenset[str]) -> bool:
     """Whether the person may keep an account: anyone when the list is empty, else a listed email address (compared
-    without case; the address is confirmed, because Supabase signs nobody in before)."""
+    without case; the address is verified, because Supabase signs nobody in before)."""
     return not allowed_users or identity.email.casefold() in allowed_users
-
-
-def clean_email(value: str | None) -> str | None:
-    """The email address a visitor typed, trimmed, or None when it cannot be one."""
-    text = (value or "").strip()
-    return text if len(text) <= MAX_EMAIL_LENGTH and EMAIL_ADDRESS.fullmatch(text) else None
-
-
-def password_problem(password: str, confirmation: str | None = None) -> str | None:
-    """What is wrong with a new password, for people, or None. Supabase applies its own rules afterwards."""
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return f"Choose a password of at least {MIN_PASSWORD_LENGTH} characters."
-    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
-        return f"Choose a password of at most {MAX_PASSWORD_BYTES} characters (fewer if it has accents or emoji)."
-    if confirmation is not None and password != confirmation:
-        return "The two passwords are not the same."
-    return None
 
 
 def safe_return_path(value: str | None) -> str:
@@ -146,6 +137,27 @@ def clear_session_cookies(response, *, secure: bool) -> None:
     """Delete the session cookies (signing out, or a session Supabase has ended)."""
     for name in (ACCESS_COOKIE, REFRESH_COOKIE):
         response.delete_cookie(cookie_name(name, secure), path="/", secure=secure, httponly=True, samesite="lax")
+
+
+def set_oauth_cookie(response, verifier: str, return_to: str, *, secure: bool) -> None:
+    """Keep a Google sign-in's code verifier, and the page it returns to, for OAUTH_MAX_AGE. SameSite=Lax, so the
+    browser sends it back when Supabase redirects to /auth/callback (a top-level navigation); HttpOnly, so no page
+    script can read it."""
+    response.set_cookie(cookie_name(OAUTH_COOKIE, secure), f"{verifier}~{quote(return_to, safe='')}",
+                        max_age=OAUTH_MAX_AGE, path="/", secure=secure, httponly=True, samesite="lax")
+
+
+def read_oauth_cookie(value: str | None) -> tuple[str, str] | None:
+    """(code verifier, page to go back to) from the Google sign-in cookie, or None when it is missing or damaged."""
+    verifier, _, return_to = (value or "").partition("~")
+    if not CODE_VERIFIER.fullmatch(verifier):
+        return None
+    return verifier, safe_return_path(unquote(return_to))
+
+
+def clear_oauth_cookie(response, *, secure: bool) -> None:
+    """Delete the Google sign-in cookie: a verifier is used at most once."""
+    response.delete_cookie(cookie_name(OAUTH_COOKIE, secure), path="/", secure=secure, httponly=True, samesite="lax")
 
 
 def new_csrf_token() -> str:
@@ -198,55 +210,41 @@ def check_session(auth: SupabaseAuth, access_token: str | None, refresh_token: s
 
 # ---------------------------------------------------------------------- attempts per visitor
 
-# Each action's limits: (attempts, seconds) per visitor address, and per email address (None: not counted by address).
-# Supabase's own limits are per IP address, and every visitor reaches it from this server's: 30 sign-ups or emails and
-# 150 sign-ins per 5 minutes for the whole site, and one email a minute per address.
-LIMITS = {
-    "sign_in": ((20, 600), (8, 600)),
-    "sign_up": ((5, 3600), (3, 3600)),
-    "email_link": ((6, 3600), (3, 3600)),  # a new confirmation link, or a password-reset link
-    "confirm": ((20, 600), None),  # opening an email link
-    "password": ((10, 600), None),  # choosing a new password
-}
+# Google sign-ins finished at /auth/callback, per visitor address: (attempts, seconds). Supabase's own limits are per
+# IP address, and every visitor reaches it from this server's: by default 150 token requests per 5 minutes for the
+# whole site, Google sign-ins and session renewals together. So one visitor must not be able to use them up.
+GOOGLE_SIGN_INS = (20, 600)
 
 
 class AttemptLimiter:
-    """Counts each action's attempts per visitor address and per email address, in a sliding window (LIMITS).
+    """Counts attempts per visitor address in a sliding window: at most `limit` in `seconds`.
 
     The counts live in this process: one replica of the website, as on the hosted site (0 to 1 replicas). A refused
     attempt is not counted, so waiting is always enough. `clock` is injectable for tests.
     """
 
-    def __init__(self, limits: dict = LIMITS, clock: Callable[[], float] = time.monotonic) -> None:
-        self._limits = limits
+    def __init__(self, limit: int, seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self._limit = limit
+        self._seconds = seconds
         self._clock = clock
         self._lock = threading.Lock()
-        self._attempts: dict[tuple[str, str], deque[float]] = {}
+        self._attempts: dict[str, deque[float]] = {}
         self._calls = 0
 
-    def allow(self, action: str, address: str, email: str | None = None) -> bool:
-        """Count one attempt; False, without counting it, when the address or the email has used up the limit."""
-        per_address, per_email = self._limits[action]
-        counted = [((f"{action}:address", address), per_address)]
-        if email and per_email:
-            counted.append(((f"{action}:email", email.casefold()), per_email))
+    def allow(self, address: str) -> bool:
+        """Count one attempt from `address`; False, without counting it, when the address has used up the limit."""
         with self._lock:
             now = self._clock()
-            windows = []
-            for key, (limit, seconds) in counted:
-                window = self._attempts.setdefault(key, deque())
-                while window and now - window[0] >= seconds:
-                    window.popleft()
-                if len(window) >= limit:
-                    return False
-                windows.append(window)
-            for window in windows:
-                window.append(now)
+            window = self._attempts.setdefault(address, deque())
+            while window and now - window[0] >= self._seconds:
+                window.popleft()
+            if len(window) >= self._limit:
+                return False
+            window.append(now)
             self._calls += 1
-            if self._calls % 1000 == 0:  # forget visitors whose attempts are all older than every window
-                longest = max(limit[1] for pair in self._limits.values() for limit in pair if limit)
-                self._attempts = {key: window for key, window in self._attempts.items()
-                                  if window and now - window[-1] < longest}
+            if self._calls % 1000 == 0:  # forget visitors whose attempts are all older than the window
+                self._attempts = {key: kept for key, kept in self._attempts.items()
+                                  if kept and now - kept[-1] < self._seconds}
         return True
 
 
@@ -275,50 +273,36 @@ def client_address(request, *, hosted: bool) -> str:
 
 # ---------------------------------------------------------------------- what to tell people
 
-WEAK_PASSWORD_REASONS = {
-    "length": "make it longer",
-    "characters": "mix in the kinds of characters this site asks for (such as lowercase and uppercase letters, digits "
-                  "and symbols)",
-    "pwned": "it has appeared in a known data breach, so choose another one",
-}
 SESSION_ENDED = ("session_not_found", "session_expired", "refresh_token_not_found", "refresh_token_already_used",
                  "bad_jwt", "user_not_found")
+# A Google sign-in whose one-time code Supabase no longer accepts: used, expired, or not this browser's.
+GOOGLE_CODE_REFUSED = ("flow_state_not_found", "flow_state_expired", "flow_state_already_used", "bad_code_verifier",
+                       "bad_oauth_state", "bad_oauth_callback")
 
 
 def auth_problem(exc: AuthError) -> tuple[int, str]:
-    """The HTTP status and the sentence for people that answer a refused Supabase request (Supabase's error codes,
+    """The HTTP status and the sentence for people that answer a refused Supabase request, or a Google sign-in that
+    Supabase sent back with its error code (Supabase's error codes,
     https://supabase.com/docs/guides/auth/debugging/error-codes). Supabase's own message is never shown."""
     code = exc.code
-    if exc.service_problem and exc.status != 429:
-        return 503, UNAVAILABLE
-    if code in ("over_request_rate_limit", "over_email_send_rate_limit") or exc.status == 429:
-        return 429, "Too many attempts or emails for now. Wait a few minutes, then try again."
-    if code == "invalid_credentials":
-        return 400, "The email address or password is not right."
-    if code == "email_not_confirmed":
-        return 400, ("Confirm your email address first: open the link in the email we sent. You can ask for a new "
-                     "link below.")
-    if code == "weak_password":
-        reasons = [WEAK_PASSWORD_REASONS[reason] for reason in exc.reasons if reason in WEAK_PASSWORD_REASONS]
-        return 400, "Choose a stronger password" + (": " + "; ".join(reasons) if reasons else "") + "."
-    if code == "same_password":
-        return 400, "Choose a password that is different from your current one."
-    if code in ("email_address_invalid", "validation_failed"):
-        return 400, "This email address cannot be used. Check it, or try another one."
-    if code in ("signup_disabled", "email_provider_disabled"):
-        return 403, "New accounts cannot be created on this site right now."
-    if code == "email_address_not_authorized":
-        return 503, "This site cannot send email yet, so the link could not be sent. Try again later."
-    if code == "otp_expired" or (exc.status == 403 and code.startswith("http_")):
-        return 400, LINK_PROBLEM
-    if code == "reauthentication_needed":
-        return 403, ("For your security, choose a new password through “Forgot your password?” on the sign-in page "
-                     "instead.")
+    if code == "over_request_rate_limit" or exc.status == 429:
+        return 429, "Too many sign-ins at once on this site. Wait a minute, then try again."
+    if code in GOOGLE_CODE_REFUSED:
+        return 400, GOOGLE_EXPIRED
+    if code == "signup_disabled":
+        return 403, "New accounts cannot be created on this site right now. Accounts made before still sign in."
+    if code == "provider_email_needs_verification":
+        return 403, ("Google has not verified the email address of that Google account, so it cannot sign in here. "
+                     "Verify the address with Google, then try again.")
+    if code == "provider_disabled":
+        return 503, "Google sign-in is not available on this site right now. Try again later."
     if code in SESSION_ENDED:
         return 401, "Your session has ended. Sign in again."
     if code == "user_banned":
         return 403, "This account cannot sign in."
-    return 400, "That did not work. Check what you entered, then try again."
+    if exc.service_problem:
+        return 503, UNAVAILABLE
+    return 400, GOOGLE_UNFINISHED
 
 
 # ---------------------------------------------------------------------- wishlist requests

@@ -47,14 +47,14 @@ moment-in-time order, because TwitchTracker publishes no terms that allow sharin
 - **Storage:** one SQLite file on your computer, written by separate commands (`sync`, `candidates`); or, for the
   hosted site, Azure Database for PostgreSQL, with the same tables (see
   [Hosted architecture (Azure)](#hosted-architecture-azure) and [DEPLOYMENT.md](DEPLOYMENT.md)).
-- **Accounts (hosted site):** optional email-and-password accounts through Supabase Auth, which only the site's
-  server talks to; a signed-in visitor's wishlist is kept privately in their account in PostgreSQL. Without an
-  account, the wishlist stays in the browser.
+- **Accounts (hosted site):** optional, through **Continue with Google** only (Supabase Auth, which only the site's
+  server calls; no password and no email code). A signed-in visitor's wishlist is kept privately in their account in
+  PostgreSQL. Without an account, every page works and the wishlist stays in the browser.
 - **Catalog:** hand-picked games (`curated/games.csv`) plus games promoted through a reviewed candidate workflow
   (`curated/promoted_games.csv`). Every catalog game is a verified Steam app.
 - **Not included (by design):** RAG, LLMs, prediction models, machine-learned recommendations, wiki links or lore,
   download mirrors or repack sites, screenshot galleries, Steam account sign-in, age categories, price filters or
-  price history, revenue figures, sales figures other than Gamalytic's estimates (shown only on your own computer),
+  price history, revenue figures, sales figures other than Gamalytic's estimates,
   Steam's Top Sellers chart, PriceCharting or any other resale-price data, an embedded Twitch player, and any history
   of Twitch viewers.
 
@@ -122,9 +122,9 @@ serves pages. It shows the data saved by the last successful sync.
 | `GAME_LIBRARIAN_DATABASE_URL` | No | The hosted site's PostgreSQL database, such as `postgresql://gl_app@<server>.postgres.database.azure.com/game_librarian`, without the password. When set, every command and the website use it instead of the SQLite file; TLS with full certificate and host-name checks (`sslmode=verify-full`) is required for any server but this computer. See [DEPLOYMENT.md](DEPLOYMENT.md). |
 | `PGPASSWORD` | With the database URL | The password of the role in `GAME_LIBRARIAN_DATABASE_URL` (libpq's own variable). Set it only for the session or as a Container Apps secret, never in a file that is committed. |
 | `GAME_LIBRARIAN_HOSTED` | No | `1` in the container image: a hosted process. It requires the PostgreSQL database, sets its cookies for HTTPS only (`Secure`, `__Host-`), and makes `sync` fail when a source it should refresh lacks its credentials. |
-| `GAME_LIBRARIAN_SUPABASE_URL` | No | The Supabase project URL (`https://<project-ref>.supabase.co`) whose Auth keeps the email accounts. With the publishable key below: accounts are offered; without: none. |
+| `GAME_LIBRARIAN_SUPABASE_URL` | No | The Supabase project URL (`https://<project-ref>.supabase.co`) whose Auth keeps the accounts (Continue with Google). With the publishable key below: accounts are offered, and the Continue with Google button works while the project's Google provider is on (it is shown disabled, with the reason, otherwise); without: no accounts. |
 | `GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY` | With the URL | The project's publishable key (`sb_publishable_...`), used only by the server. Never the secret or service-role key. |
-| `GAME_LIBRARIAN_ALLOWED_USERS` | No | The email addresses that may keep an account (comma-separated, without case); empty: everyone who confirms an address. 0.20's GitHub user names are refused. |
+| `GAME_LIBRARIAN_ALLOWED_USERS` | No | The email addresses that may keep an account (comma-separated, without case); empty: everyone who signs in. 0.20's GitHub user names are refused. |
 | `GAME_LIBRARIAN_CONTACT` | No | An email address or website **you choose**, sent only in the User-Agent of requests to Wikipedia and Wikidata, whose policy asks automated clients for contact information. Without it, critic scores are not read. See [What the critics said](#what-the-critics-said). |
 
 Settings are loaded automatically from the project-root `.env` file if it exists. Environment variables already set
@@ -909,7 +909,7 @@ on the day the page is served, so a platform moves from "announced" to "availabl
 ## Game identity and the wishlist
 
 **Where the wishlist is kept.** By default in the browser (`static/wishlist.js`, local storage), as before. With
-email accounts (`GAME_LIBRARIAN_SUPABASE_URL`; DEPLOYMENT.md, "Email accounts with Supabase"), a signed-in visitor's
+accounts (`GAME_LIBRARIAN_SUPABASE_URL`; DEPLOYMENT.md, "Accounts with Supabase"), a signed-in visitor's
 wishlist is kept in their account in PostgreSQL (`accounts`, `wishlist_items`), private to them: every request
 reaches only the account of the person whose Supabase session it carries (Supabase's id for them, from an access
 token checked with Supabase's published keys), and changes must be JSON requests from the site's own pages. The same key and alias rules apply. A browser list is never sent or deleted by itself: once
@@ -1047,9 +1047,9 @@ These measure different things, and the site never presents one as another:
 | Players or viewers now | Popular right now; a stream's viewers in Watch it live | One moment on Steam (players) or Twitch (viewers) | Owners, sales or a trend |
 | PopScore values | Most wanted on IGDB, Most wanted new releases | IGDB's relative shares or list positions | Counts of people or wishlists |
 | Chart positions | Steam's most-wishlisted list; Twitch's most-watched order | A rank among other games or Twitch categories, at one moment | Unit sales, revenue, or a count of players or viewers |
-| TwitchTracker's figures | Most watched among tracked Twitch categories, on the computer that runs the site only | TwitchTracker's rank among all Twitch categories (beside a place 1 to 10 in this list) and its average viewers and channels of a category, over a period it does not confirm | Twitch's own figures, a count of players, a trend, TwitchTracker's top 10 games, or a complete ranking of games |
+| TwitchTracker's figures | Most watched among tracked Twitch categories | TwitchTracker's rank among all Twitch categories (beside a place 1 to 10 in this list) and its average viewers and channels of a category, over a period it does not confirm | Twitch's own figures, a count of players, a trend, TwitchTracker's top 10 games, or a complete ranking of games |
 | Physical resale prices | Not shown | Marketplace prices of physical copies (for example PriceCharting) | Steam's digital prices |
-| Estimated Steam copies sold | The Estimated Steam copies sold chart (Dashboard > Trending games > Sales & reception), on the computer that runs the site only | Gamalytic's model estimate of copies bought directly on Steam, all time up to the collection | Sales reported by publishers, sales on other platforms or stores, key activations, sales in a period, or revenue |
+| Estimated Steam copies sold | The Estimated Steam copies sold chart (Dashboard > Trending games > Sales & reception) | Gamalytic's model estimate of copies bought directly on Steam, all time up to the collection | Sales reported by publishers, sales on other platforms or stores, key activations, sales in a period, or revenue |
 | Unit sales reported by publishers, revenue | Not shown | Not published per game by Valve; Gamalytic's free answers leave revenue out | Anything this site calculates: copies are never multiplied by a price |
 
 **PriceCharting is not integrated.** Its API is paid, and making its price data available to others requires a
@@ -1303,7 +1303,7 @@ stand for players on other platforms.
 
 | Page and chart | Form | Real data | What a value means |
 | --- | --- | --- | --- |
-| Sales & reception: Estimated Steam copies sold (on the computer that runs the site only; first, full width) | A doughnut: the 5 largest estimates each a slice with the game's cover art cropped into it and a numbered badge, the rest one "Other tracked games" slice whose games fold open; the cohort's total and size in the middle; a numbered list beside it; a table | Gamalytic's free list endpoint, saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, as shares of the cohort's total. See [below](#estimated-steam-copies-sold) |
+| Sales & reception: Estimated Steam copies sold (first, full width) | A doughnut: the 5 largest estimates each a slice with the game's cover art cropped into it and a numbered badge, the rest one "Other tracked games" slice whose games fold open; the cohort's total and size in the middle; a numbered list beside it; a table | Gamalytic's free list endpoint, saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, as shares of the cohort's total. See [below](#estimated-steam-copies-sold) |
 | Sales & reception: Strong Steam reception since the five-year window's start (full width; first on the public site) | One scatterplot, each game once: x = total Steam reviews (log scale when the counts span ten times or more), y = positive share to one decimal; this year's releases in the accent color, with a **this year only** view on the same axes; a selected game rings its peers, draws their median as a line and fills a detail strip; a table | Steam review summaries, genres and release dates of the catalog games | Does a game stand out among similar releases: its positive share against the median of its peers. See [Compared with similar releases](#compared-with-similar-releases) |
 | Upcoming releases: Upcoming Release Radar (left, three fifths) | A circular radar (rings: time to release; sections: platform families), windows **Next month**, **Next 3 months**, **All tracked**, a panel with the selected game's cover, dates by platform, list ranks and Twitch place, and **Date TBA or approximate** folded under one counted control | The upcoming games of the newest saved Most wanted on IGDB and Most wishlisted on Steam lists (up to 25 each) | When a game is due **on each platform**, exact days only. See [below](#upcoming-release-radar) |
 | Upcoming releases: IGDB's Want to Play and Steam's most wishlisted, compared (beside the radar; below it on a phone) | One finding, each capture's date and depth, three blocks sized by their number of games (seen on both lists, only on IGDB, only on Steam) under brackets for each capture, the open group's games, a table | The same two captures | What a player would miss by browsing only Steam's list. See [below](#what-a-player-would-miss-on-steams-list-alone) |
@@ -1559,13 +1559,13 @@ field has its own source:
 | Candidate suggestions and Steam ids (optional) | `api.igdb.com/v4/games` | Yes ([IGDB API docs](https://api-docs.igdb.com/)) | Needs Twitch app credentials. Used only server side; candidate data is not displayed. See [IGDB (optional)](#igdb-optional). |
 | Trending lists: PopScore values, records (platforms, release dates, companies, websites) of listed and catalog games, catalog apps' IGDB ids (optional) | `api.igdb.com/v4/popularity_primitives`, `/games`, `/external_games` | Yes | Needs Twitch app credentials. Displayed with credit to IGDB.com. Checked live on 2026-11-19. See [Trending](#trending). |
 | Most watched on Twitch (optional) | `api.twitch.tv/helix/games/top?first=100` (Get Top Games) | Yes ([Twitch API reference](https://dev.twitch.tv/docs/api/reference/#get-top-games)) | Same Twitch application, app access token, server side only. The order of categories by current viewers, with each category's IGDB id; no viewer numbers. Kept at most 24 hours, no history. Checked live on 2026-11-19. |
-| Most watched on Twitch, TwitchTracker's view (shown on the computer that runs the site only) | `twitchtracker.com/api/games/summary/<Twitch category id>` | In two lines, by TwitchTracker ([API page](https://twitchtracker.com/api)) | No key. JSON `avg_viewers`, `avg_channels`, `rank`, `hours_watched`; HTTP 200 with `{}` for an unknown or untracked category; no dates, period field or rate-limit headers. One category per request, at most one every 1.5 s and 200 in 24 hours. Checked live on 2026-11-21. See [TwitchTracker](#twitchtracker-checked-2026-11-21). |
+| Most watched on Twitch, TwitchTracker's view | `twitchtracker.com/api/games/summary/<Twitch category id>` | In two lines, by TwitchTracker ([API page](https://twitchtracker.com/api)) | No key. JSON `avg_viewers`, `avg_channels`, `rank`, `hours_watched`; HTTP 200 with `{}` for an unknown or untracked category; no dates, period field or rate-limit headers. One category per request, at most one every 1.5 s and 200 in 24 hours. Checked live on 2026-11-21. See [TwitchTracker](#twitchtracker-checked-2026-11-21). |
 | Live streams (optional) | `api.twitch.tv/helix/games?igdb_id=` and `/helix/streams` | Yes ([Twitch API reference](https://dev.twitch.tv/docs/api/reference/)) | Same Twitch application, app access token, server side only, cached at most 24 hours. Checked live on 2026-11-19. See [Watch it live](#watch-it-live). |
 | Critic scores (optional) | Wikidata Query Service (`query.wikidata.org/sparql`) and the English Wikipedia Action API (`action=query&prop=revisions`) | Yes ([Action API](https://www.mediawiki.org/wiki/API:Main_page)) | Needs `GAME_LIBRARIAN_CONTACT` for the User-Agent. Scores shown with the article revision and CC BY-SA 4.0. See [What the critics said](#what-the-critics-said). |
 | Players in game (player-count snapshots) | `api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1` | Yes ([reference](https://partner.steamgames.com/doc/webapi/ISteamUserStats)) | No key. One app per request. HTTP 404 means Steam has no count for the app; it is saved as "no count", not as a failure. Players not connected to Steam are not counted. Checked live on 2026-11-19. |
 | Prices: free flag, best purchase option, discount and its end date | `api.steampowered.com/IStoreBrowseService/GetItems/v1` with an empty data request | **No** | 50 apps per request, for the configured store region. Prices in cents arrive as strings; no currency code is given. Checked live on 2026-11-19. |
 | The store region's currency | `store.steampowered.com/api/appdetails?filters=price_overview` | **No** | One request per price refresh, for one priced game. |
-| Estimated Steam copies sold (shown on the computer that runs the site only) | `api.gamalytic.com/steam-games/list?appids=…&fields=steamId,copiesSold&limit=…` | Yes, by Gamalytic ([API reference](https://api.gamalytic.com/reference/)) | No key. Free users: 250 requests a day; this endpoint also allows 240 a minute when unsorted. Up to 100 app ids per request here. Checked live on 2026-11-20: `appids`, `fields` and `limit` work; a game Gamalytic has no data for is left out of the answer; `revenue` is left out of free answers; `steamId` is a number; each answer carries an undocumented `cacheTimestamp`. The single-game endpoint `/game/{id}` needs a paid plan and is not used. See [Gamalytic](#gamalytic-checked-2026-11-20). |
+| Estimated Steam copies sold | `api.gamalytic.com/steam-games/list?appids=…&fields=steamId,copiesSold&limit=…` | Yes, by Gamalytic ([API reference](https://api.gamalytic.com/reference/)) | No key. Free users: 250 requests a day; this endpoint also allows 240 a minute when unsorted. Up to 100 app ids per request here. Checked live on 2026-11-20: `appids`, `fields` and `limit` work; a game Gamalytic has no data for is left out of the answer; `revenue` is left out of free answers; `steamId` is a number; each answer carries an undocumented `cacheTimestamp`. The single-game endpoint `/game/{id}` needs a paid plan and is not used. See [Gamalytic](#gamalytic-checked-2026-11-20). |
 | Data Stories facts | Wikipedia article revisions (permanent `oldid` links) | Not applicable | Read on 2026-11-19 through the MediaWiki API. See [Data Stories](#data-stories). |
 | Data Stories cover art | `api.igdb.com/v4/games` (search, records, cover ids), images from `images.igdb.com` | Yes ([IGDB API docs](https://api-docs.igdb.com/)) | Records chosen and checked once on 2026-11-19 (about 55 IGDB requests), stored as image records in `curated/stories/*.json`; the page loads each cover from IGDB's image server and makes no IGDB request. |
 | Awards, AA/AAA/Indie | Curated CSV files in `curated/` | Not applicable | Steam does not provide these (its store data has no structured list of Steam Awards either). See below. |
@@ -1715,9 +1715,11 @@ DEPLOYMENT.md):
   owner's decision. Gamalytic's terms prohibit making its data accessible to third parties without written approval;
   TwitchTracker publishes no terms and its robots.txt disallows `/api/*`. Neither restriction is resolved (see the two
   sections above). Each figure is labeled as an estimate or as TwitchTracker's, with its source, period and time.
-- **Accounts:** Supabase (the sign-in service) keeps the email address and a password hash and sends the emails; the
-  site keeps Supabase's id for a person, the address and the saved games, and nothing else (`/account` says so and
-  offers deletion of the site's data). The email provider you configure in Supabase handles the messages.
+- **Accounts:** Supabase (the sign-in service) keeps the email address and the Google sign-in, with the name and
+  picture Google shares (0.21's password hashes stay there, unused). The site keeps Supabase's id for a person, the
+  address and the saved games, and nothing else (`/account` says so and offers deletion of the site's data). No email
+  is sent. The sign-in pages link to no terms or privacy policy: the site has none, and Google can ask for a privacy
+  policy link before it lets the Google app leave Testing (DEPLOYMENT.md, step 7.2).
 
 ### Curated sources
 
@@ -1881,7 +1883,7 @@ and Indie. *Clair Obscur: Expedition 33* is an example.
 
 ## Current architecture
 
-**Implemented:** the ingestion pipeline and website run on your computer (this section), or, prepared in 0.20, on
+**Implemented:** the ingestion pipeline and website run on your computer (this section), or, since 0.20, on
 Azure (see [Hosted architecture (Azure)](#hosted-architecture-azure)). Steam is an external online data source;
 Azure, Snowflake, and Power BI are not required to run the app.
 
@@ -1960,8 +1962,9 @@ work through ordinary links and forms.
 
 ## Hosted architecture (Azure)
 
-**Prepared in 0.20, not deployed.** The step-by-step portal guide is [DEPLOYMENT.md](DEPLOYMENT.md). The hosted site
-uses only what it needs:
+**Running in Azure since 0.20.** Since 2026-11-22 each push to `main` also deploys the new image (the workflow's
+`deploy` job). The step-by-step portal guide is [DEPLOYMENT.md](DEPLOYMENT.md). The hosted site uses only what it
+needs:
 
 - **Azure Container Apps** runs the website (`serve --host 0.0.0.0 --port 8000`, container port 8000, probes
   `/healthz` and `/readyz`) and a **scheduled job** in the same environment that runs `sync` once a day. Both use
@@ -1971,10 +1974,26 @@ uses only what it needs:
   of SQL for SQLite and PostgreSQL; `database.py` opens the connections (TLS `verify-full`, a small pool for the
   website, an advisory lock so two refreshes never overlap). The website and the job use a role that cannot
   change tables; `init-postgres` and `migrate-to-postgres` run once with the administrator.
-- **Supabase Auth** keeps the email-and-password accounts (since 0.21; 0.20 used Container Apps' built-in
-  authentication with GitHub). Only the website's server calls it, with the publishable key; the session stays in
-  HttpOnly cookies, and the app stores no password.
+- **Supabase Auth** keeps the accounts: Continue with Google only since 0.22 (email and password in 0.21; 0.20 used
+  Container Apps' built-in authentication with GitHub). Only the website's server calls its API, with the publishable
+  key; the browser visits Supabase and Google only for Google's sign-in screens, and the server finishes that sign-in
+  with PKCE. The session stays in HttpOnly cookies, and nobody has a password. 0.21's accounts are reached through
+  Google with the same address (Supabase links them); DEPLOYMENT.md, section 7, covers the rest.
 - Gamalytic's and TwitchTracker's figures are collected by the daily job and shown like the other data (since 0.21).
+
+**Sign-in setup in short** (you do every step; the details and their order are in DEPLOYMENT.md, sections 7 and
+12):
+
+1. **Google Cloud:** an OAuth client of type Web application whose **Authorized redirect URI** is Supabase's
+   callback, `https://<project-ref>.supabase.co/auth/v1/callback` (not this site's), with `https://<app-fqdn>` as
+   its JavaScript origin and only the scopes `openid`, email and profile.
+2. **Supabase:** the Google provider on, with that client's ID and secret (the secret is entered there only); Site
+   URL `https://<app-fqdn>` and Redirect URL `https://<app-fqdn>/auth/callback`; **Allow new users to sign up** on.
+   No email templates, SMTP service or domain are needed. Turn the Email provider off only after Google sign-in works
+   on the hosted site.
+3. **Azure:** no new setting (`GAME_LIBRARIAN_SUPABASE_URL` and `GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY` as for
+   0.21). A push to `main` deploys. Remove the old GitHub sign-in (Container Apps' built-in authentication) only
+   after Google sign-in has been tested.
 
 Key Vault, Blob Storage, Data Factory, Data Lake, Snowflake and a VM are not needed for this. The earlier proposal
 is kept below for reference.
@@ -2063,13 +2082,16 @@ personal tool and those public-use rights have not been confirmed.
   About section shows only Steam's short description and says that no longer text exists. Nothing is invented to
   fill the gap.
 - **Covers** load from Steam's CDN. If it is unreachable, entries show alt text, and all text still works.
-- **Estimated Steam copies sold** are Gamalytic's model estimates, shown only on the computer that runs the site.
-  They are often off for a single game (Gamalytic reports 77% within 30% and 98% within 50% of actual sales), count
-  only copies bought directly on Steam, and are less accurate for small and free-to-play games. Only the catalog
-  games on the Trending page are charted, so the chart is not a list of Steam's best sellers. The local-only check
-  cannot see through a proxy that forwards visitors without any forwarding header; do not put the site behind one.
-  Gamalytic can change its free tier, fields or terms at any time; the command then fails, or saves no estimate,
-  and keeps the stored ones.
+- **Estimated Steam copies sold** are Gamalytic's model estimates, shown to every visitor since 0.21 although
+  Gamalytic's terms restrict that (see "Data sources and terms"). They are often off for a single game (Gamalytic
+  reports 77% within 30% and 98% within 50% of actual sales), count only copies bought directly on Steam, and are
+  less accurate for small and free-to-play games. Only the catalog games on the Trending page are charted, so the
+  chart is not a list of Steam's best sellers. Gamalytic can change its free tier, fields or terms at any time; the
+  command then fails, or saves no estimate, and keeps the stored ones.
+- **Accounts (hosted site)** depend on the Supabase Free project, which Supabase pauses after about a week of low
+  activity (nobody can sign in until you restore it), and on Google: only test users can sign in while the Google app
+  is in Testing, and Google's screen names `<project-ref>.supabase.co` until the Google app's brand is verified. A
+  person without a Google account for their address cannot sign in. See DEPLOYMENT.md, sections 7 and 10.
 - **Freshness.** The catalog is only as fresh as the last `sync`. Nothing refreshes automatically unless you
   schedule it.
 - **Prices.** One store region at a time, and only Steam's "best purchase option" (other editions and bundles can
@@ -2154,6 +2176,38 @@ personal tool and those public-use rights have not been confirmed.
   `httpx2`. The tests pass with `httpx` 0.28, so no extra dependency was added.
 
 ## Verification status
+
+**Version 0.22 (sign-in with Google only, no passwords), checked on 2026-11-22.**
+
+- **What changed:** the sign-in and sign-up pages are one compact "save file" card each
+  (`templates/sign_in.html`) with one button, **Continue with Google**; the first Google sign-in creates the account.
+  Google goes through Supabase with PKCE finished on the server (`/auth/google`, `/auth/callback`; the verifier waits
+  in an HttpOnly cookie for 10 minutes). The button is a link only while Supabase's settings say its Google provider
+  is on; when the provider is off or Supabase does not answer, it is shown disabled with the reason, and the log says
+  so. The callback tells Google's cancel apart from Supabase's own refusals (sign-ups turned off, an address Google
+  has not verified, a banned user, a failure at Supabase's end, for which the log points to the client secret). An
+  email-code sign-in drafted for 0.22 was removed again before release, with its routes, rate limits and styles,
+  because it needs a domain and an SMTP service. 0.21's password, confirmation-link and reset pages are removed;
+  0.21's accounts are reached through Google with the same address (Supabase links them; the site never merges
+  accounts), and `accounts copy-wishlist` serves a person who moves to another address, by the owner's decision.
+  The session, CSRF, safe-redirect and isolation rules are unchanged; the attempt limit counts Google sign-ins per
+  visitor. A sign-out form that fails its check shows the account page with its wishlist count. DEPLOYMENT.md is
+  rewritten for 0.22 and for the automatic deployment (the workflow's `deploy` job, added on 2026-11-22). No new
+  dependency or setting.
+- **Automated tests:** on SQLite, 631 pass and 12 PostgreSQL-only tests are skipped; on a temporary PostgreSQL 18.6
+  (TLS only, `verify-full`), all 643 pass; the 21 JavaScript tests pass. The in-memory Supabase follows Supabase
+  Auth's source (read 2026-11-22): automatic linking to confirmed and never-confirmed 0.21 users, PKCE exchanges that
+  fail for another browser, the refusals it sends back to the callback, late returns and outages. One test checks
+  that the site calls only Supabase's settings, signing-key, token, renewal and sign-out endpoints, never its email
+  sign-in. Undoing each fix in a copy of the code (a refusal reported as a cancel, no button when Google is off, no
+  attempt limit, the email form back, a call to `/otp`) makes its test fail.
+- **Browser check:** headless Edge against a local server with the in-memory Supabase: the sign-in and sign-up
+  cards, Tab order with a visible focus outline, a full Continue with Google round trip in the browser (the request
+  to Supabase answered through DevTools, so the browser's own SameSite=Lax rule brought the verifier cookie back),
+  sign-out, a cancel, the disabled button with Google off and with Supabase silent, no sideways scroll at 390 px,
+  and no Content-Security-Policy violation.
+- **Not verified:** the real Supabase project and Google client (provider settings, redirect URLs, consent screen,
+  test users), the deploy of 0.22 by the workflow, and anything in Azure.
 
 **Version 0.21 (email accounts with Supabase Auth; Gamalytic and TwitchTracker on the hosted site), checked on
 2026-11-22.**

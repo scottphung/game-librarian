@@ -535,7 +535,8 @@ def _migrate_to_postgres(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _accounts_list(args: argparse.Namespace, settings: Settings) -> int:
-    """Every account with its sign-in, name and wishlist size, for deciding what to do with old GitHub accounts."""
+    """Every account with its sign-in, name and wishlist size, for deciding what to do with an account its owner can
+    no longer reach (an old GitHub account, or an email account whose owner now signs in with another address)."""
     conn = store.initialize(settings.database)
     try:
         rows = store.account_rows(conn)
@@ -551,7 +552,7 @@ def _accounts_list(args: argparse.Namespace, settings: Settings) -> int:
     old = sum(1 for row in rows if row["provider"] != accounts.PROVIDER)
     if old:
         print(f"{old} account(s) from a sign-in this site no longer offers (such as github, from 0.20): nobody can "
-              "reach them now. `accounts copy-wishlist` copies one's games into an email account you have matched "
+              "reach them now. `accounts copy-wishlist` copies one's games into a supabase account you have matched "
               "to the same person yourself; nothing is matched by email address (DEPLOYMENT.md).")
     return 0
 
@@ -1002,7 +1003,7 @@ def build_parser() -> argparse.ArgumentParser:
         handler=_accounts_list)
     copy_parser = account_actions.add_parser("copy-wishlist",
                                              help="Add the saved games of one account to another (both stay), for "
-                                                  "an old GitHub account whose owner you know.")
+                                                  "an account whose owner you know and who can no longer reach it.")
     copy_parser.add_argument("--from", dest="source", type=int, required=True, help="The account to copy from.")
     copy_parser.add_argument("--to", dest="target", type=int, required=True, help="The account to add the games to.")
     copy_parser.set_defaults(handler=_accounts_copy_wishlist)
