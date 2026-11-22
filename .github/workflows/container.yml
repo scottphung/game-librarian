@@ -67,3 +67,63 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: game-librarian-web-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check this is still the latest commit
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(gh api "repos/${{ github.repository }}/git/ref/heads/main" --jq '.object.sha')
+          if [ "$current" = "$GITHUB_SHA" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping an older commit; a newer push will deploy."
+          fi
+      - name: Sign in to Azure
+        if: steps.head.outputs.deploy == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy published image
+        if: steps.head.outputs.deploy == 'true'
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA:0:7}"
+          az containerapp update --name game-librarian-web --resource-group reagan-test \
+            --container-name game-librarian-web --image "$image" --output none
+          revision=$(az containerapp show --name game-librarian-web --resource-group reagan-test \
+            --query properties.latestRevisionName -o tsv)
+          echo "Waiting for revision $revision"
+          for attempt in {1..60}; do
+            state=$(az containerapp revision show --name game-librarian-web --resource-group reagan-test \
+              --revision "$revision" --query properties.runningState -o tsv)
+            echo "Revision status: $state"
+            if [ "$state" = "Running" ] || [ "$state" = "ScaledToZero" ]; then
+              exit 0
+            fi
+            if [ "$state" = "ActivationFailed" ] || [ "$state" = "Degraded" ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Revision did not become ready in time."
+          exit 1
+      - name: Update the scheduled sync image
+        if: steps.head.outputs.deploy == 'true'
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:sha-${GITHUB_SHA:0:7}"
+          az containerapp job update --name game-librarian-sync --resource-group reagan-test \
+            --container-name game-librarian-sync --image "$image" --output none
