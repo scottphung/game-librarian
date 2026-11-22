@@ -111,7 +111,7 @@ jobs:
             state=$(az containerapp revision show --name game-librarian-web --resource-group reagan-test \
               --revision "$revision" --query properties.runningState -o tsv)
             echo "Revision status: $state"
-            if [ "$state" = "Running" ] || [ "$state" = "ScaledToZero" ]; then
+            if [ "$state" = "Running" ] || [ "$state" = "RunningAtMaxScale" ] || [ "$state" = "ScaledToZero" ]; then
               exit 0
             fi
             if [ "$state" = "ActivationFailed" ] || [ "$state" = "Degraded" ]; then
