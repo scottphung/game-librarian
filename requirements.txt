@@ -1,7 +1,11 @@
-# Direct dependencies, pinned and tested together on Python 3.12.4 (2026-11-09).
+# Direct dependencies, pinned and tested together on Python 3.12.4 (2026-11-09); the PostgreSQL ones
+# (2026-11-21) on Python 3.11.9 with PostgreSQL 18.6. The container image uses Python 3.12.
 fastapi==0.162.2   # web framework (brings Starlette and Pydantic)
 uvicorn==0.54.0    # ASGI server for `python -m game_librarian serve`
 Jinja2==3.1.6      # server-rendered HTML templates
 httpx==0.28.1      # Steam HTTP client, and FastAPI's test client
 python-dotenv==1.2.2  # load project .env settings
+psycopg[binary]==3.3.8  # PostgreSQL driver for the hosted site's database (bundles libpq; 2026-11-04)
+psycopg-pool==3.3.3     # the website's pool of PostgreSQL connections
+certifi==2026.10.23     # Mozilla's root certificates: check Azure PostgreSQL's TLS certificate (also used by httpx)
 pytest==9.2.0      # tests

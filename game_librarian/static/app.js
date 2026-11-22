@@ -5,15 +5,50 @@
 
   document.documentElement.classList.add("js");
 
-  // The Game Librarian wishlist (static/wishlist.js): browser-local, separate from Steam.
+  // The Game Librarian wishlist, separate from Steam: kept in this browser (static/wishlist.js), or, for a
+  // signed-in visitor (body data-wishlist="account"), in their account on the server, through /api/wishlist.
   var Wishlist = window.GameLibrarianWishlist;
   var wishlistStore = Wishlist ? Wishlist.open(window) : null;
+  var inAccount = Boolean(Wishlist) && document.body.getAttribute("data-wishlist") === "account";
+  var accountItems = null; // the account's saved games once /api/wishlist answered: [{id, name}], oldest first
+  var accountProblem = ""; // why the account's list could not be read, if it could not
+  var accountLoad = null;
   var STORAGE_UNAVAILABLE = "The wishlist is unavailable: this browser does not let this site store data " +
     "(for example in some private windows, or when site data is blocked).";
 
   // The game key on a wishlist button and its aliases (its other keys, such as "igdb-52189").
-  function buttonKey(button) { return button.dataset.key || button.dataset.appid; }
+  function buttonKey(button) { return String(button.dataset.key || button.dataset.appid); }
   function buttonAliases(button) { return (button.dataset.aliases || "").split(" ").filter(Boolean); }
+  function gamesText(count) { return count === 1 ? "1 game" : count + " games"; }
+
+  // Ask the account's wishlist API: a GET without `body`, else a JSON POST (the server refuses any other kind, so a
+  // page on another site cannot change the list). Resolves with the answer, or rejects with a sentence to show.
+  function accountRequest(path, body) {
+    var options = { credentials: "same-origin", headers: { Accept: "application/json" } };
+    if (body !== undefined) {
+      options.method = "POST";
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(body);
+    }
+    return fetch(path, options).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (answer) {
+        if (!response.ok) {
+          throw new Error(answer.message || "The wishlist could not be reached (HTTP " + response.status + ").");
+        }
+        return answer;
+      });
+    }, function () { throw new Error("The wishlist could not be reached. Check the connection and try again."); });
+  }
+
+  // Read the account's list once per page; every button and the wishlist page use that copy afterwards.
+  function loadAccount() {
+    if (!accountLoad) {
+      accountLoad = accountRequest("/api/wishlist").then(function (answer) {
+        accountItems = answer.items || [];
+      }, function (error) { accountProblem = error.message; });
+    }
+    return accountLoad;
+  }
 
   // Show the details' wishlist button in its current state, or explain why there is none.
   function updateWishlistButton(root) {
@@ -21,30 +56,31 @@
     if (!button) { return; }
     var note = root.querySelector("[data-wishlist-note]");
     var status = root.querySelector("[data-wishlist-status]");
-    if (!wishlistStore) {
-      button.hidden = true;
-      if (status) { status.textContent = STORAGE_UNAVAILABLE; }
-      return;
+    var saved;
+    if (inAccount) {
+      if (accountItems === null) { // still loading, or it failed: no button that would act on an unknown list
+        button.hidden = true;
+        if (status && accountProblem) { status.textContent = accountProblem; }
+        return;
+      }
+      saved = Wishlist.listHas(accountItems, buttonKey(button), buttonAliases(button));
+    } else {
+      if (!wishlistStore) {
+        button.hidden = true;
+        if (status) { status.textContent = STORAGE_UNAVAILABLE; }
+        return;
+      }
+      saved = Wishlist.has(wishlistStore, buttonKey(button), buttonAliases(button));
     }
-    var saved = Wishlist.has(wishlistStore, buttonKey(button), buttonAliases(button));
     button.hidden = false;
     if (note) { note.hidden = false; }
     button.textContent = saved ? "Remove from wishlist" : "Add to wishlist";
     button.setAttribute("aria-pressed", String(saved));
   }
 
-  // The /wishlist page: one link and one Remove button per saved game.
-  function renderWishlist() {
-    var list = document.querySelector("[data-wishlist-list]");
-    var message = document.querySelector("[data-wishlist-message]");
-    if (!list || !message) { return; }
-    list.replaceChildren();
-    if (!wishlistStore) { message.textContent = STORAGE_UNAVAILABLE; return; }
-    var items;
-    try { items = Wishlist.read(wishlistStore); } catch (_) {
-      message.textContent = "The wishlist could not be read in this browser.";
-      return;
-    }
+  // One link and one Remove button per saved game. `removeItem(item)` removes the game where the list is kept (it
+  // may return a Promise); the list is then shown again.
+  function showItems(list, message, items, removeItem) {
     message.textContent = items.length === 0
       ? "Your wishlist is empty. Open a game's details and choose Add to wishlist."
       : (items.length === 1 ? "1 saved game." : items.length + " saved games.");
@@ -61,31 +97,142 @@
       remove.textContent = "Remove";
       remove.setAttribute("aria-label", "Remove " + item.name + " from the wishlist");
       remove.addEventListener("click", function () {
-        try {
-          Wishlist.remove(wishlistStore, item.id);
+        remove.disabled = true;
+        var removal;
+        try { removal = Promise.resolve(removeItem(item)); } catch (error) { removal = Promise.reject(error); }
+        removal.then(function () {
           renderWishlist();
           message.textContent = "Removed " + item.name + ". " + message.textContent;
           message.focus(); // the button is gone; keep keyboard focus on the page
-        } catch (_) { message.textContent = "The wishlist could not be saved in this browser."; }
+        }, function (error) {
+          remove.disabled = false;
+          message.textContent = inAccount ? error.message : "The wishlist could not be saved in this browser.";
+        });
       });
       row.append(link, document.createTextNode(" "), remove);
       list.append(row);
     });
   }
 
+  // The /wishlist page: the account's list for a signed-in visitor, else this browser's.
+  function renderWishlist() {
+    var list = document.querySelector("[data-wishlist-list]");
+    var message = document.querySelector("[data-wishlist-message]");
+    if (!list || !message) { return; }
+    list.replaceChildren();
+    if (inAccount) {
+      if (accountItems === null) { message.textContent = accountProblem || "Loading your wishlist…"; return; }
+      showItems(list, message, accountItems, function (item) {
+        return accountRequest("/api/wishlist/remove", { id: item.id }).then(function (answer) {
+          accountItems = answer.items;
+        });
+      });
+      renderImport();
+      return;
+    }
+    if (!wishlistStore) { message.textContent = STORAGE_UNAVAILABLE; return; }
+    var items;
+    try { items = Wishlist.read(wishlistStore); } catch (_) {
+      message.textContent = "The wishlist could not be read in this browser.";
+      return;
+    }
+    showItems(list, message, items, function (item) { Wishlist.remove(wishlistStore, item.id); });
+  }
+
+  // For a signed-in visitor: offer to add the games saved in this browser that the account does not have, and,
+  // once the account has all of them, to remove this browser's copy. Nothing is sent or removed until they choose.
+  function renderImport() {
+    var panel = document.querySelector("[data-wishlist-import]");
+    if (!panel || !wishlistStore || accountItems === null) { return; }
+    var browserItems;
+    try { browserItems = Wishlist.read(wishlistStore); } catch (_) { browserItems = []; }
+    var missing = Wishlist.missingFrom(browserItems, accountItems);
+    var names = missing.slice(0, 5).map(function (item) { return item.name; }).join(", ") +
+      (missing.length > 5 ? " and " + (missing.length - 5) + " more" : "");
+    panel.hidden = browserItems.length === 0;
+    panel.querySelector("[data-wishlist-import-add]").hidden = missing.length === 0;
+    panel.querySelector("[data-wishlist-import-clear]").hidden = missing.length > 0;
+    panel.querySelector("[data-wishlist-import-text]").textContent = missing.length > 0
+      ? "This browser also has " + gamesText(missing.length) + " saved that your account does not have: " + names + "."
+      : "This browser still keeps its own copy of " + gamesText(browserItems.length) +
+        " from its wishlist, and your account has every one of them.";
+  }
+
+  document.addEventListener("click", function (event) {
+    var add = event.target.closest("[data-wishlist-import-add]");
+    var clear = event.target.closest("[data-wishlist-import-clear]");
+    var status = document.querySelector("[data-wishlist-import-status]");
+    if (add && accountItems !== null) {
+      add.disabled = true;
+      var items = Wishlist.missingFrom(Wishlist.read(wishlistStore), accountItems);
+      accountRequest("/api/wishlist/import", { items: items }).then(function (answer) {
+        accountItems = answer.items;
+        renderWishlist();
+        status.textContent = "Added " + gamesText(answer.added) + " to your account" +
+          (answer.not_added_full ? "; " + gamesText(answer.not_added_full) + " did not fit, because the wishlist is full" : "") +
+          ". This browser keeps its own copy until you remove it.";
+      }, function (error) { status.textContent = error.message; }).then(function () { add.disabled = false; });
+    } else if (clear) {
+      try { Wishlist.clear(wishlistStore); } catch (_) {
+        status.textContent = "This browser's copy could not be removed.";
+        return;
+      }
+      renderWishlist();
+      status.textContent = "Removed this browser's copy. Your account keeps every game.";
+    }
+  });
+
   document.addEventListener("click", function (event) {
     var button = event.target.closest("[data-wishlist-toggle]");
-    if (!button || !wishlistStore) { return; }
+    if (!button) { return; }
     var root = button.closest(".details") || document;
     var status = root.querySelector("[data-wishlist-status]");
+    if (inAccount) {
+      if (accountItems === null) { return; }
+      button.disabled = true;
+      accountRequest("/api/wishlist/toggle", { id: buttonKey(button), name: button.dataset.name,
+                                               aliases: buttonAliases(button) }).then(function (answer) {
+        accountItems = answer.items;
+        updateWishlistButton(root);
+        if (status) { status.textContent = answer.saved ? "Added to your wishlist." : "Removed from your wishlist."; }
+      }, function (error) { if (status) { status.textContent = error.message; } })
+        .then(function () { button.disabled = false; });
+      return;
+    }
+    if (!wishlistStore) { return; }
     try {
       var saved = Wishlist.toggle(wishlistStore, buttonKey(button), button.dataset.name, buttonAliases(button));
       updateWishlistButton(root);
       if (status) { status.textContent = saved ? "Added to your wishlist." : "Removed from your wishlist."; }
     } catch (_) { if (status) { status.textContent = "The wishlist could not be saved in this browser."; } }
   });
+
+  // The account page's "Delete my account data": after a confirmation, delete it, then sign out.
+  var deleteAccount = document.querySelector("[data-account-delete]");
+  if (deleteAccount) {
+    deleteAccount.addEventListener("click", function () {
+      if (!window.confirm("Delete your account and its wishlist from this site? This cannot be undone.")) { return; }
+      var status = document.querySelector("[data-account-delete-status]");
+      deleteAccount.disabled = true;
+      accountRequest("/api/account/delete", {}).then(function () {
+        status.textContent = "Your account data was deleted. Signing you out…";
+        var signOut = document.querySelector("[data-sign-out]");
+        window.location.assign(signOut ? signOut.href : "/");
+      }, function (error) {
+        deleteAccount.disabled = false;
+        status.textContent = error.message;
+      });
+    });
+  }
+
   updateWishlistButton(document);
   renderWishlist();
+  if (inAccount) {
+    loadAccount().then(function () {
+      updateWishlistButton(document);
+      renderWishlist();
+    });
+  }
 
   // On a phone the filters start collapsed behind a "Search & filters" button, so the games come first.
   var sidebar = document.querySelector(".sidebar");

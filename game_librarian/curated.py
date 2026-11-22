@@ -14,6 +14,9 @@ production-scale/indie classifications:
                        (upcoming.py), edited by hand
   critic_articles.csv  optional: a reviewer's decision on the Wikipedia article whose review
                        table a game's critic scores come from (critics.py), edited by hand
+  twitch_categories.csv  optional: a reviewer's decision on which IGDB game a Twitch category
+                       stands for, or that it is a game series (twitch.resolve_category), edited
+                       by hand
   stories/*.json       the Data Stories (loaded by stories.py, not here)
 
 The sync command only reads the two game lists, and the web app reads the award
@@ -43,6 +46,7 @@ CLASSIFICATIONS_FILE = "classifications.csv"
 PUBLISHER_ALIASES_FILE = "publisher_aliases.csv"
 STEAM_MATCHES_FILE = "steam_matches.csv"
 CRITIC_ARTICLES_FILE = "critic_articles.csv"
+TWITCH_CATEGORIES_FILE = "twitch_categories.csv"
 
 # Where a catalog game comes from: games.csv or promoted_games.csv.
 HAND_PICKED, PROMOTED = "hand-picked", "promoted"
@@ -88,6 +92,8 @@ STEAM_MATCH_COLUMNS = ["igdb_id", "steam_appid", "decision", "checked_on", "chec
 STEAM_MATCH_DECISIONS = {"match", "no_match"}
 CRITIC_ARTICLE_COLUMNS = ["game", "article", "decision", "checked_on", "checked_by"]
 CRITIC_ARTICLE_DECISIONS = {"use", "reject"}
+TWITCH_CATEGORY_COLUMNS = ["twitch_category_id", "decision", "igdb_id", "checked_on", "checked_by"]
+TWITCH_CATEGORY_DECISIONS = {"match", "series", "no_match"}
 OPTIONAL_COLUMNS = ["title", "note", "mapping_note", "checked_on", "checked_by",
                     "source", "match_method", "evidence", "promoted_on"]
 
@@ -175,6 +181,21 @@ class CriticArticleDecision:
     note: str = ""
 
 
+@dataclass(frozen=True)
+class TwitchCategoryDecision:
+    """A reviewer's decision about a Twitch category: `match` (it stands for the one IGDB game `igdb_id`), `series` (a
+    category for a game series, such as Counter-Strike: listed under its own name, never as one of the series' games)
+    or `no_match` (not a game, or no game can be told: never listed)."""
+
+    category_id: str  # Twitch's category id, digits
+    decision: str
+    igdb_id: int | None  # match only
+    checked_on: str
+    checked_by: str
+    note: str = ""
+    title: str = ""  # Twitch's category name: a series' listed name, and the Twitch link outside Twitch's top list
+
+
 @dataclass
 class CuratedData:
     """Everything loaded from curated/, plus the problems found while loading."""
@@ -189,6 +210,7 @@ class CuratedData:
     publisher_alias_rows: list[PublisherAlias] = field(default_factory=list)
     steam_match_decisions: dict[int, SteamMatchDecision] = field(default_factory=dict)
     critic_article_decisions: dict[str, CriticArticleDecision] = field(default_factory=dict)
+    twitch_category_decisions: dict[str, TwitchCategoryDecision] = field(default_factory=dict)
 
     @property
     def publisher_aliases(self) -> dict[str, str]:
@@ -456,6 +478,34 @@ def _load_critic_articles(path: Path, problems: _Problems) -> dict[str, CriticAr
     return decisions
 
 
+def _load_twitch_categories(path: Path, problems: _Problems) -> dict[str, TwitchCategoryDecision]:
+    """Read twitch_categories.csv (optional): one decision per Twitch category id."""
+    decisions: dict[str, TwitchCategoryDecision] = {}
+    for line, row in _read_rows(path, TWITCH_CATEGORY_COLUMNS, problems, required=False):
+        errors = _review_errors(row)
+        category_id = row["twitch_category_id"]
+        if not category_id.isdigit():
+            errors.append(f"twitch_category_id must be Twitch's category id (digits), got {category_id!r}")
+        if row["decision"] not in TWITCH_CATEGORY_DECISIONS:
+            errors.append(f"decision must be one of {sorted(TWITCH_CATEGORY_DECISIONS)}, got {row['decision']!r}")
+        igdb_id = int(row["igdb_id"]) if row["igdb_id"].isdigit() and int(row["igdb_id"]) > 0 else None
+        if row["decision"] == "match" and igdb_id is None:
+            errors.append("a match needs the IGDB game id in igdb_id")
+        if row["decision"] in ("series", "no_match") and row["igdb_id"]:
+            errors.append(f"{row['decision']} takes no igdb_id (the category stands for no single game)")
+        if row["decision"] in ("match", "series") and not row["title"]:
+            errors.append(f"a {row['decision']} needs Twitch's category name in title (the list shows it and links "
+                          "to it when Twitch's top list does not include the category)")
+        if category_id in decisions:
+            errors.append(f"duplicate twitch_category_id {category_id}")
+        if errors:
+            problems.add(path.name, line, "; ".join(errors))
+            continue
+        decisions[category_id] = TwitchCategoryDecision(category_id, row["decision"], igdb_id, row["checked_on"],
+                                                        row["checked_by"], row["note"], row["title"])
+    return decisions
+
+
 def _name_key(text: str) -> str:
     """A name compared without case or extra spaces, so "Game of the year " still names the same award."""
     return " ".join(text.split()).casefold()
@@ -537,6 +587,7 @@ def load_curated(curated_dir: Path) -> CuratedData:
     publisher_alias_rows = _load_publisher_aliases(curated_dir / PUBLISHER_ALIASES_FILE, problems)
     steam_match_decisions = _load_steam_matches(curated_dir / STEAM_MATCHES_FILE, problems)
     critic_article_decisions = _load_critic_articles(curated_dir / CRITIC_ARTICLES_FILE, problems)
+    twitch_category_decisions = _load_twitch_categories(curated_dir / TWITCH_CATEGORIES_FILE, problems)
     return CuratedData(
         games=games,
         awards=awards,
@@ -548,6 +599,7 @@ def load_curated(curated_dir: Path) -> CuratedData:
         publisher_alias_rows=publisher_alias_rows,
         steam_match_decisions=steam_match_decisions,
         critic_article_decisions=critic_article_decisions,
+        twitch_category_decisions=twitch_category_decisions,
     )
 
 
@@ -565,7 +617,7 @@ class CuratedCache:
     def _current_stamp(self) -> tuple:
         stamp = []
         for name in (GAMES_FILE, PROMOTED_FILE, AWARDS_FILE, CLASSIFICATIONS_FILE, PUBLISHER_ALIASES_FILE,
-                     STEAM_MATCHES_FILE, CRITIC_ARTICLES_FILE):
+                     STEAM_MATCHES_FILE, CRITIC_ARTICLES_FILE, TWITCH_CATEGORIES_FILE):
             path = self._dir / name
             stamp.append(path.stat().st_mtime_ns if path.exists() else None)
         return tuple(stamp)

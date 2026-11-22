@@ -9,7 +9,10 @@ Signals (IGDB PopScore, popularity_primitives; checked live 2026-11-19, README "
   * STEAM_WISHLISTS (type 10, source Steam): "Most Wishlisted Upcoming". 4,863 games, all with a Steam app.
     The values step down by the same amount from one game to the next, so they encode positions in
     Steam's most-wishlisted list, not wishlist counts (Valve does not publish those). PC games on Steam only.
-  * Twitch's Get Top Games order (twitch.py): categories by current viewers, order only, kept 24 hours.
+  * Twitch's Get Top Games order (twitch.py): categories by current viewers, order only, kept 24 hours. The refresh
+    also reads IGDB's own record of each category (external_games, source Twitch), so twitch_games can tell which
+    game a category stands for when Twitch gives no igdb_id (Dota 2), and leaves it out when the two disagree; a
+    category that a reviewer marked as a game series (Counter-Strike) is listed as that series.
 IGDB recalculates PopScore about once a day ("Updated every 24 hours", IGDB API docs).
 Investigated and not used: Playing (type 3; on 2026-11-19 only 9 of its top 1,000 were released in the last
 90 days, and Grand Theft Auto VI's value still predated its launch), Visits (type 1; its top 25 included
@@ -440,6 +443,37 @@ def twitch_listable(row) -> bool:
     return row["game_type"] in GAME_TYPES and row["game_status"] not in NOT_LISTABLE_STATUSES
 
 
+def twitch_games(conn: sqlite3.Connection, top: list, decisions: dict) -> tuple[list[tuple], Counter]:
+    """The categories of a stored Twitch top list that Trending lists, in Twitch's order: games, and the categories
+    a reviewer marked as a game series.
+
+    Each is a (twitch_top_games row, IGDB record of its game, twitch.CategoryGame) triple; a series category has no
+    record (None), as it stands for no single game. The game comes from twitch.resolve_category: a reviewer's decision
+    (`decisions`: curated twitch_category_decisions), else Twitch's igdb_id and IGDB's own record of the category,
+    which must agree. The others are counted by reason: "no_game" (nothing names a game: Just Chatting, Slots),
+    "unresolved" (they name different games, or a reviewer decided the category is not a game), "not_read" (the game's
+    IGDB record was not read yet) and "other_kind" (DLC, bundles, cancelled or rumored games).
+    """
+    matches = [(row, twitch.resolve_category(row["igdb_id"], json.loads(row["igdb_links"] or "[]"),
+                                             decisions.get(row["category_id"])))
+               for row in top]
+    records = store.igdb_game_rows(conn, sorted({match.igdb_id for _, match in matches if match.igdb_id}))
+    games, left_out = [], Counter()
+    for row, match in matches:
+        record = records.get(match.igdb_id) if match.status == "matched" else None
+        if match.status == "series":
+            games.append((row, None, match))
+        elif match.status != "matched":
+            left_out[match.status] += 1
+        elif record is None:
+            left_out["not_read"] += 1
+        elif not twitch_listable(record):
+            left_out["other_kind"] += 1
+        else:
+            games.append((row, record, match))
+    return games, left_out
+
+
 # ---------------------------------------------------------------------- release-date changes (pure)
 
 
@@ -832,9 +866,13 @@ def _refresh(conn, client, steam, curated, catalog_appids, report, log, started,
         if signal.tracks_recent_releases:
             report.counts[f"{signal.key}_recent"] = len(recent_entries)
     top_games = _twitch_top_games(twitch_client, report, log)
+    twitch_links = _twitch_links(client, top_games, report)
     links = _catalog_links(client, catalog_appids)
     wanted = {entry.igdb_id for entries in tracked.values() for entry in entries}
     wanted |= {category.igdb_id for category in top_games or [] if category.igdb_id}
+    wanted |= {igdb_id for games in twitch_links.values() for igdb_id in games}  # such as Dota 2, without igdb_id
+    # Every reviewed game, in Twitch's list or not: most-watched also asks about reviewed categories outside it.
+    wanted |= {decision.igdb_id for decision in curated.twitch_category_decisions.values() if decision.igdb_id}
     wanted |= {igdb_id for status, igdb_id in links.values() if status == "linked"}  # platforms of catalog games
     existing = store.igdb_game_rows(conn)
     records = {}
@@ -856,7 +894,7 @@ def _refresh(conn, client, steam, curated, catalog_appids, report, log, started,
         kept = [entry for entry in tracked[signal.key] if entry.igdb_id in records]
         store.save_popularity_snapshot(conn, signal.key, kept, now=moment)
     if top_games is not None:
-        store.save_twitch_top_games(conn, top_games, now=moment)
+        store.save_twitch_top_games(conn, top_games, igdb_links=twitch_links, now=moment)
     store.save_steam_igdb_links(conn, links, now=moment)
     report.counts["catalog_games_linked"] = sum(1 for status, _ in links.values() if status == "linked")
     log(f"[upcoming] {len(records)} IGDB records saved, {report.counts['catalog_games_linked']} catalog games "
@@ -878,6 +916,24 @@ def _twitch_top_games(client: twitch.TwitchClient | None, report: RefreshReport,
     report.counts["twitch_categories_with_igdb_id"] = sum(1 for category in categories if category.igdb_id)
     log(f"[upcoming] Twitch: {len(categories)} top categories read")
     return categories
+
+
+def _twitch_links(client: igdb.IgdbClient, top_games: list[twitch.TopCategory] | None,
+                  report: RefreshReport) -> dict[str, list[int]]:
+    """For each category of Twitch's list, the IGDB games whose IGDB record lists that Twitch category.
+
+    One IGDB query for the whole list (external_games, source Twitch). It confirms the igdb_id Twitch gives, adds a
+    game Twitch gives none for (Dota 2 on 2026-11-21) and exposes a disagreement (twitch.resolve_category).
+    """
+    if not top_games:
+        return {}
+    found: dict[str, set[int]] = {}
+    for row in client.games_for_twitch_categories([category.category_id for category in top_games]):
+        uid, game = str(row.get("uid") or ""), row.get("game")
+        if uid.isdigit() and isinstance(game, int) and not isinstance(game, bool):
+            found.setdefault(uid, set()).add(game)
+    report.counts["twitch_categories_in_igdb"] = len(found)
+    return {uid: sorted(games) for uid, games in found.items()}
 
 
 def _steam_matches(records: dict[int, dict], steam: SteamClient | None, curated: CuratedData,

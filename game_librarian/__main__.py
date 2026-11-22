@@ -1,5 +1,6 @@
 """Command line: python -m game_librarian
-{sync,upcoming,critics,sales-estimates,serve,status,check-curated,export-report,candidates}."""
+{sync,upcoming,most-watched,critics,sales-estimates,serve,status,check-curated,export-report,candidates,
+init-postgres,migrate-to-postgres}."""
 
 from __future__ import annotations
 
@@ -7,12 +8,14 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Callable
 
 from datetime import datetime, timezone
 
-from . import candidates, critics, gamalytic, store, upcoming
+from . import candidates, critics, gamalytic, migrate, store, twitchtracker, upcoming
 from .config import DEFAULT_REPORT_DATA_DIR, REPORT_PARAMETERS_FILE, Settings, load_settings
 from .curated import PROMOTED, CuratedData, load_curated
+from .database import DatabaseConfigError, PostgresDatabase, is_postgres_error, refresh_lock
 from .gamalytic import GamalyticClient
 from .igdb import IgdbClient, IgdbError
 from .report_export import export_report, point_report_at
@@ -21,19 +24,49 @@ from .stories import load_stories
 from .sync import SyncOptions, run_sync
 from .trivia import RESET_LABEL, load_trivia
 from .twitch import KEEP_FOR as TWITCH_KEEP_FOR, TwitchClient
+from .twitchtracker import TwitchTrackerClient
 from .wikipedia import WikimediaClient, WikimediaError
 
 EXIT_CODES = {"success": 0, "failed": 1, "partial": 2}
+EXIT_BUSY = 3  # another refresh holds the database's refresh lock, so this one did nothing
 IGDB_HELP = ("IGDB is optional and not configured. To use it, set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET "
              "(a Twitch application's credentials) in .env; see README.md, \"IGDB (optional)\".")
 CONTACT_HELP = ("Critic scores come from Wikipedia, whose policy asks automated clients for contact information. "
                 "Set GAME_LIBRARIAN_CONTACT in .env to an email address or website you choose; see README.md, "
                 "\"What the critics said\".")
+LOCAL_ONLY = ("a local evaluation: its terms allow no sharing, so its figures are kept only in the local SQLite "
+              "database and shown only on the computer that runs the site, never with the PostgreSQL database or in "
+              "a hosted process (see README.md, \"Data sources and terms\")")
 
 
 def _worst(*codes: int) -> int:
     """The exit code of several steps: failed (1) over partial (2) over success (0)."""
     return 1 if 1 in codes else (2 if 2 in codes else 0)
+
+
+def _locked(settings: Settings, work: Callable[[], int]) -> int:
+    """Run a refreshing command's `work` while holding the refresh lock (database.refresh_lock). Two refreshes of the
+    same PostgreSQL database, such as a scheduled sync and a manual one, never overlap: the second stops at once."""
+    with refresh_lock(settings.database) as acquired:
+        if not acquired:
+            print("error: another refresh of this database is running (it holds the refresh lock), so this one did "
+                  "nothing. Wait until it finishes, then run again.", file=sys.stderr)
+            return EXIT_BUSY
+        return work()
+
+
+def _missing_for_hosted_sync(args: argparse.Namespace, settings: Settings) -> list[str]:
+    """What a hosted sync lacks to refresh each source it was not told to skip. A hosted run fails instead of skipping
+    a source quietly, so a missing secret shows as a failed run rather than as data that silently stops changing."""
+    missing = []
+    if not args.skip_discovery and not settings.steam_api_key:
+        missing.append("STEAM_API_KEY (Steam catalog discovery; or pass --skip-discovery)")
+    if not args.skip_upcoming and not settings.igdb_configured:
+        missing.append("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET (the cross-platform Trending lists; or pass "
+                       "--skip-upcoming)")
+    if not args.skip_critics and not settings.contact:
+        missing.append("GAME_LIBRARIAN_CONTACT (critic scores from Wikipedia; or pass --skip-critics)")
+    return missing
 
 
 def _sync(args: argparse.Namespace, settings: Settings) -> int:
@@ -47,7 +80,17 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
         unknown = sorted(set(args.appids) - {game.appid for game in curated.games})
         if unknown:
             print(f"warning: not in curated/games.csv or promoted_games.csv, skipped: {unknown}", file=sys.stderr)
+    missing = _missing_for_hosted_sync(args, settings) if settings.hosted else []
+    if missing:
+        print("error: this hosted sync stops before it starts, because it would skip these sources without their "
+              "settings: " + "; ".join(missing) + ". Add them as secrets of the job (DEPLOYMENT.md).", file=sys.stderr)
+        return 1
+    return _locked(settings, lambda: _sync_steps(args, settings, curated))
 
+
+def _sync_steps(args: argparse.Namespace, settings: Settings, curated: CuratedData) -> int:
+    """sync's steps, under the refresh lock: Steam, then the Trending lists, Most watched, critic scores and sales
+    estimates when each is configured, allowed for this database and due."""
     options = SyncOptions(
         force=args.force,
         appids=args.appids,
@@ -59,7 +102,7 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
     )
     if not args.skip_prices:
         print(f"Prices are read from the Steam {settings.steam_country} store (GAME_LIBRARIAN_STEAM_COUNTRY).")
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with SteamClient(api_key=settings.steam_api_key) as client:
             report = run_sync(
@@ -83,6 +126,15 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
         print("\nTrending lists (IGDB, Twitch): skipped, IGDB is not configured (see README.md, \"IGDB (optional)\").")
     else:
         codes.append(_run_upcoming(settings, curated, force=False))
+    if args.skip_most_watched:
+        print("\nMost watched (TwitchTracker): skipped (--skip-most-watched).")
+    elif not settings.local_evaluation:
+        print(f"\nMost watched (TwitchTracker): skipped, {LOCAL_ONLY}.")
+    elif not settings.igdb_configured:
+        print("\nMost watched (TwitchTracker): skipped, IGDB is not configured (its categories come from Twitch's top "
+              "list, read with the same credentials).")
+    else:
+        codes.append(_run_most_watched(settings, curated, force=False))
     if args.skip_critics:
         print("\nCritic scores (Wikipedia): skipped (--skip-critics).")
     elif not settings.contact:
@@ -92,6 +144,8 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
         codes.append(_run_critics(settings, curated, appids=args.appids, limit=args.limit, force=False))
     if args.skip_sales:
         print("\nSales estimates (Gamalytic): skipped (--skip-sales).")
+    elif not settings.local_evaluation:
+        print(f"\nSales estimates (Gamalytic): skipped, {LOCAL_ONLY}.")
     else:
         codes.append(_run_sales(settings, force=False))
     return _worst(*codes)
@@ -102,7 +156,7 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
 
 def _run_upcoming(settings: Settings, curated: CuratedData, *, force: bool) -> int:
     """Refresh the cross-platform Trending lists (IGDB and Twitch) when due (or `force`), and print them."""
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         if not force and not upcoming.refresh_due(conn, datetime.now(timezone.utc)):
             last = store.last_source_run(conn, upcoming.SOURCE)
@@ -122,6 +176,9 @@ def _run_upcoming(settings: Settings, curated: CuratedData, *, force: bool) -> i
             return 1
         lists = {signal.key: store.latest_popularity(conn, signal.key) for signal in upcoming.SIGNALS}
         top_games = store.twitch_top_games(conn, "")
+        games, _ = upcoming.twitch_games(conn, top_games, curated.twitch_category_decisions)
+        # A reviewed series category has no IGDB record: its reviewed title stands in its place.
+        watched = [record or curated.twitch_category_decisions[row["category_id"]].title for row, record, _ in games]
         rows = store.igdb_game_rows(conn)
     finally:
         conn.close()
@@ -130,8 +187,12 @@ def _run_upcoming(settings: Settings, curated: CuratedData, *, force: bool) -> i
     today = datetime.now(timezone.utc).date()
 
     def show(title: str, games: list) -> None:
+        """Print a list's first LIST_SIZE entries: IGDB records, or a series category's name (a str)."""
         print(f"\n{title}:")
         for number, row in enumerate(games[:upcoming.LIST_SIZE], 1):
+            if isinstance(row, str):
+                print(f"  {number:>2}. {row} [series category: no single game]")
+                continue
             available = upcoming.availability(upcoming.stored_dates(row), json.loads(row["platforms"] or "[]"), today)
             platforms = "; ".join([f"out {group.label} ({', '.join(group.platforms)})"
                                    + (f" [{group.first.status}]" if group.first.status != upcoming.FULL else "")
@@ -147,8 +208,6 @@ def _run_upcoming(settings: Settings, curated: CuratedData, *, force: bool) -> i
         if signal.tracks_recent_releases:
             show(f"Most wanted new releases (first released in the last {upcoming.RECENT_WINDOW.days} days)",
                  [row for row in listed if upcoming.list_kind(row, today) == upcoming.RECENT])
-    watched = [rows[item["igdb_id"]] for item in top_games
-               if item["igdb_id"] in rows and upcoming.twitch_listable(rows[item["igdb_id"]])]
     show(f"Most watched on Twitch ({top_games[0]['checked_at'] if top_games else 'no list from the last 24 hours'})",
          watched)
     return EXIT_CODES[report.status()]
@@ -161,7 +220,69 @@ def _upcoming(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
     for problem in curated.problems:
         print(f"warning: curated data: {problem}", file=sys.stderr)
-    return _run_upcoming(settings, curated, force=args.force)
+    return _locked(settings, lambda: _run_upcoming(settings, curated, force=args.force))
+
+
+def _run_most_watched(settings: Settings, curated: CuratedData, *, force: bool) -> int:
+    """Ask TwitchTracker for the rank and average viewers of the tracked categories that are due (all with `force`),
+    then print the list as the Trending page shows it on this computer (twitchtracker.ranking). The categories are the
+    game and series categories of Twitch's newest top list (`upcoming` saves it) and the reviewed ones of
+    curated/twitch_categories.csv; without a Twitch list from the last 24 hours, those chosen from the last one are
+    asked about again."""
+    decisions = curated.twitch_category_decisions
+    conn = store.initialize(settings.database)
+    try:
+        moment = datetime.now(timezone.utc)
+        chosen = twitchtracker.update_selection(conn, decisions, moment)
+        selection = store.tracker_rows(conn)
+        if not selection:
+            print("\nMost watched (TwitchTracker): nothing to ask about. The categories come from Twitch's top list, "
+                  "which `python -m game_librarian upcoming` saves (with IGDB_CLIENT_ID and IGDB_CLIENT_SECRET) and "
+                  "which is kept for 24 hours, and from the game and series rows of curated/twitch_categories.csv.")
+            return 0
+        from_list = len(selection) - chosen["reviewed"]
+        if chosen["selected_at"]:
+            print(f"\nMost watched (TwitchTracker): {len(selection)} categories tracked, {from_list} game and series "
+                  f"categories from Twitch's list of {chosen['selected_at']} and {chosen['reviewed']} reviewed outside "
+                  "it.")
+        else:
+            print(f"\nMost watched (TwitchTracker): no Twitch list from the last 24 hours, so the {from_list} "
+                  f"categories chosen from the last one are asked about again, with {chosen['reviewed']} reviewed "
+                  "outside it.")
+        due = twitchtracker.due_categories(conn, moment, force=force)
+        if not due:
+            print(f"Most watched (TwitchTracker): nothing is due; each category is asked again after "
+                  f"{int(twitchtracker.REFRESH_AFTER.total_seconds() // 3600)} hours (--force asks now).")
+            return 0
+        print(f"Most watched (TwitchTracker): asking about {len(due)} of {len(selection)} categories, one request "
+              f"each, {twitchtracker.MIN_INTERVAL_SECONDS:g} s apart (free API, no key)...", flush=True)
+        with TwitchTrackerClient() as client:
+            report = twitchtracker.refresh_summaries(conn, client, due, log=lambda message: print(message, flush=True))
+        ranked, left_out = twitchtracker.ranking(conn, decisions)
+    finally:
+        conn.close()
+    print(f"Most watched (TwitchTracker): {report.status()}")
+    print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
+    print("\nMost watched among tracked Twitch categories, in TwitchTracker's rank order (places in this list; the "
+          "rank counts every Twitch category; the period is not confirmed):")
+    for place, entry in enumerate(ranked[:upcoming.LIST_SIZE], 1):
+        what = f"igdb-{entry.record['igdb_id']}" if entry.record else "series category"
+        print(f"  {place:>2}. {entry.name} [{what}]: TwitchTracker category rank #{entry.row['rank']}, "
+              f"{entry.row['avg_viewers']:,} average viewers (retrieved {entry.row['retrieved_at']})")
+    if left_out:
+        print("Not listed: " + ", ".join(f"{count} {reason}" for reason, count in sorted(left_out.items())))
+    print("Shown only to a browser on this computer: TwitchTracker publishes no terms that allow sharing its figures.")
+    return EXIT_CODES[report.status()]
+
+
+def _most_watched(args: argparse.Namespace, settings: Settings) -> int:
+    if not settings.local_evaluation:
+        print(f"error: TwitchTracker's figures are {LOCAL_ONLY}.", file=sys.stderr)
+        return 1
+    curated = load_curated(settings.curated_dir)
+    for problem in curated.problems:
+        print(f"warning: curated data: {problem}", file=sys.stderr)
+    return _locked(settings, lambda: _run_most_watched(settings, curated, force=args.force))
 
 
 def _critic_targets(conn, curated: CuratedData) -> list[critics.CriticTarget]:
@@ -188,7 +309,7 @@ def _critic_targets(conn, curated: CuratedData) -> list[critics.CriticTarget]:
 def _run_critics(settings: Settings, curated: CuratedData, *, appids: list[int] | None, limit: int | None,
                  force: bool) -> int:
     """Refresh the critic scores of the games that are due (or all with `force`), and print what happened."""
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         targets = _critic_targets(conn, curated)
         if appids:
@@ -221,7 +342,7 @@ def _run_critics(settings: Settings, curated: CuratedData, *, appids: list[int] 
 
 def _critics(args: argparse.Namespace, settings: Settings) -> int:
     if args.review:
-        conn = store.initialize(settings.db_path)
+        conn = store.initialize(settings.database)
         try:
             rows = critics.review_rows(conn)
             articles = store.critic_article_rows(conn)
@@ -239,12 +360,13 @@ def _critics(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
     for problem in curated.problems:
         print(f"warning: curated data: {problem}", file=sys.stderr)
-    return _run_critics(settings, curated, appids=args.appids, limit=args.limit, force=args.force)
+    return _locked(settings, lambda: _run_critics(settings, curated, appids=args.appids, limit=args.limit,
+                                                  force=args.force))
 
 
 def _run_sales(settings: Settings, *, force: bool) -> int:
     """Collect Gamalytic's estimated Steam copies sold for the catalog games that are due (all with `force`)."""
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         appids = [row["appid"] for row in store.matching_games(conn, [], [])]
         due = gamalytic.due_appids(conn, appids, datetime.now(timezone.utc), force=force)
@@ -266,7 +388,10 @@ def _run_sales(settings: Settings, *, force: bool) -> int:
 
 
 def _sales_estimates(args: argparse.Namespace, settings: Settings) -> int:
-    return _run_sales(settings, force=args.force)
+    if not settings.local_evaluation:
+        print(f"error: Gamalytic's estimates are {LOCAL_ONLY}.", file=sys.stderr)
+        return 1
+    return _locked(settings, lambda: _run_sales(settings, force=args.force))
 
 
 def _serve(args: argparse.Namespace, settings: Settings) -> int:
@@ -277,7 +402,7 @@ def _serve(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _status(args: argparse.Namespace, settings: Settings) -> int:
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         counts = store.catalog_counts(conn)
         candidate_counts = store.candidate_counts(conn)
@@ -293,9 +418,12 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
         twitch_cached = conn.execute("SELECT COUNT(*) FROM twitch_live").fetchone()[0]
         store.purge_twitch_top_games(conn, (datetime.now(timezone.utc) - TWITCH_KEEP_FOR).isoformat(timespec="seconds"))
         top_games = store.twitch_top_games(conn, "")
+        tracker = store.tracker_rows(conn)
+        tracker_runs = store.recent_source_runs(conn, twitchtracker.SOURCE, limit=1)
     finally:
         conn.close()
-    print(f"Database: {settings.db_path}")
+    database = settings.database
+    print(f"Database: {database.describe() if isinstance(database, PostgresDatabase) else database}")
     print(f"Games ready to show: {counts['ready']} of {counts['curated']} catalog games")
     print(f"Apps in the discovery index (not enriched): {counts['discovered']}")
     if prices["games"]:
@@ -329,6 +457,13 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
     print(f"Twitch live streams: {twitch_cached} game(s) in the cache (answers are deleted after 24 hours)")
     print("Twitch most-watched list: " + (f"{len(top_games)} categories, checked {top_games[0]['checked_at']} "
                                           "(deleted after 24 hours)" if top_games else "none from the last 24 hours"))
+    answered = sorted(row["retrieved_at"] for row in tracker if row["rank"] is not None)
+    last = tracker_runs[0] if tracker_runs else None
+    print("Most watched (TwitchTracker, shown on this computer only): " + (
+        f"{len(answered)} of {len(tracker)} tracked categories with figures"
+        + (f", retrieved {answered[0]} to {answered[-1]}" if answered else "")
+        + (f"; last run {last['started_at']} {last['status']}" if last else "")
+        if tracker else "none collected yet (python -m game_librarian most-watched)"))
     if candidate_counts:
         print("Candidates: " + ", ".join(f"{count} {status}" for status, count in sorted(candidate_counts.items())))
     if not runs:
@@ -337,6 +472,68 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
         problem = store.run_problem(run)
         print(f"#{run['id']} {run['started_at']} -> {run['finished_at'] or '...'} {run['status']}"
               + (f" | {problem}" if problem else ""))
+    return 0
+
+
+# ---------------------------------------------------------------------- PostgreSQL (the hosted site's database)
+
+NEEDS_POSTGRES = ("error: set GAME_LIBRARIAN_DATABASE_URL to the PostgreSQL database and PGPASSWORD to its password, "
+                  "for this command only, with a role that may create tables (see DEPLOYMENT.md).")
+
+
+def _init_postgres(args: argparse.Namespace, settings: Settings) -> int:
+    """Create or upgrade the PostgreSQL tables, and let the runtime roles read and write their rows."""
+    if not isinstance(settings.database, PostgresDatabase):
+        print(NEEDS_POSTGRES, file=sys.stderr)
+        return 1
+    grant_to = tuple(args.grant_to or ())
+    conn = store.connect(settings.database)
+    try:
+        schema = store.create_postgres_schema(conn, grant_to=grant_to)
+        missing = store.missing_postgres_schema(conn)
+    finally:
+        conn.close()
+    print(f"{settings.database.describe()}, schema {schema}: {len(store.schema_columns())} tables ready "
+          "(existing tables and rows kept).")
+    for role in grant_to:
+        print(f"{role} may now read, add, change and delete the rows of every table, but not change or drop tables.")
+    if missing:
+        print(f"error: still missing: {', '.join(missing)}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _migrate_to_postgres(args: argparse.Namespace, settings: Settings) -> int:
+    """Copy the SQLite catalog into the PostgreSQL database (migrate.py describes every step)."""
+    if not isinstance(settings.database, PostgresDatabase):
+        print(NEEDS_POSTGRES, file=sys.stderr)
+        return 1
+    source = args.source or settings.db_path
+    print(f"{'Checking' if args.check else 'Copying'} the SQLite catalog {source} "
+          f"{'against' if args.check else 'into'} {settings.database.describe()}...", flush=True)
+    try:
+        report = migrate.migrate(source, settings.database, replace=args.replace, check_only=args.check,
+                                 log=lambda message: print(message, flush=True))
+    except migrate.MigrationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for warning in report.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
+    rows = sum(item.source_rows for item in report.copied)
+    if report.checked_only:
+        occupied = {table: count for table, count in report.target_rows.items() if count}
+        print(f"Check passed: {len(report.copied)} tables, {rows} rows would be copied. The PostgreSQL database "
+              + (f"already holds catalog rows ({', '.join(f'{t}: {n}' for t, n in occupied.items())}), so the copy "
+                 "needs --replace." if occupied else "holds no catalog rows yet.") + " Nothing was written.")
+    else:
+        print(f"Copied {len(report.copied)} tables, {rows} rows; every table's row count and checksum match the "
+              "SQLite file." + (" The catalog tables were emptied first (--replace); accounts and wishlists were "
+                                "kept." if report.replaced else ""))
+        if report.purged_twitch_rows:
+            print(f"Deleted {report.purged_twitch_rows} Twitch row(s) older than 24 hours (Twitch's caching limit).")
+    for table, count in report.skipped.items():
+        print(f"Not copied: {table} ({count} rows), {LOCAL_ONLY}.")
+    print("The SQLite file was only read; it is unchanged.")
     return 0
 
 
@@ -355,6 +552,7 @@ def _check_curated(args: argparse.Namespace, settings: Settings) -> int:
           f"{len(curated.publisher_aliases)} verified aliases used by the publisher filter")
     print(f"steam_matches.csv: {len(curated.steam_match_decisions)} reviewed Steam matches of IGDB games")
     print(f"critic_articles.csv: {len(curated.critic_article_decisions)} reviewed Wikipedia article choices")
+    print(f"twitch_categories.csv: {len(curated.twitch_category_decisions)} reviewed Twitch category decisions")
     for story in story_collection.stories.values():
         print(f"stories/{story.slug}.json: {len(story.entries)} games ({len(story.main_entries)} main), "
               f"checked {story.checked_on}")
@@ -409,7 +607,7 @@ def _print_run(report: candidates.RunReport) -> None:
 def _candidates_add(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
     catalog_appids = {game.appid for game in curated.games}
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         if args.source == "discovery":
             if store.catalog_counts(conn)["discovered"] == 0:
@@ -442,7 +640,7 @@ def _candidates_add(args: argparse.Namespace, settings: Settings) -> int:
 
 def _candidates_screen(args: argparse.Namespace, settings: Settings) -> int:
     rules = candidates.EligibilityRules(min_reviews=args.min_reviews, min_positive_percent=args.min_positive)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with SteamClient() as client:  # GetItems needs no key; the key is never sent with it
             report = candidates.screen(conn, client, limit=args.limit, rules=rules, recheck_days=args.recheck_days,
@@ -463,7 +661,7 @@ def _candidates_screen(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _candidates_list(args: argparse.Namespace, settings: Settings) -> int:
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         counts = store.candidate_counts(conn)
         rows = store.list_candidates(conn, status=args.status, source=args.source, limit=args.limit)
@@ -492,7 +690,7 @@ def _find_candidate(conn, args: argparse.Namespace):
 
 
 def _candidates_show(args: argparse.Namespace, settings: Settings) -> int:
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         row = _find_candidate(conn, args)
     finally:
@@ -518,7 +716,7 @@ def _candidates_show(args: argparse.Namespace, settings: Settings) -> int:
 
 def _candidates_promote(args: argparse.Namespace, settings: Settings) -> int:
     curated = load_curated(settings.curated_dir)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         appids = list(args.appids or []) or candidates.eligible_appids(conn, args.limit)
         if not appids:
@@ -538,7 +736,7 @@ def _candidates_promote(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _candidates_reject(args: argparse.Namespace, settings: Settings) -> int:
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         row = _find_candidate(conn, args)
         if row is None:
@@ -555,7 +753,7 @@ def _candidates_reject(args: argparse.Namespace, settings: Settings) -> int:
 
 def _candidates_match(args: argparse.Namespace, settings: Settings) -> int:
     catalog_appids = {game.appid for game in load_curated(settings.curated_dir).games}
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         row = store.candidate(conn, candidate_id=args.id)
         if row is None:
@@ -632,8 +830,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     sync = commands.add_parser("sync", help="Fetch new and changed Steam data for the curated games, then refresh "
-                                            "the upcoming lists, critic scores and sales estimates when they are "
-                                            "configured and due.")
+                                            "the upcoming lists, the Most watched ranking, critic scores and sales "
+                                            "estimates when they are configured and due.")
     sync.add_argument("--force", action="store_true", help="Refresh every selected game, even recent ones.")
     sync.add_argument("--appid", type=int, action="append", dest="appids", help="Only this curated app id (repeatable).")
     sync.add_argument("--limit", type=int, help="Only the first N curated games (for a quick test).")
@@ -644,6 +842,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--skip-upcoming", action="store_true",
                       help="Do not refresh the cross-platform Trending lists from IGDB and Twitch (otherwise once a "
                            "day).")
+    sync.add_argument("--skip-most-watched", action="store_true",
+                      help="Do not ask TwitchTracker for the Most watched ranking (otherwise each category once in "
+                           "20 hours).")
     sync.add_argument("--skip-critics", action="store_true",
                       help="Do not read critic scores from Wikipedia (otherwise each game once in 30 days).")
     sync.add_argument("--skip-sales", action="store_true",
@@ -655,6 +856,14 @@ def build_parser() -> argparse.ArgumentParser:
     upcoming_parser.add_argument("--force", action="store_true",
                                  help="Refresh now, even if the last refresh is less than 20 hours old.")
     upcoming_parser.set_defaults(handler=_upcoming)
+
+    watched_parser = commands.add_parser("most-watched",
+                                         help="Ask TwitchTracker's free API for the rank and average viewers of the "
+                                              "game and series categories in Twitch's newest top list and the "
+                                              "reviewed ones (shown on this computer only).")
+    watched_parser.add_argument("--force", action="store_true",
+                                help="Ask about every tracked category now, even those answered in the last 20 hours.")
+    watched_parser.set_defaults(handler=_most_watched)
 
     critics_parser = commands.add_parser("critics", help="Read critic scores from English Wikipedia review tables.")
     critics_parser.add_argument("--appid", type=int, action="append", dest="appids",
@@ -690,6 +899,27 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Folder for the CSV files (default: reporting/data).")
     export.set_defaults(handler=_export_report)
 
+    init_parser = commands.add_parser("init-postgres",
+                                      help="Create or upgrade the tables of the PostgreSQL database "
+                                           "(GAME_LIBRARIAN_DATABASE_URL), as a role that may create tables.")
+    init_parser.add_argument("--grant-to", action="append", metavar="ROLE",
+                             help="A role that may then read and write rows, but not change tables: the website's "
+                                  "and the sync's (repeatable).")
+    init_parser.set_defaults(handler=_init_postgres)
+
+    migrate_parser = commands.add_parser("migrate-to-postgres",
+                                         help="Copy the local SQLite catalog into the PostgreSQL database "
+                                              "(GAME_LIBRARIAN_DATABASE_URL); the SQLite file is only read.")
+    migrate_parser.add_argument("--from", dest="source", type=Path,
+                                help="The SQLite file to copy (default: GAME_LIBRARIAN_DB or "
+                                     "data/game_librarian.sqlite3).")
+    migrate_parser.add_argument("--check", action="store_true",
+                                help="Check the SQLite file and the PostgreSQL database, and write nothing.")
+    migrate_parser.add_argument("--replace", action="store_true",
+                                help="Empty the PostgreSQL catalog tables first, when they hold rows (accounts and "
+                                     "wishlists are kept). Without it, a database with catalog rows is refused.")
+    migrate_parser.set_defaults(handler=_migrate_to_postgres)
+
     _add_candidates_parser(commands)
     return parser
 
@@ -700,7 +930,22 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="backslashreplace")
     args = build_parser().parse_args(argv)
-    return args.handler(args, load_settings())
+    try:
+        settings = load_settings()
+    except ValueError as exc:  # SettingsError or DatabaseConfigError: they name the setting, never a secret
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    try:
+        return args.handler(args, settings)
+    except (store.SchemaError, DatabaseConfigError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        if not is_postgres_error(exc):
+            raise
+        # libpq's messages name the server, the database and the user, never the password.
+        print(f"error: the PostgreSQL database could not be used: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

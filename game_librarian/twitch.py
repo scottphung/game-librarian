@@ -16,6 +16,14 @@ Helix endpoints used (https://dev.twitch.tv/docs/api/reference/, read 2026-11-19
     Checked live on 2026-11-19: Grand Theft Auto VI (igdb_id 52189) first, Just Chatting second (no igdb_id).
 Rate limit: a bucket of 800 points per minute per app; a 429 answer carries Ratelimit-Reset.
 
+Which game a top category stands for (resolve_category, checked live on 2026-11-21 against the 100 categories of that
+day's list): IGDB also records each game's Twitch category itself (external_games, source 14 = Twitch). For 80
+categories Twitch's igdb_id and IGDB's record named the same game; IGDB alone named Dota 2 (Twitch gives it no
+igdb_id) and Counter-Strike; for Call of Duty: Warzone they named different games; 17 had no game on either side
+(Just Chatting, IRL, Slots and others, but also StarCraft II). A reviewer's row in curated/twitch_categories.csv
+settles a category either way, or marks it as a game series (Counter-Strike, whose streams can be Counter-Strike 2 or
+the re-released Counter-Strike: Global Offensive), which is listed as a series and never as one of its games.
+
 Twitch Developer Services Agreement (https://legal.twitch.com/en/legal/developer-agreement/, last modified
 12/04/2024, read 2026-11-19): Schedule 1 C, "Do not store copies of Twitch Content or Program Materials,
 unless you ... cache such information for only a twenty-four hour time period"; Schedule 1 B, research
@@ -243,6 +251,43 @@ def match_category(igdb_id: int, categories: list[dict]) -> CategoryMatch:
     if len({item["id"] for item in found}) > 1:
         return CategoryMatch("ambiguous")
     return CategoryMatch("matched", str(found[0]["id"]), str(found[0]["name"]))
+
+
+@dataclass(frozen=True)
+class CategoryGame:
+    """What a Twitch top category stands for (resolve_category), and on whose word."""
+
+    status: str  # matched (one game) | series (a reviewed series category) | no_game | unresolved
+    igdb_id: int | None = None  # matched only
+    source: str | None = None  # matched: reviewer | twitch+igdb | twitch | igdb; series or unresolved: reviewer
+
+
+def resolve_category(twitch_igdb_id: int | None, igdb_games: list[int], decision=None) -> CategoryGame:
+    """What a Twitch category stands for, from identifiers only, never from its name.
+
+    `twitch_igdb_id` is the igdb_id Twitch gave the category; `igdb_games` are the IGDB games whose IGDB record lists
+    the category (external_games, source Twitch); `decision` is a reviewer's curated.TwitchCategoryDecision, if any.
+    A reviewer's decision comes first: `match` names the game, `series` marks a category for a whole game series
+    (Counter-Strike: never matched to one of its games, even the one IGDB's record names), `no_match` keeps the
+    category unmatched. Otherwise every identifier must name one and the same game: Dota 2 is matched by IGDB's record
+    alone, while a category that Twitch and IGDB link to different games stays unresolved, so none of them is guessed.
+    """
+    if decision is not None:
+        if decision.decision == "match":
+            return CategoryGame("matched", decision.igdb_id, "reviewer")
+        if decision.decision == "series":
+            return CategoryGame("series", source="reviewer")
+        return CategoryGame("unresolved", source="reviewer")
+    named = set(igdb_games) | ({twitch_igdb_id} if twitch_igdb_id else set())
+    if not named:
+        return CategoryGame("no_game")
+    if len(named) > 1:
+        return CategoryGame("unresolved")
+    if twitch_igdb_id and igdb_games:
+        source = "twitch+igdb"
+    else:
+        source = "twitch" if twitch_igdb_id else "igdb"
+    return CategoryGame("matched", next(iter(named)), source)
 
 
 @dataclass(frozen=True)

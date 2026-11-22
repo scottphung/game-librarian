@@ -14,7 +14,9 @@ Uses:
     (external_games with external_game_source 1 = Steam; the field replaced the deprecated `category`);
   * the Upcoming & Anticipated lists (upcoming.py): two PopScore popularity types, the upcoming games'
     release dates, platforms, companies, websites and covers, shown with attribution to IGDB.com;
-  * linking catalog games to IGDB ids, which is how a game finds its Twitch category (twitch.py).
+  * linking catalog games to IGDB ids, which is how a game finds its Twitch category (twitch.py);
+  * IGDB's own records of the Twitch categories in Twitch's top list (external_games with source 14 = Twitch), which
+    confirm or add the game a category stands for (twitch.resolve_category).
 See README.md, "IGDB (optional)" and "Upcoming & Anticipated".
 """
 
@@ -31,6 +33,7 @@ BACKOFF_SECONDS = 2.0  # waits 2 s, 4 s, then 8 s between attempts
 MAX_RESULTS_PER_QUERY = 500
 
 STEAM_SOURCE = 1  # external_game_sources id of Steam (the old external_games.category value)
+TWITCH_SOURCE = 14  # external_game_sources id of Twitch: the uid is a Twitch category id (checked 2026-11-21)
 PC_PLATFORM = 6  # "PC (Microsoft Windows)"
 # game_type values worth suggesting: main game, standalone expansion, remake, remaster, expanded game, port.
 # DLC, expansions, bundles, mods, episodes, seasons, forks, packs and updates are left out.
@@ -121,16 +124,25 @@ class IgdbClient(TwitchAppClient):
                                              f" limit {len(chunk)};"))
         return games
 
-    def games_for_steam_appids(self, appids: list[int]) -> list[dict]:
-        """IGDB's Steam records (external_games from the Steam source) for these app ids, as {game, uid} rows."""
-        uids = sorted({int(appid) for appid in appids})
+    def _external_games(self, source: int, uids: list[str]) -> list[dict]:
+        """IGDB's records of these ids at another service (external_games from `source`), as {game, uid} rows."""
         rows: list[dict] = []
         for start in range(0, len(uids), MAX_RESULTS_PER_QUERY):
             chunk = uids[start:start + MAX_RESULTS_PER_QUERY]
             quoted = ",".join(f'"{uid}"' for uid in chunk)
-            rows.extend(self.query("external_games", f"fields game,uid; where external_game_source = {STEAM_SOURCE}"
+            rows.extend(self.query("external_games", f"fields game,uid; where external_game_source = {source}"
                                                      f" & uid = ({quoted}); limit {MAX_RESULTS_PER_QUERY};"))
         return rows
+
+    def games_for_steam_appids(self, appids: list[int]) -> list[dict]:
+        """IGDB's Steam records (external_games from the Steam source) for these app ids, as {game, uid} rows."""
+        return self._external_games(STEAM_SOURCE, [str(appid) for appid in sorted({int(appid) for appid in appids})])
+
+    def games_for_twitch_categories(self, category_ids: list[str]) -> list[dict]:
+        """IGDB's Twitch records (external_games from the Twitch source) for these category ids, as {game, uid} rows.
+
+        Only whole-number ids are sent: Twitch category ids are digits."""
+        return self._external_games(TWITCH_SOURCE, sorted({str(uid) for uid in category_ids if str(uid).isdigit()}))
 
 
 def steam_appids(game: dict) -> list[int]:

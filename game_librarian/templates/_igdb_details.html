@@ -37,7 +37,7 @@
       <button class="button button-secondary button-large" type="button" data-wishlist-toggle data-key="{{ game.key }}" data-aliases="{{ game.aliases|join(' ') }}" data-name="{{ game.name }}" aria-describedby="wishlist-note-{{ game.key }}" hidden>Add to wishlist</button>
       <span class="small" data-wishlist-status role="status"></span>
     </p>
-    <p class="small muted wishlist-note" id="wishlist-note-{{ game.key }}" data-wishlist-note hidden>The Game Librarian wishlist is saved in this browser only. It is not your Steam wishlist. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
+    <p class="small muted wishlist-note" id="wishlist-note-{{ game.key }}" data-wishlist-note hidden>The Game Librarian wishlist is saved {% if request is defined and request.state.account and request.state.account.signed_in %}in your account{% else %}in this browser only{% endif %}. It is not your Steam wishlist. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
 
     {% set more = links if game.steam_url else links[1:] %}
     {% if more %}

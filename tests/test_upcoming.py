@@ -256,9 +256,11 @@ class FakeIgdbApi:
         if url == f"{API_BASE}/games":
             ids = [int(part) for part in body.split("where id = (")[1].split(")")[0].split(",")]
             return httpx.Response(200, json=[self.games[i] for i in ids if i in self.games])
-        if url == f"{API_BASE}/external_games":
+        if url == f"{API_BASE}/external_games":  # a row without external_game_source is IGDB's Steam record
             wanted = set(body.split("uid = (")[1].split(")")[0].replace('"', "").split(","))
-            return httpx.Response(200, json=[row for row in self.externals if row["uid"] in wanted])
+            source = int(body.split("external_game_source = ")[1].split(" ")[0])
+            return httpx.Response(200, json=[row for row in self.externals if row["uid"] in wanted
+                                             and row.get("external_game_source", 1) == source])
         return httpx.Response(404)
 
     def client(self) -> IgdbClient:
@@ -302,7 +304,7 @@ def refresh(conn, api, fake_steam, now, curated=None):
 
 def test_a_refresh_stores_records_snapshots_matches_and_catalog_links(settings, world, fake_steam):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         report = refresh(conn, world, fake_steam, now)
         assert report.status() == "success"
@@ -327,7 +329,7 @@ def test_a_refresh_stores_records_snapshots_matches_and_catalog_links(settings, 
 
 def test_a_later_refresh_notices_a_delay_and_keeps_games_that_left_the_lists(settings, world, fake_steam):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         refresh(conn, world, fake_steam, now)
         world.games[1]["release_dates"] = [entry("PC", day=date(2027, 2, 23))]  # Q4 2026 -> 23 Feb 2027
@@ -349,7 +351,7 @@ def test_a_later_refresh_notices_a_delay_and_keeps_games_that_left_the_lists(set
 def test_a_reviewer_decision_wins_and_an_igdb_outage_keeps_the_saved_lists(settings, world, fake_steam):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
     curated = CuratedData(steam_match_decisions={4: SteamMatchDecision(4, 600, "match", "2026-11-19", "a reviewer")})
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         refresh(conn, world, fake_steam, now, curated)
         assert store.igdb_game_rows(conn, [4])[4]["steam_appid"] == 600
@@ -367,7 +369,7 @@ def test_a_reviewer_decision_wins_and_an_igdb_outage_keeps_the_saved_lists(setti
 
 def test_without_steam_answers_a_stored_match_is_kept(settings, world, fake_steam):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         refresh(conn, world, fake_steam, now)
         fake_steam.down = True

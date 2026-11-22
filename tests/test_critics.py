@@ -279,7 +279,7 @@ def test_a_refresh_stores_matches_scores_and_review_items(settings):
     targets = [CriticTarget("500", "Moon Garden", steam_appid=500), CriticTarget("600", "No Article", steam_appid=600),
                CriticTarget("700", "Twin Game", steam_appid=700), CriticTarget("800", "Unknown", steam_appid=800)]
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with make_client(fake) as client:
             report = critics.refresh_critics(conn, client, targets, CuratedData(), log=lambda m: None, now=lambda: now)

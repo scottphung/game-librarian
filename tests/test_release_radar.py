@@ -269,7 +269,7 @@ def save_radar(settings):
     ]
     calculated = NOW - timedelta(hours=10)
     steam_order = [408, 407, *range(421, 428), 402, 406, 404, 401, 409]  # Far Frontier is 12th, Soon Saga 13th
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         store.save_igdb_games(conn, records, {}, [], now=(NOW - timedelta(hours=1)).isoformat(timespec="seconds"))
         store.save_popularity_snapshot(conn, "want_to_play", [
@@ -408,7 +408,7 @@ def test_the_radar_explains_missing_data(games, settings):
     save_upcoming(settings)
     card = chart(upcoming_page(client), "chart-radar")
     assert len(dots(card)) == 2  # Moon Garden on PC and PlayStation 5 (23 Feb 2027)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         conn.execute("DELETE FROM popularity_snapshots WHERE igdb_id = 1")  # only the games without a day are left
         conn.commit()
@@ -423,7 +423,7 @@ def test_the_radar_explains_missing_data(games, settings):
     assert '<div class="radar-group"><dt>TBA</dt>' in undated
     assert 'data-selected="101"' in undated  # the panel shows the first listed game instead: Game 01 Saga, Mar 2027
     # Saved lists whose games are all out: nothing upcoming to place.
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         conn.execute("DELETE FROM popularity_snapshots WHERE igdb_id IN (2, 4)")
         conn.commit()

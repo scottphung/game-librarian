@@ -187,7 +187,7 @@ def save_captures(settings, *, steam_at=None, steam=True, twitch_list=True):
                507: SteamMatch("needs_review", None, "Steam calls app 904 another name.")}
     saved = (NOW - timedelta(hours=1)).isoformat(timespec="seconds")
     calculated = NOW - timedelta(hours=10)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         store.save_igdb_games(conn, records, matches, [], now=saved)
         store.save_popularity_snapshot(conn, "want_to_play", [

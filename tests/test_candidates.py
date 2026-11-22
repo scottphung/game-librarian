@@ -29,7 +29,7 @@ def facts(**overrides) -> CandidateFacts:
 
 @pytest.fixture
 def conn(settings):
-    connection = store.initialize(settings.db_path)
+    connection = store.initialize(settings.database)
     yield connection
     connection.close()
 
@@ -297,7 +297,7 @@ def test_the_pilot_workflow_from_the_readme(settings, fake_steam, curated_files,
     fake_steam.add_game(100, "Catalog Game")
     fake_steam.add_game(500, "Award Game")
     assert cli.main(["sync", "--skip-discovery"]) == 0
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         assert [row["appid"] for row in store.matching_games(conn, [], [])] == [500, 100]  # A-Z: Award, Catalog
     finally:

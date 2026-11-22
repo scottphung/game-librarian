@@ -91,3 +91,25 @@ test("a game saved under its IGDB key is recognized once it is a catalog game, a
   assert.equal(Wishlist.toggle(storage, "2694490", "A", ["igdb-125642", "not a key"]), false);
   assert.deepEqual(Wishlist.read(storage), []);
 });
+
+test("a signed-in account's list uses the same key and alias rule as the browser's", () => {
+  const account = [{ id: "2694490", name: "Path of Exile 2" }, { id: 570, name: "Dota 2" }]; // ids as the server sends
+  assert.equal(Wishlist.listHas(account, "igdb-125642", ["2694490"]), true);
+  assert.equal(Wishlist.listHas(account, "570"), true);
+  assert.equal(Wishlist.listHas(account, "730"), false);
+  assert.equal(Wishlist.listHas([], "570"), false);
+});
+
+test("importing offers only the browser's games that the account lacks, and clearing removes only this list", () => {
+  const storage = fakeStorage({ other: "kept" });
+  Wishlist.toggle(storage, "570", "Dota 2");
+  Wishlist.toggle(storage, "101", "Game 01");
+  Wishlist.toggle(storage, "igdb-5", "Game 05");
+  const missing = Wishlist.missingFrom(Wishlist.read(storage), [{ id: "570", name: "Dota 2" }]);
+  assert.deepEqual(missing, [{ id: "101", name: "Game 01" }, { id: "igdb-5", name: "Game 05" }]); // oldest first
+  assert.deepEqual(Wishlist.missingFrom(Wishlist.read(storage), Wishlist.read(storage)), []);
+  assert.equal(Wishlist.read(storage).length, 3); // reading or comparing never changes the browser's list
+  Wishlist.clear(storage); // only when the visitor asks, once the account has every game
+  assert.deepEqual(Wishlist.read(storage), []);
+  assert.deepEqual(storage.data, { other: "kept" });
+});

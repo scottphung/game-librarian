@@ -47,7 +47,7 @@ def save_upcoming(settings, *, history=True):
                3: SteamMatch("none", None, "IGDB lists no Steam app for this game."),
                4: SteamMatch("verified", 101, "IGDB lists Steam app 101, and Steam's name for it is the same.")}
     earlier, latest = NOW - timedelta(days=8), NOW - timedelta(hours=1)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         store.save_igdb_games(conn, list(records.values()), matches, [], now=latest.isoformat(timespec="seconds"))
         delay = upcoming.DateChange("PC", "Q4 2026", "23 Feb 2027", "later")
@@ -149,7 +149,7 @@ def test_an_upcoming_game_has_igdb_details_without_steam_only_data(games, settin
 
 def test_a_steam_link_needs_a_verified_match(games, settings):
     save_upcoming(settings)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         store.save_igdb_games(conn, [], {}, [], now=NOW.isoformat())
         conn.execute("UPDATE igdb_games SET steam_match = 'needs_review', steam_appid = NULL, "
@@ -178,7 +178,7 @@ def test_keys_resolve_to_one_game_and_unknown_keys_are_not_found(games, settings
 
 
 def save_critics(settings, status="verified"):
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         store.save_critics(conn, "101", {
             "status": status, "reason": "checked", "wikidata_ids": ["Q1"], "article_title": "Game 01",

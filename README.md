@@ -34,13 +34,21 @@ pages in Power BI Desktop (Trending games is on the website only). Prices are su
 price filter, and Steam is always the place to confirm the final price. On the computer that runs the site, Sales &
 reception first charts **Estimated Steam copies sold** from Gamalytic's free API: a local evaluation only, because
 Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only)).
+On that computer only, Trending's Most watched list becomes **Most watched among tracked Twitch categories**: the
+tracked game and series categories in **TwitchTracker's** rank order, with its average viewers, instead of Twitch's
+moment-in-time order, because TwitchTracker publishes no terms that allow sharing its figures (see
+[Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker)).
 
 - **Backend:** FastAPI, with server-rendered Jinja templates and three small scripts (`static/app.js`,
   `static/wishlist.js`, `static/trivia.js`) that progressively enhance filters, the details dialog, the trailer clip,
   the dashboard's report pages (the radar's selected game and windows, chart tooltips, arrow keys between a
   scatterplot's dots, the waterfall's player line), the wishlist and Daily Trivia.
   Every page also works without them; the wishlist and Daily Trivia need JavaScript.
-- **Storage:** one SQLite file, written by separate commands (`sync`, `candidates`).
+- **Storage:** one SQLite file on your computer, written by separate commands (`sync`, `candidates`); or, for the
+  hosted site, Azure Database for PostgreSQL, with the same tables (see
+  [Hosted architecture (Azure)](#hosted-architecture-azure) and [DEPLOYMENT.md](DEPLOYMENT.md)).
+- **Accounts (hosted site):** optional sign-in through Azure Container Apps' built-in authentication; a signed-in
+  visitor's wishlist is kept privately in their account. Without sign-in, the wishlist stays in the browser.
 - **Catalog:** hand-picked games (`curated/games.csv`) plus games promoted through a reviewed candidate workflow
   (`curated/promoted_games.csv`). Every catalog game is a verified Steam app.
 - **Not included (by design):** RAG, LLMs, prediction models, machine-learned recommendations, wiki links or lore,
@@ -60,7 +68,8 @@ Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sol
 7. [Collections and sort orders](#collections-and-sort-orders)
 8. [Ranking](#ranking)
 9. [Prices, player counts and snapshots](#prices-player-counts-and-snapshots)
-10. [Trending](#trending) (Trending now & recently released, Steam activity, refreshing it)
+10. [Trending](#trending) (Trending now & recently released, Most watched on Twitch and TwitchTracker, Steam activity,
+    refreshing it)
 11. [Upcoming & Anticipated](#upcoming--anticipated)
 12. [Platforms and release dates](#platforms-and-release-dates)
 13. [Game identity and the wishlist](#game-identity-and-the-wishlist)
@@ -74,7 +83,7 @@ Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sol
 21. [How the sync works](#how-the-sync-works)
 22. [Curated awards and classifications](#curated-awards-and-classifications)
 23. [Current architecture](#current-architecture)
-24. [Future cloud architecture](#future-cloud-architecture)
+24. [Hosted architecture (Azure)](#hosted-architecture-azure)
 25. [Limitations](#limitations)
 26. [Verification status](#verification-status)
 27. [Future work](#future-work)
@@ -107,8 +116,13 @@ serves pages. It shows the data saved by the last successful sync.
 | `GAME_LIBRARIAN_CURATED_DIR` | No | Folder with the curated CSV files. Default: `curated/`. |
 | `GAME_LIBRARIAN_REVIEW_LANGUAGE` | No | Steam language code for review excerpts. Default: `english`. |
 | `GAME_LIBRARIAN_STEAM_COUNTRY` | No | Two-letter Steam store region whose prices the sync reads, such as `US`, `GB` or `CA`. Default: `US`; a malformed value falls back to `US`. |
-| `IGDB_CLIENT_ID` | No | Client ID of your Twitch application. It turns on the cross-platform Trending lists (Upcoming & Anticipated, Trending now & recently released), "Watch it live" and the optional IGDB candidate source. See [IGDB (optional)](#igdb-optional). |
+| `IGDB_CLIENT_ID` | No | Client ID of your Twitch application. It turns on the cross-platform Trending lists (Upcoming & Anticipated, Trending now & recently released, including the Twitch categories that TwitchTracker is asked about), "Watch it live" and the optional IGDB candidate source. TwitchTracker itself needs no key. See [IGDB (optional)](#igdb-optional). |
 | `IGDB_CLIENT_SECRET` | No | Client secret of the same Twitch application. Both IGDB variables must be set to use IGDB and Twitch; the Steam catalog, the Steam sync and every other page work without them. |
+| `GAME_LIBRARIAN_DATABASE_URL` | No | The hosted site's PostgreSQL database, such as `postgresql://gl_app@<server>.postgres.database.azure.com/game_librarian`, without the password. When set, every command and the website use it instead of the SQLite file; TLS with full certificate and host-name checks (`sslmode=verify-full`) is required for any server but this computer. See [DEPLOYMENT.md](DEPLOYMENT.md). |
+| `PGPASSWORD` | With the database URL | The password of the role in `GAME_LIBRARIAN_DATABASE_URL` (libpq's own variable). Set it only for the session or as a Container Apps secret, never in a file that is committed. |
+| `GAME_LIBRARIAN_HOSTED` | No | `1` in the container image: a hosted process. It requires the PostgreSQL database, never shows Gamalytic's or TwitchTracker's figures, and makes `sync` fail when a source it should refresh lacks its credentials. |
+| `GAME_LIBRARIAN_SIGN_IN_PROVIDERS` | No | The providers of Azure Container Apps' built-in authentication, such as `github`. Only then are the platform's identity headers trusted and accounts offered. |
+| `GAME_LIBRARIAN_ALLOWED_USERS` | No | Who may keep an account (provider user names or emails, or `provider:name`); empty: everyone who signs in. |
 | `GAME_LIBRARIAN_CONTACT` | No | An email address or website **you choose**, sent only in the User-Agent of requests to Wikipedia and Wikidata, whose policy asks automated clients for contact information. Without it, critic scores are not read. See [What the critics said](#what-the-critics-said). |
 
 Settings are loaded automatically from the project-root `.env` file if it exists. Environment variables already set
@@ -139,18 +153,21 @@ All commands run from the project folder with the virtual environment's Python.
 
 | Command | What it does |
 | --- | --- |
-| `python -m game_librarian sync` | Discovers changes (when a key is set); refreshes stale details, tags, covers and reviews (each review refresh also saves a dated review snapshot); reads the current Steam price of every catalog game for the store region; and saves a dated player-count snapshot of every catalog game. Then, when they are configured and due, it runs `upcoming`, `critics` and `sales-estimates`. |
+| `python -m game_librarian sync` | Discovers changes (when a key is set); refreshes stale details, tags, covers and reviews (each review refresh also saves a dated review snapshot); reads the current Steam price of every catalog game for the store region; and saves a dated player-count snapshot of every catalog game. Then, when they are configured and due, it runs `upcoming`, `most-watched`, `critics` and `sales-estimates`. |
 | `python -m game_librarian sync --force` | Refreshes every curated game, even recent ones. |
 | `python -m game_librarian sync --limit 5` | Syncs only the first 5 curated games. Use it for a quick test. |
 | `python -m game_librarian sync --appid 1086940` | Syncs one curated game. You can repeat `--appid`. |
-| `python -m game_librarian sync --skip-reviews` / `--skip-discovery` / `--skip-prices` / `--skip-players` / `--skip-upcoming` / `--skip-critics` / `--skip-sales` | Leaves out one part of the sync. |
-| `python -m game_librarian upcoming [--force]` | Refreshes the cross-platform Trending lists (needs the IGDB variables): IGDB PopScore for Upcoming & Anticipated and Most wanted new releases, Twitch's top games for Most watched on Twitch, the IGDB records (platforms and release dates) of every listed and catalog game, and the catalog's IGDB links. Prints the four lists. Without `--force` it does nothing if the last refresh is less than 20 hours old. `sync` runs it too. |
+| `python -m game_librarian sync --skip-reviews` / `--skip-discovery` / `--skip-prices` / `--skip-players` / `--skip-upcoming` / `--skip-most-watched` / `--skip-critics` / `--skip-sales` | Leaves out one part of the sync. |
+| `python -m game_librarian upcoming [--force]` | Refreshes the cross-platform Trending lists (needs the IGDB variables): IGDB PopScore for Upcoming & Anticipated and Most wanted new releases, Twitch's top games for Most watched on Twitch (with IGDB's own record of each category), the IGDB records (platforms and release dates) of every listed and catalog game, and the catalog's IGDB links. Prints the four lists. Without `--force` it does nothing if the last refresh is less than 20 hours old. `sync` runs it too. |
+| `python -m game_librarian most-watched [--force]` | Asks TwitchTracker's free API (no key) for the rank and average viewers of the tracked categories: the game and series categories in Twitch's newest top list (from `upcoming`; without a list from the last 24 hours, those chosen from the last one) and every game or series category reviewed in `curated/twitch_categories.csv`, each category at most once in 20 hours, one request every 1.5 seconds. `--force` asks about every tracked category now. Prints the list as the Trending page shows it on this computer (places 1 to 10, each with TwitchTracker's category rank) and what it leaves out. `sync` runs it after `upcoming` when the IGDB variables are set. The figures are shown only on the computer that runs the site; see [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker). |
 | `python -m game_librarian critics [--appid N] [--limit N] [--force]` | Reads critic scores from English Wikipedia for the games that are due (each game once in 30 days; needs `GAME_LIBRARIAN_CONTACT`). `sync` runs it too. |
 | `python -m game_librarian critics --review` | Lists the article matches and scores that wait for a person, with the reason (no network). |
 | `python -m game_librarian sales-estimates [--force]` | Asks Gamalytic's free API (no key) for the estimated Steam copies sold of every catalog game that is due: each game once in 7 days, 100 games per request (3 requests for 238 games). `--force` asks about every game now. `sync` runs it too. The estimates are shown only on the computer that runs the site; see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only). |
 | `python -m game_librarian serve [--port 8000] [--reload]` | Runs the web app at <http://127.0.0.1:8000>. |
-| `python -m game_librarian status` | Shows catalog counts, the stored prices and snapshot history, the cross-platform Trending lists, critic scores, the sales estimates, the Twitch caches (live streams, most-watched list) and the most recent sync runs with their outcomes. |
-| `python -m game_librarian check-curated` | Validates the curated CSV files (including the reviewer decisions in `steam_matches.csv` and `critic_articles.csv`), the publisher aliases, the Data Story files and the Daily Trivia questions (`trivia.json`), and lists problems with their file and line. |
+| `python -m game_librarian status` | Shows catalog counts, the stored prices and snapshot history, the cross-platform Trending lists, critic scores, the sales estimates, the Twitch caches (live streams, most-watched list), TwitchTracker's figures and the most recent sync runs with their outcomes. |
+| `python -m game_librarian check-curated` | Validates the curated CSV files (including the reviewer decisions in `steam_matches.csv`, `critic_articles.csv` and `twitch_categories.csv`), the publisher aliases, the Data Story files and the Daily Trivia questions (`trivia.json`), and lists problems with their file and line. |
+| `python -m game_librarian init-postgres [--grant-to ROLE]` | Creates or upgrades the PostgreSQL tables (`GAME_LIBRARIAN_DATABASE_URL`, with a role that may create tables), keeping existing rows, and lets each `--grant-to` role read and write rows but never change tables. |
+| `python -m game_librarian migrate-to-postgres [--check] [--replace] [--from FILE]` | Copies the SQLite catalog into PostgreSQL after checking it, in one transaction, and compares every table's rows and checksum. The SQLite file is only read. Gamalytic's and TwitchTracker's tables are not copied; accounts are never touched. `--replace` empties the hosted catalog tables first. See [DEPLOYMENT.md](DEPLOYMENT.md). |
 | `python -m game_librarian export-report [--out DIR]` | Writes the Power BI report's CSV tables (default `reporting/data/`) from the catalog and curated files, and points the report at that folder. Run it after `sync`. |
 | `python -m game_librarian candidates add --source discovery\|awards\|igdb [--limit N]` | Collects candidate games (see [Growing the catalog](#growing-the-catalog)). Never changes the catalog. |
 | `python -m game_librarian candidates screen [--limit N] [--min-reviews 50] [--min-positive 70] [--recheck-days D]` | Checks due candidates against Steam, 50 apps per request, and applies the inclusion rules. |
@@ -159,7 +176,7 @@ All commands run from the project folder with the virtual environment's Python.
 | `python -m game_librarian candidates reject --appid N --reason "..."` / `match --id N --appid M` | Records a "no", or confirms the Steam app of a title-only candidate. |
 | `python -m pytest` | Runs the test suite (Python, plus the wishlist's JavaScript tests when Node.js is installed). It needs no network access and no key. |
 
-Exit codes for `sync`, `upcoming`, `critics` and `sales-estimates` (for `sync`, the worst of its steps):
+Exit codes for `sync`, `upcoming`, `most-watched`, `critics` and `sales-estimates` (for `sync`, the worst of its steps):
 
 | Code | Meaning |
 | --- | --- |
@@ -184,6 +201,7 @@ The other sources refresh on their own cadence, also only when a command runs:
 | Critic scores | `sync` or `critics` | Each game once in 30 days; a failed read is retried after a day | First run for 238 games: 3 Wikidata queries and 24 Wikipedia requests (about 1 minute); later runs read only the games that are due |
 | Live streams | Opening a game's details | At most once per 5 minutes per game; after a failure, not before 2 minutes or Twitch's reset time | 2 Twitch requests per check; answers are deleted after 24 hours |
 | Estimated Steam copies sold (Gamalytic) | `sync` or `sales-estimates` | Each game once in 7 days; `sales-estimates --force` asks now. Older collections are kept. At most 50 requests in any 24 hours (Gamalytic allows free users 250 a day); an HTTP 429 answer stops the run | 3 requests for 238 games (100 per request), at most one a second |
+| Most watched by TwitchTracker (shown on this computer only) | `sync` (after `upcoming`) or `most-watched` | Each tracked category once in 20 hours; `most-watched --force` asks now. Only the newest figures are kept. At most 200 requests in any 24 hours (TwitchTracker documents no limit); an HTTP 403 or 429 answer stops the run | One request per tracked category that is due: 79 on 2026-11-21 (about 2 minutes at one request every 1.5 seconds); after a new Twitch list, only the categories new to it (21 that day) |
 
 ## Growing the catalog
 
@@ -364,8 +382,8 @@ Discover has a "Discover." headline, a filter sidebar and the catalog.
   when a mode is selected, and its details say "Not listed on Steam": missing data is not shown as "unsupported".
   Selected modes stay in every search, sort, view, collection, page and details link.
 - **Wishlist.** **Add to wishlist** / **Remove from wishlist** in the details (also for upcoming games and games
-  that are not on Steam), and the star in the header. This is Game Librarian's own list, not your Steam wishlist. It is saved in browser local storage: only in this browser
-  on this device, never synced across browsers or devices, never sent to the server, and erased when the site's
+  that are not on Steam), and the star in the header. This is Game Librarian's own list, not your Steam wishlist.
+  Without sign-in it is saved in browser local storage: only in this browser on this device, never synced across browsers or devices, never sent to the server, and erased when the site's
   browser data is cleared (or by some private windows). It needs JavaScript; if the browser blocks storage, the
   details and the wishlist page say so instead of showing a button that cannot work. Damaged stored data is read as
   an empty list.
@@ -618,12 +636,13 @@ Rule, Order or Limits where they apply) is under **About this list**, and each p
 | [Upcoming & Anticipated](#upcoming--anticipated) | Most wanted on IGDB | IGDB PopScore "Want to Play" order, games not out on any platform | All platforms | IGDB, `upcoming` refresh (at most every 20 hours) |
 | | Most wishlisted on Steam | IGDB PopScore "Most Wishlisted Upcoming": positions in Steam's most-wishlisted list | Steam only | IGDB (source Steam), same refresh |
 | [Trending now & recently released](#trending-now--recently-released) | Most wanted new releases | The same "Want to Play" order, games first released in the last 90 days | All platforms | IGDB, same refresh |
-| | Most watched on Twitch | Twitch's own order of categories by current viewers | All platforms | Twitch, same refresh; deleted after 24 hours |
+| | Most watched on Twitch | Twitch's own order of categories by current viewers; on the computer that runs the site, "Most watched among tracked Twitch categories": the tracked game and series categories in TwitchTracker's rank order, with its rank and average viewers | All platforms | Twitch, same refresh, deleted after 24 hours; TwitchTracker, `most-watched` (local evaluation only) |
 | [Steam activity](#steam-activity) | Popular on Steam right now; released this year or since 2021 with strong Steam reception; recent changes on Steam | Steam players in game, Steam review labels, changes between dated Steam snapshots | Steam only, catalog games | Steam, `sync` |
 
-The page never calls IGDB, Twitch or Steam while it is served: it shows what the last refresh and sync saved. In
-this project "trending" means **attention measured at one moment**; no list claims a change over a week, and none
-is a count of players across platforms or a sales figure.
+The page never calls IGDB, Twitch, TwitchTracker or Steam while it is served: it shows what the last refresh and sync
+saved. In this project "trending" means **attention as measured at the last refresh** (at one moment, or, for
+TwitchTracker's averages, over a period before it that TwitchTracker does not confirm); no list claims a change over a
+week, and none is a count of players across platforms or a sales figure.
 
 ### Trending now & recently released
 
@@ -647,25 +666,122 @@ version and no Steam app listed) was first in this list, by the live data and th
   not make it recent; such a game can still appear in Most watched on Twitch.
 - Cancelled or rumored games, DLC, bundles and other kinds that Upcoming & Anticipated leaves out are left out here.
 
-**Most watched on Twitch.** Twitch's own list of "the categories and games that have the most viewers on Twitch",
-"sorted by the number of viewers, with the most popular first" (Get Top Games, Twitch API reference, read
-2026-11-19). Twitch gives the **order only, with no viewer numbers**, so only the order is shown, as checked at the
-refresh (the time is on the page); it is one moment, not a trend, and it changes through the day.
-
-- The first 100 categories are read. A category is a game here only through the IGDB id Twitch gives it: categories
-  without one (on 19 Nov 2026: Just Chatting, IRL, Slots, Art and also *Dota 2* and *Counter-Strike*) and IGDB
-  entries of other kinds (DLC, bundles) are left out, and the page counts them. On 19 Nov 2026, 79 of the 100
-  categories had an IGDB id.
-- Twitch decides which IGDB game a category stands for: a broad category (such as "Call of Duty") can point to the
-  series' first game. Each row shows its place in Twitch's list, Twitch's category name when it differs from IGDB's,
-  and a **Watch on Twitch** link (a clear path to the source).
-- Twitch's terms allow keeping its data for at most 24 hours: the list is replaced at each refresh and deleted 24
-  hours after Twitch answered (by the next refresh, the Trending page and `status`), and no history is kept.
-
 **Investigated and not used** (all checked live on 2026-11-19): IGDB PopScore "Playing" (type 3; only 9 of its top
 1,000 games were first released in the last 90 days, and *Grand Theft Auto VI*'s value still predated its launch),
 "Visits" (type 1; its top 25 included adult and novelty titles), "Played" (type 4; classics) and IGDB's "Twitch Hours
 Watched" (type 34; IGDB calculated it the evening before, so *Grand Theft Auto VI* had 0.0 on its launch day).
+
+### Most watched on Twitch (Twitch's order and TwitchTracker)
+
+The second list of Trending now & recently released has two views of the same Twitch categories. Every visitor sees
+**Most watched on Twitch**, in **Twitch's own order**; a browser on the computer that runs the site sees **Most
+watched among tracked Twitch categories**, in **TwitchTracker's rank order** with its average viewers, because
+TwitchTracker publishes no terms that allow sharing its figures (see
+[TwitchTracker](#twitchtracker-checked-2026-11-21)). In both, each game opens its details, and every entry has a
+**Watch on Twitch** link to its Twitch category (a clear path to the source).
+
+**What a category stands for.** The `upcoming` refresh reads Twitch's first 100 categories (Get Top Games; 100 is the
+most that one request returns) and, in one more IGDB query, IGDB's own record of each one (IGDB lists a game's Twitch
+category among its external ids, source 14). A category is listed only by these identifiers, never by its name
+(`twitch.resolve_category`):
+
+1. A reviewer's row in `curated/twitch_categories.csv` decides first: `match` names the one IGDB game the category
+   stands for; `series` marks a category for a whole game series, listed under the series name and never as one of
+   its games; `no_match` keeps the category out (not a game, or no game can be told).
+2. Otherwise the IGDB id Twitch gives the category and IGDB's own record of the category must name one and the same
+   game. Either one alone is enough; when they name different games, the category is left out.
+
+Checked live on 2026-11-21 against that day's 100 categories: for 80, Twitch's IGDB id and IGDB's record named the
+same game; IGDB alone named *Dota 2* (Twitch gives it no IGDB id, so before 0.18 it was left out) and
+*Counter-Strike*; for *Call of Duty: Warzone* Twitch named IGDB game 131800 and IGDB's record named 119177, so it is
+left out; the other 17 had no game on either side (Just Chatting, IRL, Slots and the like, but also *StarCraft II*).
+Just Chatting and the other categories that are not games are never listed. The shipped
+`curated/twitch_categories.csv` has two rows, each with its evidence in `note`:
+
+- **Dota 2** (category 29595) is a `match` to IGDB game 2963. Twitch's Get Games names the category "Dota 2" and
+  gives it no IGDB id; IGDB's own record of the category names game 2963, *Dota 2*, whose Steam record is app 570.
+  The row keeps Dota 2 listed even without IGDB's record of the category, as in a Twitch list saved before 0.18.
+- **Counter-Strike** (category 32399) is a `series`. Twitch renamed its Counter-Strike: Global Offensive category to
+  "Counter-Strike" on 25 Sep 2023, and today both Counter-Strike 2 (IGDB 242408, Steam app 730) and Counter-Strike:
+  Global Offensive (IGDB 1372, Steam app 4465480, free) are on Steam, so its streams can be either game, while IGDB's
+  record names CS:GO alone. It was `no_match`, so left out, in 0.18.
+
+A series entry shows the series name with a **Series category** label, its Twitch category name, the list's figures
+and the Watch on Twitch link. It has no cover (an empty frame), no platforms and no details link, and no other list or
+dashboard chart counts it as a game. Each list counts what it leaves out, and why ("Left out at this check" /
+"Not listed").
+
+To settle a category yourself, add a row, run `check-curated`, and reload the page (the website applies it at once;
+the next `upcoming` and `most-watched` use it too). `title` is Twitch's category name, exactly as Twitch shows it: a
+`match` or `series` row needs it, because a series is listed under it and, for a category outside Twitch's list, it
+also makes the Watch on Twitch link. `igdb_id` is for `match` only. The first row below is only a format example,
+not shipped:
+
+```csv
+twitch_category_id,title,decision,igdb_id,checked_on,checked_by,note
+490422,StarCraft II,match,239,2026-12-01,Your Name,One game with its expansions; IGDB's base game is Wings of Liberty
+32399,Counter-Strike,series,,2026-11-21,Your Name,Covers Counter-Strike 2 and Counter-Strike: Global Offensive
+```
+
+**Twitch's order (every visitor).** Twitch's own list of "the categories and games that have the most viewers on
+Twitch", "sorted by the number of viewers, with the most popular first" (Get Top Games, Twitch API reference, read
+2026-11-19). Twitch gives the **order only, with no viewer numbers**, so only the order is shown, as checked at the
+refresh (the time is on the page); it is one moment, not a trend, and it changes through the day. Each row shows its
+place in Twitch's list and Twitch's category name when it differs from IGDB's; a reviewed series category appears at
+its place as a series, and another broad category can still point to its series' first game. Twitch's terms allow
+keeping its data for at most 24 hours: the list is replaced at each refresh and deleted 24 hours after Twitch
+answered (by the next refresh, the Trending page and `status`), with no history.
+
+**TwitchTracker's view (this computer only).** `python -m game_librarian most-watched`, which `sync` runs after
+`upcoming`, asks TwitchTracker's free category summary (`twitchtracker.com/api/games/summary/<category id>`, no key)
+about each **tracked category**. The list then shows:
+
+- **The tracked categories only.** Every game and series category among Twitch's first 100 categories at the last
+  refresh (the whole answer, not just its top 10: 79 at 18:55 UTC on 2026-11-21), and every `match` or `series` row of
+  `curated/twitch_categories.csv`, whether Twitch's list includes it or not. Each category is asked about once, even
+  when it is both in Twitch's list and reviewed. **This can miss a game:** Twitch's list is one moment, while
+  TwitchTracker's figures cover a longer period, so a game that TwitchTracker ranks high but that was outside
+  Twitch's top 100 when `upcoming` ran (after an event earlier in the week, or at a quiet hour) is missing unless a
+  reviewed row tracks it. No documented TwitchTracker endpoint returns its complete ranking, so the site cannot tell
+  what it misses. "Coverage" gives the number tracked.
+- **Places 1 to 10, with TwitchTracker's own rank beside them.** The tracked entries with figures are sorted by
+  TwitchTracker's rank (equal ranks by more average viewers), and the first 10 are numbered 1 to 10 without gaps, as
+  places in this list. Each line gives TwitchTracker's rank as returned, such as "TwitchTracker category rank #8".
+  That rank counts every Twitch category, so it skips numbers (on 2026-11-21, #2 was Just Chatting). A place is never
+  called a TwitchTracker rank, and the list is titled "Most watched among tracked Twitch categories", not
+  TwitchTracker's top 10 games. A game reached by two categories is listed once, at its better rank.
+- **Average viewers and average channels** beside it. TwitchTracker does not say how it ranks, and its rank does not
+  always follow these averages: on 2026-11-21, 20 of 76 neighbouring ranks were out of viewer order (Fortnite #6 with
+  53,317 average viewers, ROB RUN #7 with 60,497). The page says so and keeps TwitchTracker's order.
+- **The source and the retrieval time** ("Source: TwitchTracker · retrieved 21 Nov 2026, 17:03 UTC to 21 Nov 2026,
+  18:55 UTC · period not confirmed": the oldest and newest figures shown, as a run asks only the categories that
+  are due), with the age in days once the newest are a day old, and a "Stale" note once they are 20 hours old or
+  more. A category whose last check failed, or that a run did not reach (figures 20 hours or more older than the
+  newest), keeps its previous figures and says when they were retrieved; a failed or partial refresh is named
+  above the list.
+- **Missing figures left out, never shown as zero.** "Not listed" counts them by reason: TwitchTracker has no summary
+  of the category (it answered `{}`), not asked yet, or a failed check with no earlier figures.
+- **"Period not confirmed".** TwitchTracker's API page says "Category summary for 30 days", but in every answer
+  checked on 2026-11-21, hours watched divided by average viewers was at most 168.2 hours (1,009 ten-minute samples,
+  7 days): exactly that for categories streamed all week, less for a game streamed only part of it and for tiny,
+  rounded averages. The answer carries no dates or period, and the rank does not follow the averages, so the site
+  claims no period and stores none.
+
+The dashboard uses the same figures on this computer: Upcoming releases' selected-game panel gives a game's
+TwitchTracker category rank and average viewers when the list names the same IGDB game (most upcoming games are not
+streamed enough), and Sales & reception counts this list as "Most watched among tracked Twitch categories". A series
+category stands for no single game, so neither one matches it to a game. No TwitchTracker figure is combined with
+IGDB's or Steam's ranks into a score.
+
+**Caching and failures.** A category is asked again only 20 hours after its last answer (`--force` asks now); at most
+one request every 1.5 seconds and 200 in any 24 hours, counted from this site's own runs (TwitchTracker documents no
+limit). Timeouts and server errors are tried 3 times; HTTP 403 or 429, or an answer that is not JSON (such as a
+challenge page), stops the run at once and is never worked around; an answer without a valid rank or average viewers
+skips that category only. An answer of `{}` (TwitchTracker has no summary of the category) clears its figures, so an
+old rank is never shown as current. Only the newest figures are kept, with no history, so no change between two
+answers is ever shown. Without a Twitch list from the last 24 hours, `most-watched` asks about the categories chosen
+from the last one (except one a reviewer has since marked `no_match`) and the reviewed ones; a category that leaves
+Twitch's list is dropped with its figures at the next refresh, unless a reviewed row tracks it.
 
 ### Steam activity
 
@@ -690,9 +806,13 @@ a game that left Early Access by its full release (Valheim and Palworld appear a
 ```powershell
 cd project
 .\.venv\Scripts\python.exe -m game_librarian upcoming --force   # the cross-platform lists, now (IGDB and Twitch)
+.\.venv\Scripts\python.exe -m game_librarian most-watched       # TwitchTracker's figures for those categories
 .\.venv\Scripts\python.exe -m game_librarian sync               # Steam data, then the lists when they are due
 .\.venv\Scripts\python.exe -m game_librarian serve              # then open http://127.0.0.1:8000/trending
 ```
+
+`most-watched` asks only about categories not answered in the last 20 hours (`--force` asks again now); run it after
+`upcoming`, as `sync` does, so it uses Twitch's newest list.
 
 `upcoming` without `--force` does nothing when the last refresh is less than 20 hours old, so a daily `sync`
 refreshes everything once a day. Twitch's list is then missing for the few hours between its deletion (24 hours after
@@ -785,6 +905,15 @@ on the day the page is served, so a platform moves from "announced" to "availabl
 
 ## Game identity and the wishlist
 
+**Where the wishlist is kept.** By default in the browser (`static/wishlist.js`, local storage), as before. On the
+hosted site with sign-in turned on (`GAME_LIBRARIAN_SIGN_IN_PROVIDERS`), a signed-in visitor's wishlist is kept in
+their account in PostgreSQL (`accounts`, `wishlist_items`), private to them: every request reaches only the account
+of the person the platform signed in (the provider's id for them), and changes must be JSON requests from the
+site's own pages. The same key and alias rules apply. A browser list is never sent or deleted by itself: once
+signed in, the wishlist page offers to add the browser's missing games to the account and, only when the account
+has all of them, to remove the browser's copy. `/account` has Sign out and Delete my account data. An account keeps
+at most 500 games.
+
 Every page link, cache entry and wishlist entry uses a **game key** (`game_librarian/identity.py`):
 
 - a catalog game keeps its Steam app id ("271590"), exactly as before;
@@ -818,8 +947,9 @@ own domain, and an official website only when its domain is also the official we
 publisher or developer (*Grand Theft Auto VI*: rockstargames.com/VI, Rockstar Games: rockstargames.com). Verified
 links come first; any other link IGDB lists is shown as "Also listed by IGDB, not verified".
 
-**The wishlist** stays Game Librarian's own, browser-local list: it is never synced with Steam or sent to the server,
-and it lives in one browser on one device. Its storage key (`game-librarian-wishlist-v1`) and format (a list of
+**The wishlist** stays Game Librarian's own list, never synced with Steam. Without sign-in it is browser-local, never
+sent to the server, in one browser on one device; a signed-in visitor's list is kept in their account (see the start
+of this section). Its storage key (`game-librarian-wishlist-v1`) and format (a list of
 `{id, name}`) are unchanged; ids may now also be IGDB keys. Wishlists saved by earlier versions are therefore read
 exactly as they are, without a migration step, and reading never rewrites them (tested in
 `tests/js/wishlist.test.mjs`). A catalog game's wishlist button lists its other keys as aliases: a game saved as
@@ -914,6 +1044,7 @@ These measure different things, and the site never presents one as another:
 | Players or viewers now | Popular right now; a stream's viewers in Watch it live | One moment on Steam (players) or Twitch (viewers) | Owners, sales or a trend |
 | PopScore values | Most wanted on IGDB, Most wanted new releases | IGDB's relative shares or list positions | Counts of people or wishlists |
 | Chart positions | Steam's most-wishlisted list; Twitch's most-watched order | A rank among other games or Twitch categories, at one moment | Unit sales, revenue, or a count of players or viewers |
+| TwitchTracker's figures | Most watched among tracked Twitch categories, on the computer that runs the site only | TwitchTracker's rank among all Twitch categories (beside a place 1 to 10 in this list) and its average viewers and channels of a category, over a period it does not confirm | Twitch's own figures, a count of players, a trend, TwitchTracker's top 10 games, or a complete ranking of games |
 | Physical resale prices | Not shown | Marketplace prices of physical copies (for example PriceCharting) | Steam's digital prices |
 | Estimated Steam copies sold | The Estimated Steam copies sold chart (Dashboard > Trending games > Sales & reception), on the computer that runs the site only | Gamalytic's model estimate of copies bought directly on Steam, all time up to the collection | Sales reported by publishers, sales on other platforms or stores, key activations, sales in a period, or revenue |
 | Unit sales reported by publishers, revenue | Not shown | Not published per game by Valve; Gamalytic's free answers leave revenue out | Anything this site calculates: copies are never multiplied by a price |
@@ -1262,7 +1393,10 @@ capture (`game_librarian/list_comparison.py`; the radar reads the same distinct 
   IGDB. Of those, Y had a verified Steam listing", plus how many of those Y were already in early access. With a
   capture missing, from two refreshes, or without an upcoming game, the card shows the coverage it has and no groups.
 - **Twitch** is context only: where Twitch's newest list names the same IGDB game, the selected game's panel gives
-  its place with a link to Twitch. It is not in the comparison, and no Twitch history is kept (24-hour cache).
+  its place with a link to Twitch. It is not in the comparison, and no Twitch history is kept (24-hour cache). On the
+  computer that runs the site, the panel gives its TwitchTracker category rank (among all Twitch categories) and
+  its average viewers instead ("period not confirmed"), on a line of their own, never combined with the list
+  ranks. A series category, such as Counter-Strike, is never any game's entry.
 - **Real data, captures of 2026-11-20 16:55 UTC** (a copy of the database, checked 2026-11-21): 44 distinct upcoming
   games = 25 + 25 − 6; 19 seen only on IGDB, 6 on both, 19 only on Steam, 0 unresolved. Of the 19, 14 had a verified
   Steam listing and 9 of those 14 were already in early access, while none of the 25 games of Steam's capture was.
@@ -1423,6 +1557,7 @@ field has its own source:
 | Candidate suggestions and Steam ids (optional) | `api.igdb.com/v4/games` | Yes ([IGDB API docs](https://api-docs.igdb.com/)) | Needs Twitch app credentials. Used only server side; candidate data is not displayed. See [IGDB (optional)](#igdb-optional). |
 | Trending lists: PopScore values, records (platforms, release dates, companies, websites) of listed and catalog games, catalog apps' IGDB ids (optional) | `api.igdb.com/v4/popularity_primitives`, `/games`, `/external_games` | Yes | Needs Twitch app credentials. Displayed with credit to IGDB.com. Checked live on 2026-11-19. See [Trending](#trending). |
 | Most watched on Twitch (optional) | `api.twitch.tv/helix/games/top?first=100` (Get Top Games) | Yes ([Twitch API reference](https://dev.twitch.tv/docs/api/reference/#get-top-games)) | Same Twitch application, app access token, server side only. The order of categories by current viewers, with each category's IGDB id; no viewer numbers. Kept at most 24 hours, no history. Checked live on 2026-11-19. |
+| Most watched on Twitch, TwitchTracker's view (shown on the computer that runs the site only) | `twitchtracker.com/api/games/summary/<Twitch category id>` | In two lines, by TwitchTracker ([API page](https://twitchtracker.com/api)) | No key. JSON `avg_viewers`, `avg_channels`, `rank`, `hours_watched`; HTTP 200 with `{}` for an unknown or untracked category; no dates, period field or rate-limit headers. One category per request, at most one every 1.5 s and 200 in 24 hours. Checked live on 2026-11-21. See [TwitchTracker](#twitchtracker-checked-2026-11-21). |
 | Live streams (optional) | `api.twitch.tv/helix/games?igdb_id=` and `/helix/streams` | Yes ([Twitch API reference](https://dev.twitch.tv/docs/api/reference/)) | Same Twitch application, app access token, server side only, cached at most 24 hours. Checked live on 2026-11-19. See [Watch it live](#watch-it-live). |
 | Critic scores (optional) | Wikidata Query Service (`query.wikidata.org/sparql`) and the English Wikipedia Action API (`action=query&prop=revisions`) | Yes ([Action API](https://www.mediawiki.org/wiki/API:Main_page)) | Needs `GAME_LIBRARIAN_CONTACT` for the User-Agent. Scores shown with the article revision and CC BY-SA 4.0. See [What the critics said](#what-the-critics-said). |
 | Players in game (player-count snapshots) | `api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1` | Yes ([reference](https://partner.steamgames.com/doc/webapi/ISteamUserStats)) | No key. One app per request. HTTP 404 means Steam has no count for the app; it is saved as "no count", not as a failure. Players not connected to Steam are not counted. Checked live on 2026-11-19. |
@@ -1534,6 +1669,52 @@ runs the site: a loopback address (127.0.0.1 or ::1) and no proxy headers (`Forw
 Gamalytic would approve a public display, and on which conditions: its published pages do not say. Until such an
 approval exists, do not publish the chart or screenshots of it. Calling the API at all counts as using Gamalytic's
 services, so its terms apply to your use of the command.
+
+### TwitchTracker (checked 2026-11-21)
+
+This summary is not legal advice. TwitchTracker's own pages were read on 2026-11-21 (its API page, its `robots.txt`
+and the footer every page carries); no statistics page was fetched, and the integration uses the API only.
+
+- **[API page](https://twitchtracker.com/api):** two lines, "Channel summary for 30 days: …/api/channels/summary/
+  [channel_name]" and "Category summary for 30 days: …/api/games/summary/[twitch_id or full_name]". No fields, key,
+  rate limit or terms of use are given.
+- **Footer:** "Scraping is prohibited. Use this basic API." and "TwitchTracker is not affiliated with Twitch or
+  Amazon."
+- **[robots.txt](https://twitchtracker.com/robots.txt):** `Disallow: /api/*` for every user agent (with `/search?`,
+  `/u/*` and `/*/fragments`). Robots rules address crawlers, while the footer sends people to this API instead of
+  scraping, so the two published statements pull in different directions.
+- **No terms of service or privacy policy:** `twitchtracker.com/terms` shows the page of a Twitch channel named
+  "terms", the footer links to no terms, and a web search found none.
+- **The API, tested live:** 12 requests 3 seconds apart, then the 77-category refresh described under
+  [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker), all answered anonymously with no
+  rate-limit headers (`Cache-Control: no-cache, private`, served through Cloudflare).
+
+**Established:** the category summary is free and anonymous, and TwitchTracker asks people to use this API rather
+than scrape its site. **Not established:** any permission to store its figures or to show them to other people, any
+attribution rule, any rate limit, the reporting period, how the rank is calculated, and whether the `robots.txt` line
+is meant for an API client like this one. **Conclusion:** public display is not established, so the figures are a
+local evaluation, as for Gamalytic: the site shows them only to a loopback browser without proxy headers
+(`web.is_local_request`), the Power BI export leaves them out, and every view names TwitchTracker and links its API
+page. Do not publish the list or screenshots of it unless TwitchTracker permits it. If you read the `robots.txt` line
+as covering this use, turn the step off: `sync --skip-most-watched`, and do not run `most-watched`.
+
+### The hosted site (checked 2026-11-21)
+
+This summary is not legal advice. What changes when the site is served to other people (0.20, DEPLOYMENT.md):
+
+- **Steam:** the Steam Web API Terms allow distributing Steam Data "to end users for their personal use". Whether a
+  site for a small circle of people may show store descriptions, images and review excerpts publicly is **not
+  confirmed** (see "Terms checked" above); decide before you share the address, or ask Valve. The footer keeps
+  the attribution, the "as is" notice and Valve's trademark notice.
+- **IGDB and Twitch:** IGDB asks for visible attribution and allows storing and serving its data; Twitch allows
+  caching for 24 hours and asks for a path to the source. Both are kept as before on the hosted site.
+- **Wikipedia and Wikidata:** scores with the article, the revision link and CC BY-SA 4.0, as before.
+- **Gamalytic and TwitchTracker:** their terms (Gamalytic) or the lack of them (TwitchTracker) allow no sharing.
+  A hosted process (`GAME_LIBRARIAN_HOSTED`, or any PostgreSQL database) never asks them and never shows their
+  figures, even to a request from 127.0.0.1 (the authentication sidecar forwards from there); `migrate-to-postgres`
+  leaves their tables in the SQLite file. On your own computer, with SQLite, they stay as before.
+- **Accounts:** the sign-in provider shares its id for a person and a name; the site keeps them with the saved
+  games and nothing else (`/account` says so and offers deletion).
 
 ### Curated sources
 
@@ -1697,7 +1878,8 @@ and Indie. *Clair Obscur: Expedition 33* is an example.
 
 ## Current architecture
 
-**Implemented:** the ingestion pipeline and website run on your computer. Steam is an external online data source;
+**Implemented:** the ingestion pipeline and website run on your computer (this section), or, prepared in 0.20, on
+Azure (see [Hosted architecture (Azure)](#hosted-architecture-azure)). Steam is an external online data source;
 Azure, Snowflake, and Power BI are not required to run the app.
 
 ```mermaid
@@ -1750,13 +1932,16 @@ game_librarian/stories.py   Data Stories: loads and validates curated/stories/*.
 game_librarian/trivia.py    Daily Trivia: loads and validates curated/trivia.json; the UTC quiz day and the schedule
 game_librarian/candidates.py  catalog expansion: candidate sources, Steam screening rules, review, promotion
 game_librarian/identity.py  game keys: a Steam app id, or igdb-<id> for a game without a catalog Steam app
-game_librarian/twitch.py    Twitch app token (shared with IGDB), Helix streams and top games, category matching, 24-hour cache
+game_librarian/twitch.py    Twitch app token (shared with IGDB), Helix streams and top games, category matching
+                            (resolve_category: game, series or none), 24-hour cache
 game_librarian/igdb.py      optional IGDB client: PopScore, game records, Steam ids, pacing, retries (server side)
 game_librarian/upcoming.py  cross-platform Trending: dates and precision, availability per platform, the upcoming
                             and recent rules, verified links, Steam matching, game keys, the refresh (IGDB + Twitch)
 game_librarian/wikipedia.py Wikimedia client: Wikidata identifiers, article wikitext, User-Agent and pacing
 game_librarian/critics.py   critic scores: article matching, review-table extraction, review states, refresh
 game_librarian/gamalytic.py estimated Steam copies sold: free list endpoint, pacing, 24-hour budget, collection
+game_librarian/twitchtracker.py Most watched by TwitchTracker: category summaries, the tracked categories, the
+                            list (places 1-10, ranking), pacing, 24-hour budget
 game_librarian/web.py       FastAPI + Jinja templates; reads stored data; calls Twitch only from /games/{key}/live;
                             sends the sales estimates only to a browser on the same computer
 game_librarian/dashboard.py  pure: the Dashboard pages' measures, filters and chart positions (Trending games'
@@ -1770,9 +1955,30 @@ A separate frontend framework was not needed: the page is a read-only list with 
 instant filters, the details dialog (with history support) and the clip controls; without it, the same features
 work through ordinary links and forms.
 
-## Future cloud architecture
+## Hosted architecture (Azure)
 
-**Proposed, not built or deployed.** The goal is to make the website accessible from another device and keep its
+**Prepared in 0.20, not deployed.** The step-by-step portal guide is [DEPLOYMENT.md](DEPLOYMENT.md). The hosted site
+uses only what it needs:
+
+- **Azure Container Apps** runs the website (`serve --host 0.0.0.0 --port 8000`, container port 8000, probes
+  `/healthz` and `/readyz`) and a **scheduled job** in the same environment that runs `sync` once a day. Both use
+  one image, built by GitHub Actions (`.github/workflows/container.yml`) and stored in the GitHub Container
+  Registry. The container keeps no data; `curated/` is part of the image.
+- **Azure Database for PostgreSQL** holds the catalog, its history, accounts and wishlists. `store.py` keeps one set
+  of SQL for SQLite and PostgreSQL; `database.py` opens the connections (TLS `verify-full`, a small pool for the
+  website, an advisory lock so two refreshes never overlap). The website and the job use a role that cannot
+  change tables; `init-postgres` and `migrate-to-postgres` run once with the administrator.
+- **Built-in authentication** signs visitors in (GitHub, Google, Microsoft or another provider); the app stores no
+  password and sets no cookie of its own.
+- Gamalytic's and TwitchTracker's figures stay a local evaluation: a hosted process never collects or shows them,
+  and `migrate-to-postgres` does not copy them.
+
+Key Vault, Blob Storage, Data Factory, Data Lake, Snowflake and a VM are not needed for this. The earlier proposal
+is kept below for reference.
+
+### Earlier proposal (before 0.20)
+
+**Proposed, not built.** The goal is to make the website accessible from another device and keep its
 catalog up to date even when your computer is off. The current SQLite store and sync are not yet cloud-ready.
 
 ```mermaid
@@ -1880,11 +2086,26 @@ personal tool and those public-use rights have not been confirmed.
   month-, quarter- or year-dated release enters the list only after its whole period is over, so it can appear late
   or never (a year-dated one never does). Only the 1,000 highest Want to Play values are scanned.
 - **Most watched on Twitch** is Twitch's order at the moment of the refresh, not a day's total, and it changes through
-  the day (and by time zone). Categories Twitch links to no IGDB game are left out, including some real games
-  (*Dota 2* and *Counter-Strike* on 19 Nov 2026). Twitch's category-to-game link can point a series category to its
-  first game. The list is deleted 24 hours after Twitch answered, so with a daily refresh it can be missing for a
-  few hours. Twitch's terms need a separate agreement for research on trends over time, so the dashboard shows no
-  Twitch rank changes or repeat top places, and it never will under the current access.
+  the day (and by time zone). Categories that neither Twitch nor IGDB links to a game are left out, including some
+  real games (*StarCraft II* and *Magic: The Gathering* on 21 Nov 2026), as are categories they link to different
+  games (*Call of Duty: Warzone*). *Counter-Strike* is listed as a series (a reviewer's `series` row), never as one
+  of its games; another category-to-game link can still point a series category to its first game. The list is
+  deleted 24 hours after Twitch answered, so with a daily refresh it can be missing for a few hours. Twitch's terms
+  need a separate agreement for research on trends over time, so the dashboard shows no Twitch rank changes or
+  repeat top places, and it never will under the current access.
+- **TwitchTracker's view** (this computer only) covers only the tracked categories: Twitch's game and series
+  categories at the last `upcoming` refresh, which is one moment, and the reviewed ones. A game that ranks high over
+  TwitchTracker's longer period but was outside Twitch's top 100 at that moment, and is not reviewed, is missing,
+  and the site cannot tell: no documented endpoint gives TwitchTracker's complete ranking. Places 1 to 10 are places
+  in this list, not TwitchTracker ranks; TwitchTracker ranks by a rule it does not state (it does not always follow
+  the average viewers shown) and over a period it does not confirm (its page says 30 days; its averages fit 7). Its
+  figures are TwitchTracker's own estimates, not Twitch's or a count of players, and a series entry's viewers are
+  spread over the games of its series. Public display is not established (see
+  [TwitchTracker](#twitchtracker-checked-2026-11-21)). With each tracked category, the TwitchTracker table also keeps
+  the category's id and Twitch's name for it (for the Watch on Twitch link) beyond Twitch's 24 hours, until the
+  category leaves the list; the category-to-game link it keeps is a reviewer's row (Dota 2) or was confirmed by
+  IGDB's own record (the other 77 of 79 on 2026-11-21), which IGDB allows storing. If you read Twitch's 24-hour
+  limit as covering a category's name too, skip the step (`sync --skip-most-watched`).
 - **The analyses of Steam's most-wishlisted list** compare only the snapshots this site saved, one per IGDB
   calculation: with a daily refresh, changes are day to day, and a gap in the refreshes makes the previous snapshot
   older (both dates are shown). A place is IGDB's position for the game in Steam's list, among the games IGDB has
@@ -1930,6 +2151,127 @@ personal tool and those public-use rights have not been confirmed.
   `httpx2`. The tests pass with `httpx` 0.28, so no extra dependency was added.
 
 ## Verification status
+
+**Version 0.20 (prepared for Azure: PostgreSQL, container, daily job, accounts), checked on 2026-11-21.**
+
+- **What changed:** PostgreSQL support beside SQLite (`database.py`, `store.py`: one set of SQL; the few SQLite-only
+  statements rewritten: `INSERT OR REPLACE`/`OR IGNORE` as `ON CONFLICT`, `lastrowid` as `RETURNING`, `GROUP_CONCAT`
+  and `json_each` replaced, named parameters, `NOT IN ()`; discovery pages written in batches); `init-postgres` and
+  `migrate-to-postgres`; TLS `verify-full` for any server but this computer, with certifi's roots by default;
+  `GAME_LIBRARIAN_HOSTED`; a refresh lock (PostgreSQL advisory lock, exit code 3); a hosted `sync` that fails on a
+  missing credential; `/healthz`, `/readyz`; security headers (Content-Security-Policy, nosniff, frame denial, HSTS
+  when hosted); accounts and private wishlists through Container Apps' built-in authentication (`accounts.py`,
+  `/account`, `/api/wishlist`, an explicit import of the browser's list); `Dockerfile`, `.dockerignore`, the GitHub
+  workflow and [DEPLOYMENT.md](DEPLOYMENT.md).
+- **Found and restored:** at 14:41-14:42 the same day, outside this work, `web.py` had been changed so that every
+  visitor got Gamalytic's estimates and TwitchTracker's figures (`local = True`, and the Trending view without its
+  check), and four templates had lost their local-evaluation badges and terms notes. Two tests failed. The check and
+  the notes are back, now also behind `Settings.local_evaluation`; the changed files were kept for comparison.
+- **Automated tests:** on SQLite, 611 pass and 11 PostgreSQL-only tests are skipped (580 before). With
+  `GAME_LIBRARIAN_TEST_DATABASE_URL` set to a temporary PostgreSQL 18.6 server (TLS only, verify-full, a linguistic
+  default collation like Azure's), all 622 pass; the Gamalytic and TwitchTracker tests then use SQLite by design.
+  Node: the wishlist tests (9) and the trivia tests pass. New: `test_database.py`, `test_migrate.py`,
+  `test_accounts.py`, `test_hosting.py`.
+- **Live checks on the temporary server, with a copy of the real catalog** (the real file was only read): as a
+  non-superuser owner role, `init-postgres --grant-to gl_app` and `migrate-to-postgres` copied 20 tables and 216,615
+  rows in about 3 seconds, every count and checksum matching; the Gamalytic (238 rows) and TwitchTracker (81) tables
+  were left out; one Twitch row older than 24 hours was deleted; a second run was refused. As `gl_app`, reading and
+  writing rows worked and CREATE, DROP, TRUNCATE and ALTER were refused; `status` matched. Served in hosted mode as
+  `gl_app`: the probes, security headers and nine pages answered; in headless Edge, no Content-Security-Policy
+  violation on eight pages, no TwitchTracker or Gamalytic figure, and the signed-in flows (account list, import of a
+  browser list, removing the browser copy only on request, the details' button, another account seeing nothing of
+  the first) worked, also at 390 px. Server, browser and the temporary database were stopped afterwards.
+- **Not verified:** building or running the container (no Docker on this computer), the GitHub workflow, anything
+  in Azure (built-in authentication, networking, the job's schedule), and a connection to the Azure server.
+
+**Version 0.19 (Most watched among tracked Twitch categories), checked on 2026-11-21.**
+
+- **What changed:** [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker).
+  `curated/twitch_categories.csv` gains a `series` decision (a category for a whole game series, listed under its
+  name and never as one of its games); a `match` or `series` row needs Twitch's category name in `title`. The shipped
+  file keeps the reviewed Dota 2 row (`match`, IGDB 2963, now with its evidence in `note`) and marks Counter-Strike
+  `series` (it was `no_match`). `most-watched` tracks every game and series category of Twitch's newest list and
+  every reviewed game or series category, in Twitch's list or not; `upcoming` reads the IGDB record of every reviewed
+  game. On the computer that runs the site, the list is titled "Most watched among tracked Twitch categories": the
+  first 10 entries in TwitchTracker's rank order, numbered 1 to 10, each line giving "TwitchTracker category rank #N"
+  as returned; one function (`twitchtracker.ranking`) decides the entries for the page, the dashboard and the command.
+  Missing figures are told apart (no summary, not asked yet, a failed check with no earlier figures), a "Stale" note
+  appears once the newest figures are 20 hours old, the meta line gives the oldest and newest retrieval times, and only
+  a failed check or a gap of 20 hours marks one figure as old. Every visitor's Twitch-order list shows a reviewed
+  series as a series. A series is never matched to a game by the dashboard's Upcoming panel or sales chart. A 0.18
+  `twitchtracker_summaries` table is rebuilt at start with its rows, so a series (no IGDB id) and a reviewed category
+  outside Twitch's list (no list time) fit. The Power BI files and export are unchanged.
+- **Why Dota 2 was missing from the saved snapshot:** its `most-watched` run (17:03 UTC) chose from a Twitch list saved
+  at 13:43 UTC by the code before 0.18's IGDB-record step, so nothing named Dota 2's game, and the reviewed Dota 2 row
+  was added after that run. The 0.18 code already used that row (checked on a copy: Dota 2 chosen and due);
+  Counter-Strike needed the new `series` decision.
+- **The reviewed rows, checked live on 2026-11-21:** Twitch's Get Games names 29595 "Dota 2" and 32399
+  "Counter-Strike", both without an IGDB id. IGDB's own Twitch records: 29595 to game 2963 (*Dota 2*), 32399 to 1372
+  (*Counter-Strike: Global Offensive*). IGDB's Steam records: app 570 to 2963, app 730 to 242408 (*Counter-Strike 2*)
+  and app 4465480 to 1372; both Counter-Strike games are in IGDB's Counter-Strike collection.
+- **Automated tests:** `python -m pytest` runs 580 tests, all passing (572 before). `tests/test_twitchtracker.py` has
+  30 (22 before): a Dota 2-like category with no IGDB id or record, a Counter-Strike-like series (listed, never matched
+  to the game IGDB's record names on the page, the public list, the dashboard panel or the sales chart), Just Chatting
+  never asked or listed, rank gaps beside places 1 to 10, the first 10 only, a category repeated by Twitch or both
+  listed and reviewed (asked once), a game reached by two categories (listed once), missing summaries (never zero),
+  not asked versus failed, stale figures, a category asked hours later, a reviewed category outside Twitch's list
+  (with and without a Twitch list), a reviewer ruling one out, the 0.18 table rebuild, the `series` and `title` rules,
+  the shipped file and the commands' output.
+- **Mutation check:** 26 deliberate breaks, one at a time (places showing ranks, a series treated as `no_match` or as
+  IGDB's game, series dropped, reviewed categories not chosen or miscounted, reviewed games not read, a ruled-out
+  category still asked, a series opening details, later decisions ignored, categories without figures listed, not
+  asked counted as failed, no stale note, a "top 10 games" title, more than 10 shown, a game listed twice, no rebuild
+  or a rebuild losing figures, the two curation rules, and five 0.18 rules): all 26 caught; every file restored byte
+  for byte.
+- **Live checks on a copy of the database** (the real one was only read): opening it rebuilt the 0.18 table with its 79
+  rows and figures. On the saved snapshot (Twitch's list of 13:43 UTC), `most-watched` tracked 81 categories and asked
+  only Dota 2 and Counter-Strike (2 requests): Counter-Strike place 7, TwitchTracker category rank #8, 57,576 average
+  viewers; Dota 2 place 8, rank #9, 48,252. After `upcoming --force` (100 categories, 80 with Twitch's IGDB id, 82 in
+  IGDB's records), `most-watched` tracked 79 (77 by Twitch and IGDB together, Dota 2 and Counter-Strike by their
+  reviewed rows) and asked the 21 new ones; places 1 to 10 showed ranks 1, 3, 4, 5, 6, 7, 8, 9, 10 and 11. Served,
+  a loopback browser saw that list; a visitor with `X-Forwarded-For` got Twitch's order with Dota 2 (#3 on Twitch)
+  and the Counter-Strike series (#7) and no TwitchTracker word; the other pages answered 200. Headless Edge (30
+  checks, 1280 and 390 px): no horizontal scroll; the series row has its label and Twitch link and opens no dialog;
+  Dota 2's row opens its details; the dashboard panel gives Star Citizen's TwitchTracker category rank (#47), and no
+  panel matches Counter-Strike to a game. Server and browser were stopped afterwards.
+- **Limits:** the reporting period and TwitchTracker's rank rule stay unconfirmed; public display is not established;
+  a game outside Twitch's top 100 at the refresh and not reviewed is missing; on the copy no paid game of the list had
+  an estimate (Dota 2 and Path of Exile are free, GTA V had none), so the sales chart's list name was checked by a test
+  only; a real screen reader and browsers other than Edge were not tried.
+
+**Version 0.18 (Most watched on Twitch by TwitchTracker), checked on 2026-11-21.**
+
+- **What changed:** [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker): on the computer
+  that runs the site, the list ranks its game categories by TwitchTracker's rank (as returned, with gaps) and average
+  viewers (`game_librarian/twitchtracker.py`, `web._most_watched`, a `most-watched` command, a `sync` step with
+  `--skip-most-watched`, a `twitchtracker_summaries` table); every other visitor keeps Twitch's order. One rule now
+  decides which game a Twitch category stands for (`twitch.resolve_category`): a reviewer's row in the new
+  `curated/twitch_categories.csv` (one shipped: Counter-Strike, `no_match`), else Twitch's IGDB id and IGDB's own
+  record of the category (read by `upcoming` in one more IGDB query and saved in a new `twitch_top_games.igdb_links`
+  column), which must agree. So *Dota 2* is now listed, and *Call of Duty: Warzone* is left out. Dashboard: the Upcoming
+  releases panel and the Sales & reception doughnut follow TwitchTracker's list on this computer. The footer says
+  "Twitch's top-games order" instead of "the most-watched order". The Power BI files and export are unchanged.
+- **Automated tests:** `python -m pytest` runs 572 tests, all passing (550 before). New: `tests/test_twitchtracker.py`
+  (answers and missing fields, the client's pacing, retries, 403/429/non-JSON stops, identity rules including Dota 2,
+  Warzone and reviewer decisions, the refresh's IGDB records, an older database, the chosen categories, the 20-hour
+  cache, a new or missing Twitch list, failures keeping the last figures, the 24-hour budget, local and public pages,
+  rank gaps, old and failed figures, empty states, a reviewer's later decision, the dashboard panel and doughnut, the
+  command, `sync`, `status` and `check-curated`). A conftest fake stands in for TwitchTracker in every test. One
+  expected text in `tests/test_trending_cross_platform.py` follows the new left-out wording.
+- **Mutation check:** 20 deliberate breaks, one at a time (renumbered or viewer-ordered ranks, figures shown to every
+  browser, IGDB's record or a reviewer ignored, a disagreement accepted, `{}` keeping old figures, a failure wiping
+  them, the cache, the budget or a 429 retry ignored, a missing rank accepted, a 7-day label, no age, no migration,
+  the dashboard and doughnut ignoring the list): all 20 caught; every file restored byte for byte.
+- **Live checks on a copy of the database:** `upcoming --force` (Twitch's 100 categories; IGDB recorded 81 of them),
+  then `sync --limit 2 --skip-discovery --skip-critics --skip-sales`: the new step chose 77 game categories and got 77
+  answers in 1 min 55 s (76 matched by Twitch and IGDB together, *Dota 2* by IGDB alone). The served Trending page
+  gave a loopback browser ranks 1, 3, 4, 5, 6, 7, 9, 10, 11, 14 with average viewers, and a visitor with
+  `X-Forwarded-For` Twitch's order and no TwitchTracker word; every other page answered 200. Headless Edge (16
+  checks, 1280 and 390 px): no horizontal scroll, every rank fits its column, the details dialog opens from the list,
+  the dashboard panel shows TwitchTracker's entry. Server and browser were stopped afterwards.
+- **Limits:** TwitchTracker's reporting period and rank rule are not confirmed (see above); public display is not
+  established; StarCraft II and Magic: The Gathering stay unmatched until a reviewer adds them; a real screen reader
+  and browsers other than Edge were not tried.
 
 **Version 0.17 (Daily Trivia), checked on 2026-11-21.**
 

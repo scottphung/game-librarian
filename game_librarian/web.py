@@ -1,7 +1,7 @@
-"""FastAPI web app: a read-only, server-rendered view of the stored catalog.
+"""FastAPI web app: a server-rendered view of the stored catalog, with private wishlists for signed-in visitors.
 
-Page requests never call Steam. They read the SQLite catalog written by the sync
-command and the curated files, so the site keeps serving the last saved data
+Page requests never call Steam. They read the catalog written by the sync command (the local SQLite file, or the
+hosted site's PostgreSQL database; store.py) and the curated files, so the site keeps serving the last saved data
 when Steam is unavailable. The five-year ranking is recalculated on every request
 from the verified awards, the stored review counts and today's date (see
 ranking.py), so it follows the latest sync and its window moves forward every 1 January.
@@ -18,7 +18,11 @@ Pages, in the order of the site navigation:
 - Trending (/trending): three parts, each list ranked by one named signal. Upcoming & Anticipated and
   Trending now & recently released cover every platform (IGDB PopScore and Twitch's top games, saved by
   the upcoming refresh; upcoming.py, twitch.py). Steam activity covers the Steam catalog only (stored Steam
-  snapshots, trending.py). Every game shows where it is out and where it is only announced (IGDB).
+  snapshots, trending.py). Every game shows where it is out and where it is only announced (IGDB). For a
+  browser on the computer that runs the site (is_local_request), Most watched on Twitch becomes "Most watched
+  among tracked Twitch categories": the tracked game and series categories in TwitchTracker's rank order, with
+  its rank and average viewers (_most_watched, twitchtracker.py), instead of Twitch's order: TwitchTracker
+  publishes no terms that allow sharing its figures.
 - Data Stories (/stories): hand-checked series timelines (stories.py).
 - Dashboard (/dashboard...): Trending games first (/dashboard): three report pages about the Trending page's
   games, from the stored lists and snapshots (?report=: Sales & reception, Upcoming releases and Momentum; see
@@ -26,10 +30,17 @@ Pages, in the order of the site navigation:
   (dashboard.py): Player reception (/dashboard/reception), Awards and About the data. Old addresses redirect (see
   dashboard_home). Sales & reception's Estimated Steam copies sold chart (Gamalytic) is sent only to a browser on
   the computer that runs the site (is_local_request): Gamalytic's terms forbid sharing its data.
-- Wishlist (/wishlist): the browser-local Game Librarian wishlist, behind the header's star icon.
+- Wishlist (/wishlist), behind the header's star icon: in the browser (static/wishlist.js), or, for a visitor signed
+  in with Container Apps' built-in authentication (accounts.py; /account), in their account on the server, read and
+  changed only through /api/wishlist for that account. A list saved in the browser is imported only when its owner
+  asks, and the browser's copy stays until they remove it.
 - Daily Trivia: the header's lightbulb opens a popup on any page. Its content comes from /trivia/panel: today's
   quiz from curated/trivia.json, the same for everyone that quiz day (UTC; trivia.py), and the facts open for
   browsing. The visitor's answers and scores stay in the browser (static/trivia.js); the server never sees them.
+
+Gamalytic's and TwitchTracker's figures need both a request from this computer (is_local_request) and a site that
+may hold them at all (Settings.local_evaluation: the local SQLite database, not a hosted process). /healthz and
+/readyz answer Container Apps' probes. Every response carries security headers (_security_headers).
 
 Run with `python -m game_librarian serve` (uses the `create_app` factory).
 """
@@ -38,21 +49,25 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import math
 import threading
 from collections import Counter
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 
-from . import __version__, catalog, critics, dashboard, gamalytic, list_comparison, pricing, ranking, related, \
-    stories, store, trending, trivia, twitch, upcoming
+from . import __version__, accounts, catalog, critics, dashboard, gamalytic, list_comparison, pricing, ranking, \
+    related, stories, store, trending, trivia, twitch, twitchtracker, upcoming
+from .database import close_pools
 from .catalog import ALL_VIEW, COLLECTION_KEYS, DEFAULT_VIEW, LABEL_ORDER, LEGACY_NO_LABEL, NO_VERIFIED_LABEL, \
     SORT_ALIASES, SORT_OPTIONS, SORTS, STEAM_REVIEW_LABELS, TOP_VIEW, VIEWS, CatalogGame
 from .config import PACKAGE_DIR, STORE_PAGE_URL, Settings, load_settings
@@ -170,7 +185,9 @@ def is_local_request(request: Request) -> bool:
     """True when the browser runs on the computer that runs the site: a loopback client address, and no proxy headers.
 
     Only such a request gets Gamalytic's sales estimates, because Gamalytic's terms forbid making its data accessible
-    to anyone else (gamalytic.py). A request passed on by a proxy is never local, even when the proxy itself runs here.
+    to anyone else (gamalytic.py), and TwitchTracker's figures, because TwitchTracker publishes no terms that allow
+    sharing them (twitchtracker.py). A request passed on by a proxy is never local, even when the proxy itself runs
+    here.
     """
     try:
         address = ipaddress.ip_address(request.client.host if request.client else "")
@@ -179,6 +196,67 @@ def is_local_request(request: Request) -> bool:
     if getattr(address, "ipv4_mapped", None):  # ::ffff:127.0.0.1 on a dual-stack socket
         address = address.ipv4_mapped
     return address.is_loopback and not any(name in request.headers for name in FORWARDING_HEADERS)
+
+
+# ---------------------------------------------------------------------- security headers, the JSON API
+
+LOG = logging.getLogger("game_librarian.web")
+# What a page may load: its own scripts only (none inline), its own styles plus style attributes, images and video
+# from https servers (the Steam, IGDB and Twitch CDNs), requests to this site only, and no framing by other sites.
+CONTENT_SECURITY_POLICY = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                           "img-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; "
+                           "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+SECURITY_HEADERS = {
+    "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+}
+HSTS = "max-age=31536000"  # the hosted site answers only over HTTPS; browsers then never try plain HTTP
+MAX_JSON_BODY = 256 * 1024  # a wishlist import of WISHLIST_LIMIT games is well under this
+
+
+def _security_headers(response: Response, *, hosted: bool, personal: bool) -> None:
+    """Add the headers every response carries. A page for a signed-in visitor (`personal`) is never cached, so the
+    next person on a shared computer cannot see it from the browser's cache."""
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if hosted:
+        response.headers.setdefault("Strict-Transport-Security", HSTS)
+    if personal:
+        response.headers["Cache-Control"] = "no-store"
+
+
+def _json_error(status: int, code: str, message: str) -> JSONResponse:
+    """An API error: a stable `error` code for the page's script and a sentence for people."""
+    return JSONResponse({"error": code, "message": message}, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def _same_site_json(request: Request) -> JSONResponse | None:
+    """None for a JSON request from this site's own pages; else the error that refuses it.
+
+    This is the protection against cross-site request forgery: another site's page cannot send JSON here without a
+    CORS preflight, which this app never approves, and every current browser marks a request from another site in
+    Sec-Fetch-Site. The platform's session cookie alone is therefore never enough to change a wishlist.
+    """
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+        return _json_error(415, "json_required", "Send the request as JSON.")
+    if request.headers.get("sec-fetch-site", "same-origin") != "same-origin":
+        return _json_error(403, "cross_site", "This request did not come from a Game Librarian page.")
+    return None
+
+
+async def _read_json(request: Request):
+    """The request's JSON body, or None when it is not JSON or is larger than MAX_JSON_BODY."""
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_JSON_BODY:
+            return None
+    try:
+        return json.loads(body)
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------- catalog query
@@ -713,6 +791,7 @@ def _igdb_item(row, key: str, today: date, **facts) -> dict:
     publishers = json.loads(row["publishers"] or "[]")
     verified = row["steam_match"] == "verified"
     return {
+        "series": False,
         "key": key,
         "igdb_id": row["igdb_id"],
         "name": row["name"],
@@ -729,6 +808,13 @@ def _igdb_item(row, key: str, today: date, **facts) -> dict:
     }
 
 
+def _series_item(name: str, **facts) -> dict:
+    """A reviewed series category in a Most watched list ("series" in curated/twitch_categories.csv), under its series
+    name. It stands for no single game, so it has no key, IGDB id, details page, cover or platforms, and no other list
+    or chart can match it to a game. `facts` adds the list's Twitch or TwitchTracker fields, as for _igdb_item."""
+    return {"series": True, "key": None, "igdb_id": None, "name": name, "image_url": None, **facts}
+
+
 def _date_change_view(rows: list) -> dict | None:
     """The newest release-date change of a game (store.release_changes rows, newest first), as shown."""
     if not rows:
@@ -738,16 +824,17 @@ def _date_change_view(rows: list) -> dict | None:
             "noticed_at": newest["noticed_at"]}
 
 
-def _trending_lists(conn, today: date, moment: datetime) -> dict:
+def _trending_lists(conn, today: date, moment: datetime, decisions: dict) -> dict:
     """Every cross-platform list on Trending, from stored data only (no network).
 
     "upcoming": one list per signal, games not out on any platform ("games" shows the first LIST_SIZE; "tracked"
     holds every upcoming game of the newest snapshot, up to TRACKED_PER_SIGNAL, for the dashboard's release radar and
     list comparison; "unread" counts the snapshot's entries without a stored IGDB record, which no rule can place);
     "recent": the Want to Play games first released in the last RECENT_WINDOW; "twitch": Twitch's newest top
-    categories that are IGDB games, if the list is less than 24 hours old ("games" shows the first LIST_SIZE;
-    "listable" holds all of them, for the dashboard's analyses). A game released since the last refresh moves from
-    the upcoming list to the recent one at the next page load, with the same key.
+    categories that are games (upcoming.twitch_games, with the reviewer `decisions` of curated/twitch_categories.csv),
+    if the list is less than 24 hours old ("games" shows the first LIST_SIZE; "listable" holds all of them, for the
+    dashboard's analyses), a reviewed series category as a series item (_series_item). A game released since the last
+    refresh moves from the upcoming list to the recent one at the next page load, with the same key.
     """
     visible = {row["appid"] for row in store.matching_games(conn, [], [])}
     linked = store.catalog_links_by_igdb(conn, visible)
@@ -786,27 +873,21 @@ def _trending_lists(conn, today: date, moment: datetime) -> dict:
             recent = {**common, "games": recent_games, "has_changes": any(item["change"] for item in recent_games)}
 
     top = store.twitch_top_games(conn, (moment - twitch.KEEP_FOR).isoformat(timespec="seconds"))
-    records = store.igdb_game_rows(conn, [row["igdb_id"] for row in top if row["igdb_id"]])
-    listable, left_out = [], Counter()
-    for row in top:
-        record = records.get(row["igdb_id"]) if row["igdb_id"] else None
-        if row["igdb_id"] is None:
-            left_out["no_igdb_game"] += 1  # Just Chatting, Art, Slots and other categories Twitch links to no game
-        elif record is None:
-            left_out["not_read"] += 1  # the IGDB record was not read (yet)
-        elif not upcoming.twitch_listable(record):
-            left_out["other_kind"] += 1  # DLC, bundles, mods and the like, or a game IGDB marks cancelled
-        else:
-            listable.append(_igdb_item(
-                record, upcoming.game_key_for(record, visible, linked), today, twitch_position=row["position"],
-                twitch_name=row["name"], twitch_url=twitch.category_url(row["name"]),
-                name_differs=normalize_for_search(row["name"]) != normalize_for_search(record["name"])))
+    games, left_out = upcoming.twitch_games(conn, top, decisions)
+    listable = []
+    for row, record, _ in games:
+        name = record["name"] if record else decisions[row["category_id"]].title  # a series: its reviewed title
+        facts = {"twitch_position": row["position"], "twitch_name": row["name"],
+                 "twitch_url": twitch.category_url(row["name"]),
+                 "name_differs": normalize_for_search(row["name"]) != normalize_for_search(name)}
+        listable.append(_igdb_item(record, upcoming.game_key_for(record, visible, linked), today, **facts) if record
+                        else _series_item(name, **facts))
     twitch_list = {"games": listable[:upcoming.LIST_SIZE], "listable": listable,
                    "checked_at": top[0]["checked_at"] if top else None, "categories": len(top),
-                   "left_out": left_out, "depth": twitch.TOP_GAMES_PAGE,
-                   "keep_hours": int(twitch.KEEP_FOR.total_seconds() // 3600)}
+                   "left_out": left_out, "left_out_phrases": _left_out_phrases(left_out),
+                   "depth": twitch.TOP_GAMES_PAGE, "keep_hours": int(twitch.KEEP_FOR.total_seconds() // 3600)}
     _fill_catalog_images(conn, [item for data in upcoming_lists for item in data["tracked"]]
-                         + (recent["games"] if recent else []) + listable)
+                         + (recent["games"] if recent else []) + [item for item in listable if not item["series"]])
     return {"upcoming": upcoming_lists, "recent": recent, "twitch": twitch_list}
 
 
@@ -817,6 +898,79 @@ def _fill_catalog_images(conn, items: list[dict]) -> None:
     for item in items:
         if not item["image_url"] and item["key"].isdigit():
             item["image_url"] = images.get(int(item["key"]))
+
+
+# Why a Twitch category is not in a Most watched list (upcoming.twitch_games, twitchtracker.ranking), as shown after a
+# count. The last three tell apart a category without TwitchTracker figures: never a zero.
+LEFT_OUT_REASONS = {
+    "no_game": "that neither Twitch nor IGDB links to a game (such as Just Chatting)",
+    "unresolved": "whose game is unresolved (Twitch and IGDB name different games, or a reviewer decided it stands "
+                  "for no game)",
+    "other_kind": "that IGDB lists as DLC, bundles or other kinds",
+    "not_read": "whose IGDB record was not read yet",
+    "repeated": "for a game another category already stands for",
+    "no_summary": "that TwitchTracker has no summary of",
+    "not_asked": "not asked yet",
+    "failed": "with a failed check and no earlier figures",
+}
+
+
+def _left_out_phrases(left_out: Counter) -> list[str]:
+    """The left-out categories as phrases such as "17 that neither Twitch nor IGDB links to a game (...)", in a fixed
+    order, leaving out reasons with no category."""
+    return [f"{left_out[reason]} {words}" for reason, words in LEFT_OUT_REASONS.items() if left_out[reason]]
+
+
+def _most_watched(conn, decisions: dict, today: date, moment: datetime) -> dict:
+    """Most watched among tracked Twitch categories, by TwitchTracker's figures (twitchtracker.py), from stored data
+    only (no network).
+
+    Call it only for a local request (is_local_request): TwitchTracker publishes no terms that allow showing its
+    figures to anyone else. The entries are twitchtracker.ranking's (games and reviewed series categories, with the
+    reviewer `decisions` of curated/twitch_categories.csv applied at once), in TwitchTracker's rank order. The page
+    numbers them 1, 2, 3... as places in this list; each keeps TwitchTracker's own category rank as returned
+    ("tracker_rank"), which counts Just Chatting and every category not tracked too, so a place is never called a
+    TwitchTracker rank. "games" holds the first LIST_SIZE and "listable" all of them (for the dashboard's selected-game
+    panel). Each item carries its retrieval time: "older" marks figures whose category's last check failed
+    ("check_failed"), or that are REFRESH_AFTER or more older than the newest shown (a run that stopped before them);
+    "stale" says the newest are REFRESH_AFTER old or more.
+    """
+    rows = store.tracker_rows(conn)
+    ranked, left_out = twitchtracker.ranking(conn, decisions)
+    items = []
+    for entry in ranked:
+        row = entry.row
+        facts = {"tracker_rank": row["rank"], "avg_viewers": row["avg_viewers"], "avg_channels": row["avg_channels"],
+                 "retrieved_at": row["retrieved_at"], "check_failed": row["status"] in ("error", "invalid"),
+                 "twitch_name": row["category_name"], "twitch_url": twitch.category_url(row["category_name"]),
+                 "name_differs": normalize_for_search(row["category_name"]) != normalize_for_search(entry.name)}
+        items.append(_igdb_item(entry.record, entry.key, today, **facts) if entry.record
+                     else _series_item(entry.name, **facts))
+    _fill_catalog_images(conn, [item for item in items if not item["series"]])
+    times = sorted({item["retrieved_at"] for item in items})
+    newest = _parse_time(times[-1]) if times else None
+    for item in items:  # a category asked hours after the others, within the cache time, leaves them current
+        gap = newest - _parse_time(item["retrieved_at"])
+        item["older"] = item["check_failed"] or gap >= twitchtracker.REFRESH_AFTER
+    runs = store.recent_source_runs(conn, twitchtracker.SOURCE, limit=1)
+    return {
+        "games": items[:upcoming.LIST_SIZE],
+        "listable": items,
+        "list_size": upcoming.LIST_SIZE,
+        "selected": len(rows),
+        "reviewed": sum(1 for row in rows if not row["selected_at"]),  # chosen by a reviewed row, outside Twitch's list
+        "selected_at": max((row["selected_at"] for row in rows if row["selected_at"]), default=None),
+        "retrieved": (times[0], times[-1]) if times else None,
+        "age_days": (moment - newest).days if newest else None,
+        "stale": newest is not None and moment - newest >= twitchtracker.REFRESH_AFTER,
+        "left_out": left_out,
+        "left_out_phrases": _left_out_phrases(left_out),
+        "last_run": runs[0] if runs else None,
+        "last_problem": store.run_problem(runs[0]) if runs else None,
+        "depth": twitch.TOP_GAMES_PAGE,
+        "refresh_hours": int(twitchtracker.REFRESH_AFTER.total_seconds() // 3600),
+        "api_url": twitchtracker.API_DOCS_URL,
+    }
 
 
 def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datetime) -> dict:
@@ -889,13 +1043,17 @@ def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datet
 def _trending_catalog_games(lists: dict, steam: dict) -> dict[int, list[str]]:
     """The catalog games shown on the Trending page, each once in page order, with the titles of its lists there.
 
-    `lists` and `steam` are the answers of _trending_lists and _steam_activity: the games each list shows.
+    `lists` and `steam` are the answers of _trending_lists and _steam_activity: the games each list shows. On this
+    computer, Most watched is TwitchTracker's ranking when `lists` holds it ("watched", _most_watched). A series
+    category stands for no single game, so it never names a catalog game here.
     """
     sections = [(data["signal"].title, data["games"]) for data in lists["upcoming"]]
     if lists["recent"]:
         sections.append(("Most wanted new releases", lists["recent"]["games"]))
+    watched = lists.get("watched")
     sections += [
-        ("Most watched on Twitch", lists["twitch"]["games"]),
+        ("Most watched among tracked Twitch categories", watched["games"]) if watched is not None
+        else ("Most watched on Twitch", lists["twitch"]["games"]),
         ("Popular on Steam right now", steam["popular"]),
         (f"Released in {steam['this_year_window'][0].year} with strong Steam reception", steam["this_year"]),
         (f"Released since {steam['four_years_window'][0].year} with strong Steam reception", steam["four_years"]),
@@ -905,6 +1063,8 @@ def _trending_catalog_games(lists: dict, steam: dict) -> dict[int, list[str]]:
     games: dict[int, list[str]] = {}
     for title, items in sections:
         for item in items:
+            if item.get("series"):
+                continue
             key = str(item.get("appid") or item["key"])  # Steam lists give app ids; IGDB and Twitch lists give keys
             if key.isdigit() and title not in games.setdefault(int(key), []):
                 games[int(key)].append(title)
@@ -1010,7 +1170,12 @@ def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetim
     the strong-reception scatterplot in `view`. Each doughnut game says whether it is on that chart."""
     steam = _steam_activity(conn, curated, current_day, moment)
     reception = _reception_view(conn, steam, view)
-    sales = _sales_view(conn, _trending_lists(conn, current_day, moment), steam, moment) if local else None
+    sales = None
+    if local:  # the doughnut's games are those of this computer's Trending page, TwitchTracker's ranking included
+        decisions = curated.twitch_category_decisions
+        lists = {**_trending_lists(conn, current_day, moment, decisions),
+                 "watched": _most_watched(conn, decisions, current_day, moment)}
+        sales = _sales_view(conn, lists, steam, moment)
     if sales:
         drawn = {point["appid"] for point in reception["chart"]["points"]} if reception["chart"] else set()
         named = [part for part in sales["ring"]["parts"] if part["kind"] == "game"] if sales["ring"] else []
@@ -1020,18 +1185,22 @@ def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetim
 
 
 def _upcoming_report(conn, current_day: date, moment: datetime, window: str | None, group: str | None, *,
-                     configured: bool) -> dict:
+                     configured: bool, decisions: dict, local: bool) -> dict:
     """Upcoming releases: the release radar narrowed to `window` (a dashboard.RADAR_WINDOWS key; any other value shows
     every tracked game), beside the comparison of IGDB's and Steam's captures (list_comparison) with `group` open (a
-    list_comparison group key; by default the games seen only on IGDB). Both share one list of distinct games; each
-    game that Twitch's newest list names by the same IGDB id carries its Twitch place ("twitch"), for its panel."""
-    lists = _trending_lists(conn, current_day, moment)
+    list_comparison group key; by default the games seen only on IGDB). Both share one list of distinct games. For its
+    panel, each game that the Most watched list names by the same IGDB id carries its entry there: TwitchTracker's rank
+    and average viewers for a `local` request ("watched", _most_watched), else its place in Twitch's newest list
+    ("twitch"). A series category has no IGDB id, so it is never any game's entry."""
+    lists = _trending_lists(conn, current_day, moment, decisions)
+    tracker = _most_watched(conn, decisions, current_day, moment) if local else None
     runs = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
     windows = [key for key, _, _ in dashboard.RADAR_WINDOWS]
     radar = dashboard.release_radar(lists["upcoming"], current_day)
-    watched = {item["igdb_id"]: item for item in lists["twitch"]["listable"]}
+    entries = {item["igdb_id"]: item for item in (tracker or lists["twitch"])["listable"] if not item["series"]}
     for game in radar["games"]:
-        game["twitch"] = next((watched[igdb_id] for igdb_id in game["igdb_ids"] if igdb_id in watched), None)
+        game["watched" if tracker else "twitch"] = next(
+            (entries[igdb_id] for igdb_id in game["igdb_ids"] if igdb_id in entries), None)
     comparison = list_comparison.compare_lists(lists["upcoming"], radar["games"])
     groups = list(list_comparison.BAR_ORDER)
     return {
@@ -1041,6 +1210,7 @@ def _upcoming_report(conn, current_day: date, moment: datetime, window: str | No
         "group": group if group in groups else list_comparison.IGDB_ONLY,
         "group_labels": list_comparison.GROUP_LABELS,
         "twitch": lists["twitch"],
+        "watched": tracker,
         "igdb": {"configured": configured, "last_run": runs[0] if runs else None,
                  "last_problem": store.run_problem(runs[0]) if runs else None, "list_size": upcoming.LIST_SIZE},
     }
@@ -1113,10 +1283,16 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     and prices, and whether a sale badge may show).
     """
     settings = settings or load_settings()
-    store.initialize(settings.db_path).close()  # an empty catalog is valid: the page explains how to sync
+    # An empty catalog is valid (the page explains how to sync); a PostgreSQL database must have its tables.
+    store.initialize(settings.database).close()
     curated_cache = CuratedCache(settings.curated_dir)
 
-    app = FastAPI(title="Game Librarian", docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        close_pools()  # this process's PostgreSQL connections, at shutdown
+
+    app = FastAPI(title="Game Librarian", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     templates.env.filters.update(
@@ -1125,6 +1301,37 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         tenths=dashboard.format_tenths,
     )
     templates.env.globals["app_version"] = __version__  # cache-busts the stylesheet and script after an upgrade
+    templates.env.globals.update(sign_in_url=accounts.sign_in_url, sign_out_url=accounts.SIGN_OUT_URL,
+                                 provider_label=accounts.provider_label, wishlist_limit=accounts.WISHLIST_LIMIT)
+    # Set when a /.auth/ request reaches the app: built-in authentication is not in front of it, so the identity
+    # headers could come from anyone and are no longer trusted by this process.
+    sign_in_missing = threading.Event()
+
+    def open_db():
+        """A connection to the catalog for one page request (a pooled one for PostgreSQL)."""
+        return store.connect(settings.database, pooled=True)
+
+    def local_view(request: Request) -> bool:
+        """Whether this request may get Gamalytic's and TwitchTracker's figures: it comes from this computer, and
+        this site may hold them at all (the local SQLite database, not a hosted process)."""
+        return settings.local_evaluation and is_local_request(request)
+
+    def account_state(request: Request) -> accounts.AccountState:
+        """Who is signed in, read from the platform's headers only while built-in authentication is trusted."""
+        enabled = bool(settings.sign_in_providers) and not sign_in_missing.is_set()
+        identity = accounts.identity_from_headers(request.headers, settings.sign_in_providers) if enabled else None
+        allowed = identity is None or accounts.is_allowed(identity, settings.allowed_users)
+        return accounts.AccountState(enabled, identity, allowed, settings.sign_in_providers)
+
+    @app.middleware("http")
+    async def accounts_and_security_headers(request: Request, call_next):
+        """Give each request its account state (request.state.account, which templates read) and each response the
+        security headers."""
+        state = request.state.account = account_state(request)
+        response = await call_next(request)
+        _security_headers(response, hosted=settings.hosted,
+                          personal=state.identity is not None and not request.url.path.startswith("/static/"))
+        return response
     # Today's Daily Trivia day (UTC) in the header, so the lightbulb's "finished" badge follows the server's quiz day.
     templates.env.globals["trivia_day"] = lambda: trivia.quiz_day(now()).isoformat()
     live_lock = threading.Lock()  # one Twitch check at a time; a second request then finds the fresh answer
@@ -1139,7 +1346,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     def load_details(appid: int, params) -> tuple[dict | None, CatalogQuery, int]:
         """The details view of one visible game (None if it is not shown), and the list context its links keep."""
         curated = curated_cache.get()
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             catalog_rows = store.matching_games(conn, [], [])
             publishers = publisher_index(catalog_rows, curated)
@@ -1188,7 +1395,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     def list_context(params) -> tuple[CatalogQuery, int]:
         """The browsing context (search, filters, sort and page) that the details' links keep."""
         curated = curated_cache.get()
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             publishers = publisher_index(store.matching_games(conn, [], []), curated)
         finally:
@@ -1207,7 +1414,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             game, query, page = load_details(parsed.number, params)
             if game is not None:
                 return game, query, page
-            conn = store.connect(settings.db_path)
+            conn = open_db()
             try:  # a Steam app outside the catalog may still be the verified match of an IGDB game
                 match = store.igdb_game_for_appid(conn, parsed.number)
             finally:
@@ -1218,7 +1425,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         query, page = list_context(params)
         if parsed is None:
             return None, query, page
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             row = store.igdb_game_rows(conn, [parsed.number]).get(parsed.number)
             visible = {item["appid"] for item in store.matching_games(conn, [], [])}
@@ -1235,7 +1442,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             return None, query, page
         game = _igdb_details_view(row, today())
         released = not game["state"].upcoming
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             game["critics"] = _critics_view(conn, game["key"], released=released)
             game["live"] = _live_view(conn, game["key"], row["igdb_id"], configured=settings.igdb_configured,
@@ -1247,7 +1454,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     def report_tables() -> tuple[ReportTables, ranking.RankingWindow]:
         """The dashboard's data: the report tables for today's five-year window, read on every request."""
         window = ranking.RankingWindow.for_website(today())
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             return collect_tables(conn, curated_cache.get(), window), window
         finally:
@@ -1295,19 +1502,22 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         if report not in dashboard.TRENDING_REPORTS:
             report = dashboard.DEFAULT_REPORT
         current_day, moment = today(), now()
-        conn = store.connect(settings.db_path)
+        # Gamalytic's estimates and TwitchTracker's figures go only to a browser on this computer; for anyone else
+        # they do not exist in the page.
+        local = local_view(request)
+        curated = curated_cache.get()
+        conn = open_db()
         try:
             # Twitch allows keeping its data for 24 hours; an older list is deleted, not just hidden.
             store.purge_twitch_top_games(conn, (moment - twitch.KEEP_FOR).isoformat(timespec="seconds"))
             if report == "upcoming":
                 view = _upcoming_report(conn, current_day, moment, params.get("window"), params.get("group"),
-                                        configured=settings.igdb_configured)
+                                        configured=settings.igdb_configured,
+                                        decisions=curated.twitch_category_decisions, local=local)
             elif report == "momentum":
-                view = _momentum_report(conn, curated_cache.get(), current_day, moment, params.get("player"))
+                view = _momentum_report(conn, curated, current_day, moment, params.get("player"))
             else:
-                # Gamalytic's estimates go only to a browser on this computer; for anyone else the chart does not exist.
-                view = _sales_report(conn, curated_cache.get(), current_day, moment, params.get("view"),
-                                     local=is_local_request(request))
+                view = _sales_report(conn, curated, current_day, moment, params.get("view"), local=local)
             last_sync = store.last_successful_sync(conn)
         finally:
             conn.close()
@@ -1323,16 +1533,21 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     @app.get("/trending", response_class=HTMLResponse)
     def trending_page(request: Request):
         """Separate, labeled signals from stored data, in three parts: upcoming games and games that are out or
-        watched now (all platforms, from IGDB and Twitch), then Steam activity (Steam only). No network calls."""
+        watched now (all platforms, from IGDB and Twitch), then Steam activity (Steam only). No network calls.
+        A browser on this computer gets Most watched among tracked Twitch categories, by TwitchTracker's figures
+        ("watched"); for anyone else they do not exist in the page, and Most watched on Twitch keeps Twitch's order."""
         current_day, moment = today(), now()
-        conn = store.connect(settings.db_path)
+        curated = curated_cache.get()
+        conn = open_db()
         try:
             # Twitch allows keeping its data for 24 hours; an older list is deleted, not just hidden.
             store.purge_twitch_top_games(conn, (moment - twitch.KEEP_FOR).isoformat(timespec="seconds"))
-            steam = _steam_activity(conn, curated_cache.get(), current_day, moment)
+            steam = _steam_activity(conn, curated, current_day, moment)
             counts = store.catalog_counts(conn)
             sync_status = _sync_status(conn)
-            lists = _trending_lists(conn, current_day, moment)
+            lists = _trending_lists(conn, current_day, moment, curated.twitch_category_decisions)
+            watched = (_most_watched(conn, curated.twitch_category_decisions, current_day, moment)
+                       if local_view(request) else None)
             igdb_run = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
         finally:
             conn.close()
@@ -1366,6 +1581,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             "recent_window": (current_day - upcoming.RECENT_WINDOW, current_day),
             "recent_days": upcoming.RECENT_WINDOW.days,
             "twitch_top": lists["twitch"],
+            "watched": watched,  # None unless the browser runs on this computer
         }
         return templates.TemplateResponse(request, "trending.html", context)
 
@@ -1390,7 +1606,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         if story is None:
             return templates.TemplateResponse(request, "story.html", {"active": "stories", "story": None},
                                               status_code=404)
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             in_catalog = {row["appid"] for row in store.matching_games(conn, [], [])}
         finally:
@@ -1424,7 +1640,173 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
 
     @app.get("/wishlist", response_class=HTMLResponse)
     def wishlist_page(request: Request):
+        """The wishlist: app.js fills it from the browser, or from /api/wishlist for a signed-in visitor."""
         return templates.TemplateResponse(request, "wishlist.html", {"active": "wishlist"})
+
+    # ------------------------------------------------------------------ accounts (accounts.py) and their wishlists
+
+    @app.get("/account", response_class=HTMLResponse)
+    def account_page(request: Request):
+        """Sign in or out, and what an account keeps. Without GAME_LIBRARIAN_SIGN_IN_PROVIDERS there are no accounts
+        (404). ?next= is the page to come back to after signing in (a path on this site only)."""
+        state: accounts.AccountState = request.state.account
+        count = None
+        if state.signed_in:
+            conn = open_db()
+            try:
+                row = store.find_account(conn, state.identity.provider, state.identity.subject)
+                count = len(store.wishlist_items(conn, row["id"])) if row else 0
+            finally:
+                conn.close()
+        context = {"active": "account", "count": count, "unavailable": False,
+                   "return_to": accounts.safe_return_path(request.query_params.get("next") or "/wishlist")}
+        return templates.TemplateResponse(request, "account.html", context, status_code=200 if state.enabled else 404)
+
+    @app.get("/.auth/{rest:path}", response_class=HTMLResponse)
+    def sign_in_unavailable(request: Request, rest: str):
+        """Reached only when built-in authentication is not in front of the app: with it, the platform answers every
+        /.auth/ address itself. From then on this process trusts no identity header, so a misconfigured site cannot
+        be used to sign in as someone else by sending their headers."""
+        if settings.sign_in_providers and not sign_in_missing.is_set():
+            sign_in_missing.set()
+            LOG.error("A /.auth/ request reached the app, so Container Apps' built-in authentication is not in front "
+                      "of it; identity headers are ignored until the app restarts. Turn on Authentication for the "
+                      "container app, or remove GAME_LIBRARIAN_SIGN_IN_PROVIDERS.")
+        request.state.account = account_state(request)
+        context = {"active": "account", "count": None, "unavailable": True, "return_to": "/"}
+        return templates.TemplateResponse(request, "account.html", context, status_code=503)
+
+    def api_identity(request: Request) -> tuple[accounts.Identity | None, JSONResponse | None]:
+        """The signed-in person who may keep an account, or the error that answers the API request."""
+        state: accounts.AccountState = request.state.account
+        if not state.enabled:
+            return None, _json_error(404, "sign_in_off", "This site has no accounts; the wishlist stays in the browser.")
+        if state.identity is None:
+            return None, _json_error(401, "sign_in_required", "Sign in to keep your wishlist in your account.")
+        if not state.allowed:
+            return None, _json_error(403, "not_allowed", "This account is not on this site's list of allowed "
+                                                         "accounts. The wishlist stays in this browser.")
+        return state.identity, None
+
+    def for_account(identity: accounts.Identity, work: Callable):
+        """`work(conn, account_id)` for the person's own account (made at first use); nothing else is reachable."""
+        conn = open_db()
+        try:
+            account = store.account_id(conn, identity.provider, identity.subject, identity.name,
+                                       now=now().isoformat(timespec="seconds"))
+            return work(conn, account)
+        finally:
+            conn.close()
+
+    def wishlist_body(conn, account: int) -> dict:
+        items = store.wishlist_items(conn, account)
+        return {"items": [{"id": row["game_key"], "name": row["name"]} for row in items],
+                "limit": accounts.WISHLIST_LIMIT}
+
+    def api_answer(body: dict) -> JSONResponse:
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/wishlist")
+    def wishlist_read(request: Request):
+        """The signed-in person's wishlist: {"items": [{"id", "name"}, ...] oldest first, "limit"}."""
+        identity, error = api_identity(request)
+        return error or api_answer(for_account(identity, wishlist_body))
+
+    @app.post("/api/wishlist/toggle")
+    async def wishlist_toggle(request: Request):
+        """Save a game, or remove it when it is saved under its key or an alias: {"id", "name", "aliases"}."""
+        identity, error = api_identity(request)
+        error = error or _same_site_json(request)
+        entry = None if error else accounts.wishlist_entry(await _read_json(request))
+        if error or entry is None:
+            return error or _json_error(400, "invalid", "The game could not be read from the request.")
+        key, name, aliases = entry
+
+        def work(conn, account):
+            saved = store.toggle_wishlist_item(conn, account, key, name, aliases,
+                                               now=now().isoformat(timespec="seconds"), limit=accounts.WISHLIST_LIMIT)
+            return saved, wishlist_body(conn, account)
+
+        saved, body = await run_in_threadpool(for_account, identity, work)
+        if saved is None:
+            return _json_error(409, "wishlist_full", f"Your wishlist already holds {accounts.WISHLIST_LIMIT} games, "
+                                                     "the most it can keep. Remove one to add another.")
+        return api_answer({"saved": saved, **body})
+
+    @app.post("/api/wishlist/remove")
+    async def wishlist_remove(request: Request):
+        """Remove one saved game: {"id"}."""
+        identity, error = api_identity(request)
+        error = error or _same_site_json(request)
+        payload = None if error else await _read_json(request)
+        key = payload.get("id") if isinstance(payload, dict) else None
+        if error or not isinstance(key, str) or not accounts.GAME_KEY.fullmatch(key):
+            return error or _json_error(400, "invalid", "The game could not be read from the request.")
+
+        def work(conn, account):
+            store.remove_wishlist_item(conn, account, key)
+            return wishlist_body(conn, account)
+
+        return api_answer(await run_in_threadpool(for_account, identity, work))
+
+    @app.post("/api/wishlist/import")
+    async def wishlist_import(request: Request):
+        """Add the games of the browser's wishlist that the account does not have: {"items": [{"id", "name"}]}.
+        The browser keeps its own copy; only its owner removes it."""
+        identity, error = api_identity(request)
+        error = error or _same_site_json(request)
+        entries = None if error else accounts.import_entries(await _read_json(request))
+        if error or entries is None:
+            return error or _json_error(400, "invalid", "The browser's wishlist could not be read from the request.")
+
+        def work(conn, account):
+            counts = store.import_wishlist_items(conn, account, entries, now=now().isoformat(timespec="seconds"),
+                                                 limit=accounts.WISHLIST_LIMIT)
+            return {**counts, **wishlist_body(conn, account)}
+
+        return api_answer(await run_in_threadpool(for_account, identity, work))
+
+    @app.post("/api/account/delete")
+    async def account_delete(request: Request):
+        """Delete the signed-in person's account and wishlist on this site (their sign-in provider is not affected)."""
+        identity, error = api_identity(request)
+        error = error or _same_site_json(request)
+        if error:
+            return error
+
+        def work():
+            conn = open_db()
+            try:
+                row = store.find_account(conn, identity.provider, identity.subject)
+                if row is not None:
+                    store.delete_account(conn, row["id"])
+            finally:
+                conn.close()
+
+        await run_in_threadpool(work)
+        return api_answer({"deleted": True})
+
+    # ------------------------------------------------------------------ health probes (Container Apps)
+
+    @app.get("/healthz")
+    def healthz():
+        """Liveness and startup probe: the process answers. It reads nothing, so a database outage never makes the
+        platform restart a container that works."""
+        return api_answer({"status": "ok"})
+
+    @app.get("/readyz")
+    def readyz():
+        """Readiness probe: the catalog database answers a query (503 otherwise; the reason goes to the log only)."""
+        try:
+            conn = open_db()
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:  # any failure means "not ready"; messages name the server, never a password
+            LOG.warning("Readiness check: the catalog database did not answer (%s: %s)", type(exc).__name__, exc)
+            return JSONResponse({"status": "unavailable"}, status_code=503, headers={"Cache-Control": "no-store"})
+        return api_answer({"status": "ok"})
 
     @app.get("/trivia/panel", response_class=HTMLResponse)
     def trivia_panel(request: Request):
@@ -1432,7 +1814,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         `now`), the facts of earlier quizzes and today's facts, marked. A game links its details only when it is
         in the catalog. Reads the curated file and the catalog only: answers and scores stay in the browser."""
         daily = trivia.daily_trivia(trivia.load_trivia(settings.curated_dir), trivia.quiz_day(now()))
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             in_catalog = {row["appid"] for row in store.matching_games(conn, [], [])}
         finally:
@@ -1459,7 +1841,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         if live["needs_check"]:
             igdb_id = game["igdb_id"] if game["kind"] == "igdb" else None
             with live_lock:
-                conn = store.connect(settings.db_path)
+                conn = open_db()
                 try:
                     if igdb_id is None:
                         igdb_id = _catalog_igdb_id(conn, int(game["key"]))
@@ -1490,7 +1872,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         current_day, moment = today(), now()
         window = ranking.RankingWindow.for_website(current_day)
 
-        conn = store.connect(settings.db_path)
+        conn = open_db()
         try:
             catalog_rows = store.matching_games(conn, [], [])
             publishers = publisher_index(catalog_rows, curated)

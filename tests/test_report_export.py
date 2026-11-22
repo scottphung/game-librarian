@@ -50,7 +50,7 @@ def exported(settings, fake_steam, clock, tmp_path):
                         release_date={"coming_soon": False, "date": "Apr 18, 2011"})
     fake_steam.add_game(30, "Quiet Game", positive=0, negative=0, totals=(0, 0, None))
     games = [CuratedGame(10, "Test Quest", ""), CuratedGame(20, "Other Game", ""), CuratedGame(30, "Quiet Game", "")]
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     with fake_steam.client() as steam:
         run_sync(conn, steam, games, SyncOptions(), log=lambda message: None, now=clock)
     conn.close()
@@ -89,7 +89,7 @@ def test_export_writes_one_table_per_file_with_documented_columns(exported):
 def test_review_counts_appear_once_per_game_however_many_tags_or_awards(exported, settings):
     _, out_dir = exported
     games = {row["appid"]: row for row in read(out_dir / "games.csv")}
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     stored_total = conn.execute("SELECT SUM(review_total) FROM games").fetchone()[0]
     conn.close()
     assert sum(int(row["total_reviews"] or 0) for row in games.values()) == stored_total == 1100

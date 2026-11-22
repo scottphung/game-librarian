@@ -194,7 +194,7 @@ def world(games, fake_steam):
 
 def refresh(settings, world, fake_steam, moment: datetime) -> upcoming.RefreshReport:
     api, helix = world
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with api.client() as client:
             return upcoming.refresh_upcoming(conn, client, fake_steam.client(), CuratedData(), catalog_appids=CATALOG,
@@ -229,7 +229,7 @@ def test_a_game_moves_from_upcoming_to_recent_on_its_release_day_with_the_same_k
     assert "Launch Day Available on PlayStation 5, Xbox Series X|S since 19 Nov 2026" in recent
     # The release-day refresh keeps one record and one signal history: nothing is duplicated.
     assert refresh(settings, world, fake_steam, at(RELEASE_DAY)).status() == "success"
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         assert conn.execute("SELECT COUNT(*) FROM igdb_games WHERE igdb_id = 201").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM popularity_snapshots WHERE signal = 'want_to_play' "
@@ -254,8 +254,8 @@ def test_most_watched_on_twitch_lists_games_in_twitchs_order_with_their_platform
     text = text_of(watched)
     listed = text_of(watched[watched.index("<ol"):])
     assert "Just Chatting" not in listed and "Expansion Pack" not in listed and "Unknown Thing" not in listed
-    assert ("Left out at this check: 1 that Twitch links to no game (such as Just Chatting), 1 that IGDB lists as "
-            "DLC, bundles or other kinds, 1 whose IGDB record was not read yet.") in text
+    assert ("Left out at this check: 1 that neither Twitch nor IGDB links to a game (such as Just Chatting), 1 that "
+            "IGDB lists as DLC, bundles or other kinds, 1 whose IGDB record was not read yet.") in text
     assert "Twitch's list: #2 · Watch on Twitch" in text and "Twitch's list: #4 as “Old Classic: Online” ·" in text
     assert "Old Classic Available on PC since 19 May 2015" in text
     assert "Mystery Game Platforms: not known (IGDB lists none for this game)" in text  # missing platform data
@@ -287,7 +287,7 @@ def test_console_only_and_partly_released_games_have_honest_details_and_one_iden
     assert "Steam platforms Windows · Linux" in catalog
     assert "All platforms Available on PC since 1 Jan 2024 From IGDB.com, checked 19 Nov 2026" in catalog
     assert "Price on Steam" in catalog and "Steam reviews" in catalog  # the catalog details keep every section
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         keys = {target.key for target in cli._critic_targets(conn, CuratedData())}
     finally:
@@ -329,7 +329,7 @@ def test_twitch_failures_keep_the_last_list_for_24_hours_only(world, settings, f
     assert "Launch Day" in site(settings, next_day, at(next_day, 11)).get("/trending").text
     later = site(settings, next_day, at(next_day, 13)).get("/trending").text  # 25 hours after Twitch answered
     assert "No Twitch list is saved from the last 24 hours" in text_of(later)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         assert conn.execute("SELECT COUNT(*) FROM twitch_top_games").fetchone()[0] == 0  # deleted, not just hidden
     finally:

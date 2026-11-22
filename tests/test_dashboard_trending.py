@@ -14,6 +14,7 @@ Uses the fourteen synced catalog games of test_web.py (app ids 101-114). All nam
 import re
 from datetime import date, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 
 from game_librarian import dashboard
@@ -299,6 +300,7 @@ def genre_world(settings) -> None:
     set_column(settings, "review_positive", {114: 0})
 
 
+@pytest.mark.local_evaluation
 def test_the_public_page_leads_with_reception_and_the_local_page_with_estimated_sales(games, settings):
     strong_reception(settings)
     save_players(settings, {114: 4_000, 113: 1_500}, moment=NOW - timedelta(minutes=50))

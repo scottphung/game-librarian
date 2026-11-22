@@ -31,7 +31,7 @@ def app_client(settings, now=NOW) -> TestClient:
 
 
 def set_column(settings, column: str, values_by_appid: dict) -> None:
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         for appid, value in values_by_appid.items():  # column names come from the tests, never from input
             conn.execute(f"UPDATE games SET {column} = ? WHERE appid = ?", (value, appid))
@@ -41,7 +41,7 @@ def set_column(settings, column: str, values_by_appid: dict) -> None:
 
 
 def with_conn(settings, action) -> None:
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         action(conn)
     finally:

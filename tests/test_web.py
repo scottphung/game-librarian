@@ -39,7 +39,7 @@ def make_app(settings):
 
 
 def run_test_sync(settings, fake_steam, clock, games, **options):
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with fake_steam.client() as steam:
             run_sync(conn, steam, games, SyncOptions(**options), log=lambda message: None, now=clock)
@@ -95,7 +95,7 @@ def client(settings, games):
 
 
 def set_modes(settings, modes_by_appid):
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         for appid, modes in modes_by_appid.items():
             conn.execute("UPDATE games SET modes = ? WHERE appid = ?", (json.dumps(modes), appid))

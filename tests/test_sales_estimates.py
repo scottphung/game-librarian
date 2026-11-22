@@ -23,13 +23,15 @@ from tests.test_web import games, text_of  # noqa: F401
 from tests.test_web_discovery import iso, save_players, with_conn
 from tests.test_web_upcoming import NOW, TODAY, NoTwitch, configured
 
+pytestmark = pytest.mark.local_evaluation  # Gamalytic's estimates live in the local SQLite database only
+
 UTC = timezone.utc
 LOCAL = ("127.0.0.1", 50000)
 
 
 def catalog_db(settings, appids):
     """A database whose catalog lists `appids` (estimates refer to catalog games)."""
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     store.sync_curated_games(conn, [(appid, f"Game {appid}") for appid in appids])
     return conn
 
@@ -388,7 +390,7 @@ def test_the_command_and_sync_ask_only_when_due_and_say_where_the_estimates_show
     out = capsys.readouterr().out
     assert "Sales estimates (Gamalytic): failed" in out and "Gamalytic answered 429" in out
     assert len(fake_gamalytic.requests) == 2
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         assert store.latest_sales_estimates(conn, [101])[101]["copies_sold"] == 101_000  # kept after the 429
     finally:

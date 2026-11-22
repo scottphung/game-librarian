@@ -115,7 +115,7 @@ def test_rate_limits_and_failures_become_clear_errors():
 def test_refresh_and_view_cover_every_state(settings):
     fake = FakeHelix()
     fake.categories[52189] = [{"id": "777", "name": "Upcoming Saga", "igdb_id": "52189"}]
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with fake.client() as client:
             refresh_live(conn, client, "271590", 1020, NOW)
@@ -141,7 +141,7 @@ def test_refresh_and_view_cover_every_state(settings):
 
 def test_a_failed_check_keeps_recent_streams_and_waits_before_asking_again(settings):
     fake = FakeHelix()
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with fake.client() as client:
             refresh_live(conn, client, "271590", 1020, NOW)
@@ -170,7 +170,7 @@ def test_a_failed_check_keeps_recent_streams_and_waits_before_asking_again(setti
 
 def test_twitch_answers_are_deleted_after_24_hours(settings):
     fake = FakeHelix()
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         with fake.client() as client:
             refresh_live(conn, client, "271590", 1020, NOW)

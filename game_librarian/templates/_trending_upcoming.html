@@ -7,9 +7,10 @@
    selecting it again, or its name, opens the details dialog. On a phone the comparison comes below the radar. #}
 
 {# The selected-game panel's content for one game (dashboard.release_radar): cover, name (which opens the details
-   dialog), soonest release, each platform's date, its ranks in the tracked lists and, when Twitch's newest list names
-   the same IGDB game, its place there. The panel shows the selected game's copy; app.js swaps in another game's copy
-   from its <template>. #}
+   dialog), soonest release, each platform's date, its ranks in the tracked lists and, when the Most watched list names
+   the same IGDB game, its entry there: TwitchTracker's rank and average viewers on this computer ("watched"), else its
+   place in Twitch's newest list ("twitch"). Each is its own line, never combined with the list ranks. The panel shows
+   the selected game's copy; app.js swaps in another game's copy from its <template>. #}
 {% macro radar_game(game) -%}
 <div class="rp-head">
   {{ thumb(game.image_url) }}
@@ -25,7 +26,7 @@
 {% else %}
 <p class="rp-none">IGDB lists no platform or release date for it yet.</p>
 {% endif %}
-<ul class="rp-ranks">{% for rank in game.ranks %}<li><strong>#{{ rank.place }}</strong> in {{ rank.list }}</li>{% endfor %}{% if game.twitch %}<li><strong>#{{ game.twitch.twitch_position }}</strong> on Twitch’s most-watched list · {{ twitch_link(game.twitch) }}</li>{% endif %}</ul>
+<ul class="rp-ranks">{% for rank in game.ranks %}<li><strong>#{{ rank.place }}</strong> in {{ rank.list }}</li>{% endfor %}{% if game.watched %}<li>TwitchTracker category rank <strong>#{{ game.watched.tracker_rank }}</strong>, {{ game.watched.avg_viewers|number }} average viewers (period not confirmed) · {{ twitch_link(game.watched) }}</li>{% elif game.twitch %}<li><strong>#{{ game.twitch.twitch_position }}</strong> on Twitch’s most-watched list · {{ twitch_link(game.twitch) }}</li>{% endif %}</ul>
 {%- endmacro %}
 
 {# When one capture was saved, and when IGDB calculated its values. #}
@@ -52,7 +53,7 @@ saved {{ capture.captured_at|datetime }}{% if capture.calculated_at %} (IGDB cal
 </li>
 {%- endmacro %}
 
-{% set rd = dash.radar %}{% set cmp = dash.comparison %}{% set tw = dash.twitch %}
+{% set rd = dash.radar %}{% set cmp = dash.comparison %}{% set tw = dash.twitch %}{% set tt = dash.watched %}
 {% set igdb, steam = cmp.captures[0], cmp.captures[1] %}
 {% set saved = rd.lists|map(attribute="captured_at")|select|list %}
 <section class="report" aria-labelledby="report-title">
@@ -132,7 +133,7 @@ saved {{ capture.captured_at|datetime }}{% if capture.calculated_at %} (IGDB cal
       {% else %}
       <p class="chart-empty">Not refreshed yet: run <code>python -m game_librarian upcoming</code>.</p>
       {% endif %}
-      <p class="chart-meta">IGDB release dates and platforms of the games in IGDB PopScore types 2 and 10 · {% if saved %}lists saved {{ saved|min|datetime }}{% if saved|max != saved|min %} – {{ saved|max|datetime }}{% endif %}; days counted from {{ rd.today|day }}{% else %}not refreshed yet{% endif %}{% if tw.checked_at %}; Twitch’s places from its list of {{ tw.checked_at|datetime }}{% endif %}.</p>
+      <p class="chart-meta">IGDB release dates and platforms of the games in IGDB PopScore types 2 and 10 · {% if saved %}lists saved {{ saved|min|datetime }}{% if saved|max != saved|min %} – {{ saved|max|datetime }}{% endif %}; days counted from {{ rd.today|day }}{% else %}not refreshed yet{% endif %}{% if tt %}{% if tt.retrieved %}; TwitchTracker’s ranks retrieved {{ tt.retrieved[1]|datetime }} (on this computer only){% endif %}{% elif tw.checked_at %}; Twitch’s places from its list of {{ tw.checked_at|datetime }}{% endif %}.</p>
       {% if rd.games %}
       <details class="table-view">
         <summary>Show as a table</summary>
@@ -242,7 +243,11 @@ saved {{ capture.captured_at|datetime }}{% if capture.calculated_at %} (IGDB cal
         <li><strong>The groups:</strong> every distinct game is in exactly one, so their counts add up to the distinct games of both captures, the comparison’s one denominator. A game on several platforms is one game. Ranks are places among each list’s upcoming games, as the Trending page numbers them; the table adds each game’s place in the source’s own ranking.</li>
         <li><strong>Steam listing:</strong> “verified” means IGDB lists exactly one Steam app for the game and Steam’s name for it is the same (or a reviewer confirmed it), or the game is a Steam game of this catalog. A game seen only on IGDB was absent from the places Steam’s capture holds; it may still be wishlisted further down Steam’s list. No game is called console-only: IGDB lists the platforms a game is announced for, which never proves it will not come to PC.</li>
         <li><strong>Early access:</strong> a game whose early access has started is still upcoming here, but it is already sold on Steam, which may be why Steam’s list of upcoming games leaves it out.{% if not cmp.withheld %} Now {{ cmp.early_access|length }} of the {{ cmp.igdb_listed|length }} games seen only on IGDB with a Steam listing are in early access, and {{ cmp.steam_early_access|length }} of the {{ cmp.counts.both + cmp.counts.steam_only }} games in Steam’s capture.{% endif %}</li>
-        <li><strong>Twitch:</strong> not part of the comparison. Where Twitch’s newest list names the same IGDB game, the selected-game panel adds its place there, with a link to Twitch.{% if tw.categories %} Of the {{ tw.categories }} categories asked for at {{ tw.checked_at|datetime }}, {{ tw.listable|length }} are games IGDB lists as main games or similar{% if left.no_igdb_game %}, {{ left.no_igdb_game }} are not games (such as Just Chatting){% endif %}{% if left.other_kind %}, {{ left.other_kind }} are DLC, bundles or other kinds{% endif %}{% if left.not_read %}, and {{ left.not_read }} were not read from IGDB yet{% endif %}.{% endif %} Twitch’s Developer Services Agreement allows caching its data “for only a twenty-four hour time period” and needs a separate agreement for research on “trends over specific time periods”, so its list is deleted after {{ tw.keep_hours }} hours and no Twitch history is kept.</li>
+        {% if tt %}
+        <li><strong>TwitchTracker:</strong> not part of the comparison, and shown on this computer only (TwitchTracker publishes no terms that allow sharing its figures). Where Most watched among tracked Twitch categories names the same IGDB game, the selected-game panel adds its TwitchTracker category rank, as returned (among every Twitch category), and its average viewers, with a link to Twitch. A series category, such as Counter-Strike, stands for no single game, so it is never matched to one. The list covers only the categories this site tracks, the game and series categories among Twitch’s top {{ tt.depth }} categories{% if tt.selected_at %} at {{ tt.selected_at|datetime }}{% endif %} and the reviewed ones, so most upcoming games have no entry. TwitchTracker’s API page calls its figures a 30-day summary, but its average viewers and hours watched fit at most about 7 days (hours watched ÷ average viewers is never above 168 hours), and its rank does not always follow them, so the period is not confirmed. No history is kept, so no change is shown.</li>
+        {% else %}
+        <li><strong>Twitch:</strong> not part of the comparison. Where Twitch’s newest list names the same IGDB game, the selected-game panel adds its place there, with a link to Twitch.{% if tw.categories %} Of the {{ tw.categories }} categories asked for at {{ tw.checked_at|datetime }}, {{ tw.listable|length }} are games IGDB lists as main games or similar{% if left.no_game %}, {{ left.no_game }} are not linked to a game (such as Just Chatting){% endif %}{% if left.unresolved %}, {{ left.unresolved }} have an unresolved game{% endif %}{% if left.other_kind %}, {{ left.other_kind }} are DLC, bundles or other kinds{% endif %}{% if left.not_read %}, and {{ left.not_read }} were not read from IGDB yet{% endif %}.{% endif %} Twitch’s Developer Services Agreement allows caching its data “for only a twenty-four hour time period” and needs a separate agreement for research on “trends over specific time periods”, so its list is deleted after {{ tw.keep_hours }} hours and no Twitch history is kept.</li>
+        {% endif %}
       </ul>
       <h3 class="chart-title" id="radar-method-title">How the release radar works</h3>
       <ul class="method-notes">
@@ -252,9 +257,9 @@ saved {{ capture.captured_at|datetime }}{% if capture.calculated_at %} (IGDB cal
         <li><strong>Sections:</strong> one per platform family these games are announced for, clockwise from the top: PC (IGDB’s “PC (Microsoft Windows)”, on any store, not only Steam), Xbox, PlayStation, Switch (Nintendo Switch and Switch 2) and Other ({{ rd.other_platforms|join(", ") if rd.other_platforms else "none now" }}). Within a section, a point’s angle only keeps the games apart: it means nothing.</li>
         <li><strong>Several platforms:</strong> a game gets a point in every section where it has an exact release day, at that family’s earliest day, so the numbers per section add up to more than the games, and a game due on PC and consoles on different days sits at a different distance in each section. Selecting one of its points lights up the others.</li>
         <li><strong>Exact days only:</strong> a section whose date is a month, quarter, year or TBA gets no point. A game without an exact day anywhere is under “Date TBA or approximate”, by the earliest date IGDB states, ordered by the last day each date allows. An alpha, beta or early access is noted but is not a release. IGDB’s dates can change; the Trending page notes a change once two refreshes see it.</li>
-        <li><strong>Selected game:</strong> the soonest release when the page opens. Pointing at a point or at a game in the comparison, focusing it with Tab (on the radar, soonest game first) or tapping it shows its game beside the radar: its cover, every platform’s date, its rank in each tracked list and its place on Twitch when Twitch names the same IGDB game. A second click or tap, Enter, or the name opens its details; a game picked in the comparison whose point a window hides brings back “All tracked”.</li>
+        <li><strong>Selected game:</strong> the soonest release when the page opens. Pointing at a point or at a game in the comparison, focusing it with Tab (on the radar, soonest game first) or tapping it shows its game beside the radar: its cover, every platform’s date, its rank in each tracked list and, when the Most watched list names the same IGDB game, {{ "TwitchTracker’s rank and average viewers" if tt else "its place on Twitch" }}. A second click or tap, Enter, or the name opens its details; a game picked in the comparison whose point a window hides brings back “All tracked”.</li>
       </ul>
-      <p class="chart-sub">Data from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a> (release dates, platforms, covers and both PopScore lists, saved by <code>python -m game_librarian upcoming</code>) and <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>; cover art belongs to its publishers. A position is a place in a list, not a count of people, wishlists or viewers.</p>
+      <p class="chart-sub">Data from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a> (release dates, platforms, covers and both PopScore lists, saved by <code>python -m game_librarian upcoming</code>) and <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>{% if tt %}, and TwitchTracker’s free API (saved by <code>python -m game_librarian most-watched</code>){% endif %}; cover art belongs to its publishers. A position is a place in a list, not a count of people, wishlists or viewers{% if tt %}; TwitchTracker’s average viewers are its own figures{% endif %}.</p>
     </div>
   </details>
 </section>

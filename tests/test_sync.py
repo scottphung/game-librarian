@@ -17,7 +17,7 @@ GAMES = [CuratedGame(10, "Test Quest", ""), CuratedGame(20, "Other Game", ""), C
 
 @pytest.fixture
 def conn(settings):
-    connection = store.initialize(settings.db_path)
+    connection = store.initialize(settings.database)
     yield connection
     connection.close()
 
@@ -381,7 +381,7 @@ def test_the_sync_command_reads_prices_for_the_configured_store_region(settings,
     monkeypatch.setattr(cli, "load_settings", lambda: replace(settings, steam_country="JP"))
     monkeypatch.setattr(cli, "SteamClient", lambda api_key=None: fake_steam.client(api_key))
     assert cli.main(["sync"]) == 0
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         assert store.price_rows(conn, [10])[10]["country_code"] == "JP"
     finally:

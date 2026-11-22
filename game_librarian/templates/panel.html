@@ -1,7 +1,7 @@
 {# HTML fragment loaded into the details dialog. A Steam catalog game and a game known only from IGDB
    have different details: the IGDB one has no Steam reviews, prices, awards or player counts. #}
-{% from "_details.html" import game_details %}
-{% from "_igdb_details.html" import igdb_details %}
+{% from "_details.html" import game_details with context %}
+{% from "_igdb_details.html" import igdb_details with context %}
 {% if game and game.kind == "igdb" %}{{ igdb_details(game, "dialog-heading") }}
 {% elif game %}{{ game_details(game, "dialog-heading") }}
 {% else %}<div class="details-missing"><h2 id="dialog-heading" tabindex="-1">Game not found</h2><p>This game is not in the catalog or the upcoming lists.</p></div>{% endif %}

@@ -1,4 +1,5 @@
-"""Shared test helpers: an in-memory fake Steam and Gamalytic, synthetic payloads and a controllable clock.
+"""Shared test helpers: an in-memory fake Steam, Gamalytic and TwitchTracker, synthetic payloads and a controllable
+clock.
 
 All names, texts and numbers here are made up for tests. They are never shown by the app.
 """
@@ -7,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +19,7 @@ import pytest
 from game_librarian.config import Settings
 from game_librarian.gamalytic import GamalyticClient
 from game_librarian.steam import SteamClient
+from game_librarian.twitchtracker import TwitchTrackerClient
 
 TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1695: "Open World", 3871: "2D", 1667: "Horror",
              1664: "Puzzle", 1625: "Platformer", 4085: "Anime", 21: "Adventure", 3859: "Multiplayer", 1742: "Story Rich"}
@@ -289,6 +293,50 @@ def fake_gamalytic(monkeypatch) -> FakeGamalytic:
     return fake
 
 
+class FakeTwitchTracker:
+    """TwitchTracker's category summary endpoint in memory, answering like the live one did on 2026-11-21
+    (twitchtracker.py): a JSON object of four whole numbers, or {} for a category it has no summary of.
+
+    `summaries` maps a Twitch category id to its answer; an id without one gets {}. `responses` are consumed one per
+    request before normal answers: an HTTP status to answer with, "timeout", or "html" (a challenge page that is not
+    JSON, with HTTP 200). Every request is kept in `requests`.
+    """
+
+    def __init__(self) -> None:
+        self.summaries: dict[str, dict] = {}
+        self.responses: list[int | str] = []
+        self.requests: list[httpx.Request] = []
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.responses:
+            planned = self.responses.pop(0)
+            if planned == "timeout":
+                raise httpx.ReadTimeout("TwitchTracker did not answer (test)", request=request)
+            if planned == "html":
+                return httpx.Response(200, text="<html><title>Just a moment...</title></html>",
+                                      headers={"Content-Type": "text/html"})
+            if planned != 200:
+                return httpx.Response(planned, text=f"planned answer {planned} (test)")
+        prefix = "/api/games/summary/"
+        if not request.url.path.startswith(prefix):
+            return httpx.Response(404)
+        return httpx.Response(200, json=self.summaries.get(request.url.path[len(prefix):], {}))
+
+    def client(self) -> TwitchTrackerClient:
+        return TwitchTrackerClient(http=httpx.Client(transport=httpx.MockTransport(self.handler)),
+                                   sleep=lambda seconds: None)
+
+
+@pytest.fixture(autouse=True)
+def fake_twitchtracker(monkeypatch) -> FakeTwitchTracker:
+    """Every test's TwitchTracker: `sync` asks it by default when IGDB is configured, so without this a command-line
+    test could reach the real API. The test suite never does."""
+    fake = FakeTwitchTracker()
+    monkeypatch.setattr("game_librarian.__main__.TwitchTrackerClient", fake.client)
+    return fake
+
+
 class Clock:
     """A controllable UTC clock for sync runs."""
 
@@ -321,12 +369,56 @@ def clock() -> Clock:
     return Clock()
 
 
+# With GAME_LIBRARIAN_TEST_DATABASE_URL (a PostgreSQL database that the test role owns, such as
+# "postgresql://gl_test@localhost:55432/gl_test", with PGPASSWORD set), every test that uses `settings` gets a new,
+# empty PostgreSQL schema there instead of a SQLite file, so the whole suite runs on PostgreSQL. Without it, SQLite.
+TEST_DATABASE_URL = os.environ.get("GAME_LIBRARIAN_TEST_DATABASE_URL")
+
+
 @pytest.fixture
-def settings(tmp_path: Path) -> Settings:
+def postgres_url(request):
+    """A connection string to a new, empty schema with the app's tables (None when the suite runs on SQLite).
+
+    A test marked local_evaluation always gets SQLite: Gamalytic's and TwitchTracker's figures are kept only in the
+    local SQLite database (Settings.local_evaluation), so their features do not exist with PostgreSQL.
+    """
+    if not TEST_DATABASE_URL or request.node.get_closest_marker("local_evaluation"):
+        yield None
+        return
+    from psycopg.conninfo import make_conninfo
+
+    from game_librarian import database, store
+
+    schema = f"test_{uuid.uuid4().hex[:16]}"
+    admin = database.connect(database.PostgresDatabase(TEST_DATABASE_URL))
+    try:
+        admin.execute(f"CREATE SCHEMA {schema}")
+    finally:
+        admin.close()
+    url = make_conninfo(TEST_DATABASE_URL, options=f"-c search_path={schema}")
+    conn = database.connect(database.PostgresDatabase(url))
+    try:
+        store.create_postgres_schema(conn)
+    finally:
+        conn.close()
+    try:
+        yield url
+    finally:
+        database.close_pools()  # the website's pooled connections of this test
+        admin = database.connect(database.PostgresDatabase(TEST_DATABASE_URL))
+        try:
+            admin.execute(f"DROP SCHEMA {schema} CASCADE")
+        finally:
+            admin.close()
+
+
+@pytest.fixture
+def settings(tmp_path: Path, postgres_url) -> Settings:
     (tmp_path / "curated").mkdir()
     return Settings(
         db_path=tmp_path / "data" / "catalog.sqlite3",
         curated_dir=tmp_path / "curated",
         steam_api_key=None,
         review_language="english",
+        database_url=postgres_url,
     )

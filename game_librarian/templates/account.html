@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Account | Game Librarian{% endblock %}
+{# Sign in and out (Azure Container Apps' built-in authentication, accounts.py) and what an account keeps. The
+   platform signs people in at /.auth/login/<provider> and out at /.auth/logout; this page only links there. #}
+{% block body %}
+{% set state = request.state.account %}
+<main class="page account-page" id="main">
+  <section class="hero" aria-labelledby="account-title">
+    <h1 id="account-title">Your account</h1>
+    <p class="hero-sub">An account keeps your Game Librarian wishlist private to you and the same on every device.</p>
+  </section>
+
+  {% if unavailable %}
+  <p class="notice">Signing in is not available on this server right now: its sign-in service is not set up. Your wishlist stays in this browser. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
+  {% elif not state or not state.enabled %}
+  <p class="notice">This site has no accounts. Your wishlist is saved in this browser. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
+  {% elif state.identity and not state.allowed %}
+  <section class="notice account-summary" aria-labelledby="account-status">
+    <p id="account-status">You are signed in with {{ state.identity.provider_label }} as <strong>{{ state.identity.name }}</strong>, but this account is not on this site’s list of allowed accounts, so nothing is kept for it. Your wishlist stays in this browser.</p>
+    <p class="account-actions"><a class="button button-secondary" href="{{ sign_out_url }}" data-sign-out>Sign out</a></p>
+  </section>
+  {% elif state.signed_in %}
+  <section class="notice account-summary" aria-labelledby="account-status">
+    <p id="account-status">Signed in with {{ state.identity.provider_label }} as <strong>{{ state.identity.name }}</strong>.</p>
+    <p>Your wishlist holds {{ count }} {{ "game" if count == 1 else "games" }}. <a class="text-link" href="/wishlist">Open your wishlist</a></p>
+    <p class="account-actions"><a class="button button-secondary" href="{{ sign_out_url }}" data-sign-out>Sign out</a></p>
+  </section>
+  <details class="about-list account-about">
+    <summary>What this site keeps for your account</summary>
+    <ul>
+      <li>From {{ state.identity.provider_label }}: its id for you and the name shown above. Game Librarian never sees your password.</li>
+      <li>The games you save, with their names and when you saved them. Only your own signed-in requests can read or change them.</li>
+      <li>Signing out ends your session on this site. Your saved games stay in your account for your next visit.</li>
+    </ul>
+  </details>
+  <section class="account-delete" aria-labelledby="delete-title">
+    <h2 id="delete-title" class="chart-title">Delete your account data</h2>
+    <p class="small muted">Removes your account and its wishlist from this site. Your {{ state.identity.provider_label }} account is not affected, and a wishlist saved in this browser stays there.</p>
+    <p><button class="button button-secondary" type="button" data-account-delete>Delete my account data</button></p>
+    <p class="small" data-account-delete-status role="status"></p>
+  </section>
+  {% else %}
+  <section class="notice account-summary" aria-labelledby="account-status">
+    <p id="account-status">Sign in to keep your wishlist in your own account. A wishlist already saved in this browser stays there, and you can add it to your account afterwards.</p>
+    <p class="account-actions">
+      {% for provider in state.providers %}<a class="button button-primary" href="{{ sign_in_url(provider, return_to) }}">Sign in with {{ provider_label(provider) }}</a>{% endfor %}
+    </p>
+  </section>
+  <details class="about-list account-about">
+    <summary>What signing in shares</summary>
+    <ul>
+      <li>The sign-in provider tells Game Librarian its id for you and a name, such as your user name or email address. Game Librarian never sees your password.</li>
+      <li>This site keeps them with the games you save in your account, and nothing else about you.</li>
+      <li>Signing in is optional: without it, the wishlist works in this browser only.</li>
+    </ul>
+  </details>
+  {% endif %}
+</main>
+{% endblock %}

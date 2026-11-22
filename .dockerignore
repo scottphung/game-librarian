@@ -1,0 +1,9 @@
+# An allow list: only what the image needs is sent to the build, so nothing private can ever be copied in, such as
+# .env (the API keys), data/ (the SQLite catalog, with Gamalytic's and TwitchTracker's figures, which may not be
+# shared, and any saved password files), .venv/, .git/ or reporting/ (Power BI, local only).
+*
+!requirements.txt
+!game_librarian/
+!curated/
+**/__pycache__
+**/*.pyc

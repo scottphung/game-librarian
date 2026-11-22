@@ -6,6 +6,7 @@ URL, an error message, the command output, the database or repr().
 """
 
 import json
+from dataclasses import replace
 from urllib.parse import parse_qs
 
 import httpx
@@ -14,7 +15,6 @@ import pytest
 from game_librarian import __main__ as cli
 from game_librarian import candidates, store
 from game_librarian.candidates import NEEDS_REVIEW
-from game_librarian.config import Settings
 from game_librarian.igdb import API_BASE, MIN_INTERVAL_SECONDS, TOKEN_URL, IgdbClient, IgdbError, steam_appids
 from tests.conftest import write_csv
 
@@ -158,7 +158,7 @@ def test_steam_ids_come_only_from_the_steam_source():
 
 
 def test_igdb_suggestions_become_candidates_by_steam_id_or_wait_for_review(settings):
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         store.upsert_discovered_apps(conn, [{"appid": 700, "name": "Echo Quest"}, {"appid": 701, "name": "ECHO QUEST"},
                                             {"appid": 702, "name": "Solo Title"}], now="2026-11-15T00:00:00+00:00")
@@ -195,8 +195,7 @@ def test_the_command_explains_how_to_enable_igdb_and_never_calls_it_without_cred
 
 
 def test_the_command_with_credentials_prints_and_stores_no_secret(settings, monkeypatch, capsys):
-    configured = Settings(db_path=settings.db_path, curated_dir=settings.curated_dir, steam_api_key=None,
-                          review_language="english", igdb_client_id=CLIENT_ID, igdb_client_secret=CLIENT_SECRET)
+    configured = replace(settings, igdb_client_id=CLIENT_ID, igdb_client_secret=CLIENT_SECRET)
     write_csv(settings.curated_dir / "games.csv", [{"steam_appid": "100", "title": "Catalog Game"}])
     fake = FakeIgdb([game(1, "Steam Game", 300)])
     monkeypatch.setattr(cli, "load_settings", lambda: configured)
@@ -209,7 +208,7 @@ def test_the_command_with_credentials_prints_and_stores_no_secret(settings, monk
     assert "Twitch refused the IGDB credentials (HTTP 401" in output.out  # recorded in the run summary
     assert not any(secret in output.out + output.err for secret in SECRETS)
     assert "Settings(" in repr(configured) and CLIENT_SECRET not in repr(configured)
-    conn = store.connect(settings.db_path)
+    conn = store.connect(settings.database)
     try:
         runs = "\n".join(str(tuple(row)) for row in conn.execute("SELECT * FROM candidate_runs"))
         assert not any(secret in runs for secret in SECRETS)

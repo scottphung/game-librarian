@@ -31,14 +31,22 @@
 </ol>
 {%- endmacro %}
 
-{# A cross-platform list of IGDB games (web._igdb_item). Platform lines come from IGDB's per-platform dates. #}
-{% macro igdb_list(games, label, twitch=false) -%}
+{# A cross-platform list of IGDB games (web._igdb_item) and reviewed series categories (web._series_item). The number
+   beside each row is its place in this list, 1 to 10. Platform lines come from IGDB's per-platform dates. A series row
+   names its series and Twitch category and links to Twitch only: it opens no game's details. `twitch`: each row gives
+   its place in Twitch's list. `tracker`: each row gives TwitchTracker's own category rank, as returned (it counts every
+   Twitch category), with its average viewers. #}
+{% macro igdb_list(games, label, twitch=false, tracker=false) -%}
 <ol class="trend-list upcoming-list" aria-label="{{ label }}">
   {% for item in games %}
-  <li class="trend-item">
+  <li class="trend-item{% if item.series %} is-series{% endif %}">
     <span class="trend-pos" aria-hidden="true">{{ loop.index }}</span>
     {% if item.image_url %}<img class="trend-thumb is-cover" src="{{ item.image_url }}" alt="" width="264" height="374" loading="lazy" decoding="async" referrerpolicy="no-referrer">{% else %}<span class="trend-thumb is-cover is-missing"></span>{% endif %}
     <div class="trend-text">
+      {% if item.series %}
+      <p class="trend-name">{{ item.name }} <span class="scope-badge">Series category</span></p>
+      <p class="trend-platforms">Twitch category “{{ item.twitch_name }}”: streams of any game in the series, so it is not counted as one game and opens no game’s details.</p>
+      {% else %}
       <a class="trend-link" href="{{ item.details_url }}" data-details="{{ item.key }}">{{ item.name }}</a>
       <p class="trend-platforms">{{ availability_lines(item.availability, 2) }}</p>
       {% if item.publisher or item.steam_verified %}
@@ -47,11 +55,19 @@
         {%- if item.steam_verified %}{% if item.publisher %} · {% endif %}On Steam{% endif %}
       </p>
       {% endif %}
+      {% endif %}
       {% if twitch %}
       <p class="small trend-twitch">
-        Twitch's list: #{{ item.twitch_position }}{% if item.name_differs %} as “{{ item.twitch_name }}”{% endif %} ·
+        Twitch's list: #{{ item.twitch_position }}{% if item.name_differs and not item.series %} as “{{ item.twitch_name }}”{% endif %} ·
         <a class="text-link inner-link" href="{{ item.twitch_url }}" target="_blank" rel="noopener">Watch on Twitch<span class="visually-hidden"> (opens in a new tab)</span></a>
       </p>
+      {% endif %}
+      {% if tracker %}
+      <p class="small trend-twitch">
+        TwitchTracker category rank #{{ item.tracker_rank }}{% if item.name_differs and not item.series %} as “{{ item.twitch_name }}”{% endif %} · <strong>{{ item.avg_viewers|number }}</strong> average {{ "viewer" if item.avg_viewers == 1 else "viewers" }}{% if item.avg_channels is not none %} <span class="muted">· {{ item.avg_channels|number }} average {{ "channel" if item.avg_channels == 1 else "channels" }}</span>{% endif %} ·
+        <a class="text-link inner-link" href="{{ item.twitch_url }}" target="_blank" rel="noopener">Watch on Twitch<span class="visually-hidden"> (opens in a new tab)</span></a>
+      </p>
+      {% if item.older %}<p class="small date-change">Figures retrieved {{ item.retrieved_at|datetime }}: {{ "its last check failed" if item.check_failed else "not asked again since" }}.</p>{% endif %}
       {% endif %}
       {% if item.change %}{% set c = item.change %}
       <p class="small trend-change">
@@ -156,13 +172,41 @@
   {% set meta %}Source: Twitch · {% if data.checked_at %}asked {{ data.checked_at|datetime }}, kept {{ data.keep_hours }} hours{% else %}no list from the last {{ data.keep_hours }} hours{% endif %}{% endset %}
   {% call list_intro("Twitch categories with the most viewers at one moment. Order only, no viewer numbers.", meta) %}
     <div><dt>Signal</dt><dd>Twitch's own list of the categories with the most viewers at the moment it was asked (“Get Top Games”). Twitch gives the order only, with no viewer numbers. One moment, not a trend: the order changes through the day.</dd></div>
-    <div><dt>Coverage</dt><dd>Games on any platform that people stream. Twitch's first {{ data.depth }} categories are read{% if data.categories %}. Left out at this check: {{ data.left_out.no_igdb_game }} that Twitch links to no game (such as Just Chatting){% if data.left_out.other_kind %}, {{ data.left_out.other_kind }} that IGDB lists as DLC, bundles or other kinds{% endif %}{% if data.left_out.not_read %}, {{ data.left_out.not_read }} whose IGDB record was not read yet{% endif %}{% endif %}. A category can stand for a whole series and point to its first game.</dd></div>
-    <div><dt>Source</dt><dd>Twitch API, matched to games by the IGDB id Twitch gives each category; platforms and dates from IGDB.com.</dd></div>
+    <div><dt>Coverage</dt><dd>Games on any platform that people stream. Twitch's first {{ data.depth }} categories are read{% if data.left_out_phrases %}. Left out at this check: {{ data.left_out_phrases|join(", ") }}{% endif %}. A category that a reviewer marked as a game series, such as Counter-Strike, is listed as that series, with no game's details; another broad category can still point to its series' first game.</dd></div>
+    <div><dt>Source</dt><dd>Twitch API. A category is a game by the IGDB id Twitch gives it, by IGDB's own record of the category, or by a reviewed row in <code>curated/twitch_categories.csv</code>, never by its name; when Twitch and IGDB name different games, it is left out. Platforms and dates from IGDB.com.</dd></div>
     <div><dt>Updated</dt><dd>{% if data.checked_at %}Twitch was asked {{ data.checked_at|datetime }}.{% else %}No Twitch list from the last {{ data.keep_hours }} hours.{% endif %} Twitch's terms allow keeping its data for {{ data.keep_hours }} hours, so an older list is deleted, and no history is kept.</dd></div>
   {% endcall %}
   {% if data.games %}{{ igdb_list(data.games, "Most watched on Twitch", twitch=true) }}
   {% elif data.checked_at %}<p class="notice-line">None of the categories Twitch listed is a game that IGDB knows.</p>
   {% else %}<p class="notice-line">No Twitch list is saved from the last {{ data.keep_hours }} hours. Run <code>python -m game_librarian upcoming</code> (it refreshes once every 20 hours; add <code>--force</code> to ask again now).</p>{% endif %}
+</section>
+{%- endmacro %}
+
+{# "Most watched among tracked Twitch categories", for a browser on this computer only (web._most_watched): the game
+   and series categories this site tracks, in TwitchTracker's rank order, numbered 1 to 10 as places in this list, each
+   with TwitchTracker's own category rank as returned and its average viewers. TwitchTracker publishes no terms that
+   allow sharing its figures, so for any other request this macro is never used and Twitch's order is shown. #}
+{% macro tracker_column(data) -%}
+<section class="upcoming-column" aria-labelledby="twitch-title">
+  <div class="trend-head"><h3 id="twitch-title">Most watched among tracked Twitch categories</h3>{{ scope_badge("all") }}<span class="scope-badge is-local">Local evaluation only</span></div>
+  {% set meta %}Source: TwitchTracker · {% if data.retrieved %}retrieved {% if data.retrieved[0] != data.retrieved[1] %}{{ data.retrieved[0]|datetime }} to {% endif %}{{ data.retrieved[1]|datetime }}{% if data.age_days %} ({{ data.age_days }} {{ "day" if data.age_days == 1 else "days" }} ago){% endif %} · period not confirmed{% else %}not retrieved yet{% endif %}{% endset %}
+  {% call list_intro("Games and game series among the Twitch categories this site tracks, in TwitchTracker’s rank order. Not TwitchTracker’s complete top " ~ data.list_size ~ ": the number beside each is its place here, and its line gives TwitchTracker’s own category rank.", meta) %}
+    <div><dt>Signal</dt><dd>TwitchTracker’s category summary: its rank among every Twitch category, 1 = most watched, and the average number of viewers and of live channels. The places 1 to {{ data.list_size }} are this list’s own: the tracked categories sorted by TwitchTracker’s rank, numbered without gaps. TwitchTracker’s rank is shown as returned on each line, for example “TwitchTracker category rank #8”: it counts Just Chatting, other categories that are not games and categories this site does not track, so it skips numbers. TwitchTracker does not say how it ranks, and its rank does not always follow the average viewers: a category can have more average viewers than the one ranked above it.</dd></div>
+    <div><dt>Period</dt><dd>Not confirmed. TwitchTracker’s API page calls this a summary “for 30 days”, but in the answers checked on 21 Nov 2026 the hours watched divided by the average viewers was never more than about 168 hours, which is 7 days. The answer gives no dates, and the rank may cover another period, so no period is claimed.</dd></div>
+    <div><dt>Coverage</dt><dd>Not a complete ranking: only the categories this site tracks, the game and series categories among Twitch’s first {{ data.depth }} categories{% if data.selected_at %} at {{ data.selected_at|datetime }}{% endif %}{% if data.reviewed %}, and {{ data.reviewed }} reviewed in <code>curated/twitch_categories.csv</code> outside that list{% endif %}{% if data.selected %} ({{ data.selected }} tracked){% endif %}. Twitch’s list is one moment, while TwitchTracker’s figures cover a longer period, so a game that TwitchTracker ranks high but that was outside Twitch’s top {{ data.depth }} at that moment is missing unless it is reviewed{% if data.left_out_phrases %}. Not listed: {{ data.left_out_phrases|join(", ") }}{% endif %}.</dd></div>
+    <div><dt>Series</dt><dd>A category that a reviewer marked as a game series in <code>curated/twitch_categories.csv</code>, such as Counter-Strike, covers streams of several games. It is listed under the series name with its Twitch category and a Watch on Twitch link, never as one of its games: it opens no game’s details, and the dashboard never matches it to a game.</dd></div>
+    <div><dt>Source</dt><dd>TwitchTracker’s free <a class="text-link" href="{{ data.api_url }}" target="_blank" rel="noopener">category summary API<span class="visually-hidden"> (opens in a new tab)</span></a>; TwitchTracker is not affiliated with Twitch. A category is a game by the IGDB id Twitch gives it, by IGDB’s own record of the category, or by a reviewed row in <code>curated/twitch_categories.csv</code>, never by its name. Platforms and dates from IGDB.com.</dd></div>
+    <div><dt>Updated</dt><dd>{% if data.retrieved %}Retrieved {{ data.retrieved[1]|datetime }}{% if data.retrieved[0] != data.retrieved[1] %}; the oldest figures shown are from {{ data.retrieved[0]|datetime }}, and a figure {{ data.refresh_hours }} hours or more older than the newest, or whose last check failed, says when it was retrieved{% endif %}.{% else %}Not retrieved yet.{% endif %} Each category is asked again after {{ data.refresh_hours }} hours, by <code>sync</code> or <code>most-watched</code>; a failed check keeps the previous figures with their own time, and a category without figures is left out, never shown as zero. No history is kept, so no change is shown.</dd></div>
+    <div><dt>Shown</dt><dd>Only on the computer that runs this site: TwitchTracker publishes no terms that allow sharing its figures. Do not publish this list or screenshots of it.</dd></div>
+  {% endcall %}
+  {% if data.last_run and data.last_run.status in ("failed", "partial") and data.last_problem %}
+  <p class="data-note">The last TwitchTracker refresh ({{ data.last_run.started_at|datetime }}) {{ "failed" if data.last_run.status == "failed" else "was partial" }}: {{ data.last_problem }}{% if data.retrieved %} The figures shown were retrieved {{ data.retrieved[1]|datetime }}{% if data.retrieved[0] != data.retrieved[1] %} or earlier{% endif %}.{% endif %}</p>
+  {% elif data.stale %}
+  <p class="data-note">Stale: the newest figures were retrieved {{ data.retrieved[1]|datetime }}, more than {{ data.refresh_hours }} hours ago. Run <code>python -m game_librarian most-watched</code> to refresh them.</p>
+  {% endif %}
+  {% if data.games %}{{ igdb_list(data.games, "Most watched among tracked Twitch categories, in TwitchTracker’s rank order", tracker=true) }}
+  {% elif data.selected %}<p class="notice-line">None of the {{ data.selected }} tracked categories has TwitchTracker figures yet{% if data.left_out_phrases %} ({{ data.left_out_phrases|join(", ") }}){% endif %}. Run <code>python -m game_librarian most-watched</code>.</p>
+  {% else %}<p class="notice-line">No TwitchTracker figures yet. Run <code>python -m game_librarian most-watched</code> after <code>upcoming</code> (<code>sync</code> runs both): it asks TwitchTracker about the game and series categories of Twitch’s newest top list and the reviewed ones.</p>{% endif %}
 </section>
 {%- endmacro %}
 
@@ -212,17 +256,21 @@
 
   <section class="trend-section" id="now" aria-labelledby="now-title">
     <div class="trend-head"><h2 id="now-title">Trending now &amp; recently released</h2>{{ scope_badge("all") }}</div>
+    {% if watched is not none %}
+    <p class="trend-scope">Games out on at least one platform, by two separate signals: interest in new releases on IGDB, and Twitch viewers as TwitchTracker averages them. Neither shows a change over time.</p>
+    {% else %}
     <p class="trend-scope">Games out on at least one platform, by two separate signals: interest in new releases on IGDB, and viewing on Twitch. Attention at one moment, not a change over time.</p>
+    {% endif %}
     {% call about_section() %}
-      <p>Both lists include console-only games and games without a Steam page. The first shows what IGDB.com users want to play among the games first released in the last {{ recent_days }} days; the second, what Twitch viewers watch at the moment Twitch was asked.</p>
-      <p>A game that has just come out moves here from Upcoming &amp; Anticipated with the same signal, so it stays on this page on its release day. “Trending” means attention at one moment, not a change over time.</p>
+      <p>Both lists include console-only games and games without a Steam page. The first shows what IGDB.com users want to play among the games first released in the last {{ recent_days }} days; the second, {% if watched is not none %}TwitchTracker’s rank and average Twitch viewers over a recent period it does not state clearly, shown on this computer only{% else %}what Twitch viewers watch at the moment Twitch was asked{% endif %}.</p>
+      <p>A game that has just come out moves here from Upcoming &amp; Anticipated with the same signal, so it stays on this page on its release day. “Trending” means attention {{ "as measured now" if watched is not none else "at one moment" }}, not a change over time.</p>
     {% endcall %}
     {% if igdb.configured %}
       <div class="trend-columns">
         {{ recent_column(recent) }}
-        {{ twitch_column(twitch_top) }}
+        {% if watched is not none %}{{ tracker_column(watched) }}{% else %}{{ twitch_column(twitch_top) }}{% endif %}
       </div>
-      <p class="small muted">Platforms and release dates from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a>; viewing order from <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>. Neither list is a count of players or a sales figure.</p>
+      <p class="small muted">Platforms and release dates from <a class="text-link" href="https://www.igdb.com/" target="_blank" rel="noopener">IGDB.com</a>; {% if watched is not none %}ranks and average viewers from <a class="text-link" href="{{ watched.api_url }}" target="_blank" rel="noopener">TwitchTracker</a> (on this computer only), with links to <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>{% else %}viewing order from <a class="text-link" href="https://www.twitch.tv/directory" target="_blank" rel="noopener">Twitch</a>{% endif %}. Neither list is a count of players or a sales figure.</p>
     {% else %}
       <p class="notice-line">These lists come from IGDB and Twitch, which this site cannot reach yet: set <code>IGDB_CLIENT_ID</code> and <code>IGDB_CLIENT_SECRET</code> (a free Twitch application's credentials; see the README), then run <code>python -m game_librarian upcoming</code>.</p>
     {% endif %}

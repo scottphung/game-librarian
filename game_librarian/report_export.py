@@ -294,7 +294,7 @@ def export_report(settings: Settings, out_dir: Path, *, now: datetime | None = N
     """
     curated = load_curated(settings.curated_dir)
     window = ranking.RankingWindow.ending_on(today or date.today())
-    conn = store.initialize(settings.db_path)
+    conn = store.initialize(settings.database)
     try:
         report = collect_tables(conn, curated, window)
     finally:
