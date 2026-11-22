@@ -32,9 +32,7 @@ from tests.test_upcoming import CLIENT_ID, CLIENT_SECRET, FakeIgdbApi, entry, ig
 from tests.test_web import games, text_of  # noqa: F401
 from tests.test_web_upcoming import NOW, NoTwitch, configured
 
-pytestmark = pytest.mark.local_evaluation  # TwitchTracker's figures live in the local SQLite database only
 
-LOCAL = ("127.0.0.1", 50000)
 REVIEWED = {"twitch_category_id": "1005", "title": "Shooter", "decision": "no_match", "igdb_id": "",
             "checked_on": "2026-11-21", "checked_by": "a reviewer", "note": "Covers two live games"}
 # Reviewed rows like the shipped Counter-Strike (series) and Dota 2 (match) rows, and one outside Twitch's list.
@@ -161,7 +159,7 @@ def asked(fake) -> list[str]:
     return [request.url.path.rsplit("/", 1)[1] for request in fake.requests]
 
 
-def trending(settings, moment, *, client=LOCAL, headers=None) -> str:
+def trending(settings, moment, *, client=("testclient", 50000), headers=None) -> str:
     app = create_app(configured(settings), today=lambda: moment.date(), now=lambda: moment, twitch_client=NoTwitch())
     return TestClient(app, client=client).get("/trending", headers=headers or {}).text
 
@@ -470,8 +468,8 @@ def test_this_site_sends_at_most_its_daily_budget_in_any_24_hours(world, setting
 # ---------------------------------------------------------------------- the Trending page
 
 
-def test_this_computer_sees_places_one_to_three_beside_twitchtrackers_own_ranks(world, settings, fake_steam,
-                                                                                fake_twitchtracker):
+def test_the_list_gives_places_one_to_three_beside_twitchtrackers_own_ranks(world, settings, fake_steam,
+                                                                            fake_twitchtracker):
     refresh_lists(settings, world, fake_steam, at(RELEASE_DAY))
     collect(settings, fake_twitchtracker, at(RELEASE_DAY))
     html = trending(settings, at(RELEASE_DAY, 13))
@@ -481,7 +479,7 @@ def test_this_computer_sees_places_one_to_three_beside_twitchtrackers_own_ranks(
     assert re.findall(r'data-details="([^"]+)"', ol) == ["igdb-201", "101", "igdb-208"]
     assert places(ol) == ["1", "2", "3"] and ranks(ol) == ["1", "4", "6"]
     text = text_of(watched_part(html))
-    assert "Most watched among tracked Twitch categories All platforms Local evaluation only" in text
+    assert "Most watched among tracked Twitch categories All platforms Games and game series" in text
     assert "Source: TwitchTracker · retrieved 19 Nov 2026, 12:00 UTC · period not confirmed" in text
     assert ("Games and game series among the Twitch categories this site tracks, in TwitchTracker’s rank order. Not "
             "TwitchTracker’s complete top 10: the number beside each is its place here, and its line gives "
@@ -496,7 +494,7 @@ def test_this_computer_sees_places_one_to_three_beside_twitchtrackers_own_ranks(
     assert "Period Not confirmed. TwitchTracker’s API page calls this a summary “for 30 days”" in text
     assert "never more than about 168 hours, which is 7 days" in text and "the rank may cover another period" in text
     assert "its rank does not always follow the average viewers" in text  # as seen live on 2026-11-21
-    assert "Do not publish this list or screenshots of it." in text
+    assert "Do not publish" not in text and "this computer" not in html  # 0.20's local-only wording
     assert 'href="https://www.twitch.tv/directory/game/Arena%20Two"' in ol  # Watch on Twitch: the source
     assert 'href="https://twitchtracker.com/api"' in html
     assert "Twitch's list: #" not in text  # Twitch's own order is not shown beside TwitchTracker's
@@ -505,15 +503,25 @@ def test_this_computer_sees_places_one_to_three_beside_twitchtrackers_own_ranks(
 @pytest.mark.parametrize("client, headers", [
     (("testclient", 50000), None),  # the test client's default: not an address
     (("192.168.1.20", 50000), None),  # another computer on the network
-    (LOCAL, {"X-Forwarded-For": "203.0.113.9"}),  # a proxy on this computer passing a visitor on
+    (("127.0.0.1", 50000), {"X-Forwarded-For": "203.0.113.9"}),  # a visitor passed on by a proxy
 ])
-def test_any_other_browser_gets_twitchs_order_and_no_twitchtracker_figure(world, settings, fake_steam,
-                                                                          fake_twitchtracker, client, headers):
+def test_every_visitor_gets_the_same_list(world, settings, fake_steam, fake_twitchtracker, client, headers):
+    """Since 0.21 TwitchTracker's figures are not kept to the computer that runs the site."""
     refresh_lists(settings, world, fake_steam, at(RELEASE_DAY))
     collect(settings, fake_twitchtracker, at(RELEASE_DAY))
     html = trending(settings, at(RELEASE_DAY, 13), client=client, headers=headers)
-    assert "TwitchTracker" not in html and "642,962" not in html and "average viewers" not in html
-    assert "Most watched among tracked Twitch categories" not in html
+    assert "Most watched among tracked Twitch categories" in html and "642,962 average viewers" in text_of(html)
+    assert listed(html) == listed(trending(settings, at(RELEASE_DAY, 13)))
+
+
+def test_before_any_twitchtracker_figure_the_page_keeps_twitchs_order(world, settings, fake_steam, fake_twitchtracker):
+    """Until TwitchTracker has given figures (no refresh yet, or every check refused), Most watched is Twitch's own
+    list, never an empty one; the dashboard uses it too."""
+    refresh_lists(settings, world, fake_steam, at(RELEASE_DAY))
+    fake_twitchtracker.responses = [403]
+    collect(settings, fake_twitchtracker, at(RELEASE_DAY))  # refused at once: nothing answered
+    html = trending(settings, at(RELEASE_DAY, 13))
+    assert "Most watched among tracked Twitch categories" not in html and "average viewers" not in html
     watched = watched_part(html)
     # Twitch's own order. Arena Two (no igdb_id on Twitch) is kept by IGDB's record; the disagreement is left out.
     assert re.findall(r'data-details="([^"]+)"', watched) == ["igdb-201", "101", "igdb-208", "igdb-209"]
@@ -522,6 +530,8 @@ def test_any_other_browser_gets_twitchs_order_and_no_twitchtracker_figure(world,
     assert "Twitch's list: #1 · Watch on Twitch" in text and "Twitch's list: #4 · Watch on Twitch" in text
     assert ("Left out at this check: 1 that neither Twitch nor IGDB links to a game (such as Just Chatting), 2 whose "
             "game is unresolved") in text
+    collect(settings, fake_twitchtracker, at(RELEASE_DAY, 14))  # answered now: TwitchTracker's order takes over
+    assert "Most watched among tracked Twitch categories" in trending(settings, at(RELEASE_DAY, 15))
 
 
 def test_reviewed_games_and_a_series_are_listed_in_twitchtrackers_order(reviewed, settings, fake_steam,
@@ -550,13 +560,7 @@ def test_reviewed_games_and_a_series_are_listed_in_twitchtrackers_order(reviewed
     assert "Series A category that a reviewer marked as a game series in curated/twitch_categories.csv" in text
     assert "Just Chatting" not in ol
 
-    public = trending(settings, at(RELEASE_DAY, 13), client=("192.168.1.20", 50000))
-    public_ol = listed(public)
-    # Twitch's own order: the series at its place (#8), Dota Two by the reviewed row; Old Favourite is not in it.
-    assert re.findall(r'data-details="([^"]+)"', public_ol) == ["igdb-201", "101", "igdb-208", "igdb-209", "igdb-210"]
-    assert "Strike Series Series category" in text_of(public_ol) and "Twitch's list: #8 · Watch on Twitch" in text_of(
-        public_ol)
-    assert "Old Favourite" not in public and "TwitchTracker" not in public and "Strike Two" not in public_ol
+    assert listed(trending(settings, at(RELEASE_DAY, 13), client=("192.168.1.20", 50000))) == ol  # every visitor
 
 
 def test_a_game_reached_by_two_categories_is_listed_once_and_the_list_stops_at_ten(world, settings, fake_steam,
@@ -598,7 +602,6 @@ def test_stale_old_or_failed_figures_say_when_they_were_retrieved(world, setting
             "22 Nov 2026, 12:00 UTC or earlier.") in text
     assert "Figures retrieved 19 Nov 2026, 12:00 UTC: its last check failed." in text  # Game 01, the 429
     assert "Figures retrieved 19 Nov 2026, 12:00 UTC: not asked again since." in text  # Arena Two
-    assert "No Twitch list is saved from the last 24 hours" in text_of(trending(settings, later, client=("x", 1)))
 
 
 def test_a_category_asked_hours_after_the_others_leaves_their_figures_current(reviewed, settings, fake_steam,
@@ -622,19 +625,10 @@ def test_a_category_asked_hours_after_the_others_leaves_their_figures_current(re
     assert text.count("Figures retrieved") == 1
 
 
-def test_a_reviewers_later_decision_applies_at_once_and_the_empty_states_say_what_to_run(world, settings, fake_steam,
-                                                                                       fake_twitchtracker):
+def test_a_reviewers_later_decision_applies_at_once(world, settings, fake_steam, fake_twitchtracker):
     empty = text_of(watched_part(trending(settings, at(RELEASE_DAY))))
-    assert "No TwitchTracker figures yet. Run python -m game_librarian most-watched after upcoming" in empty
+    assert "No Twitch list is saved from the last 24 hours. Run python -m game_librarian upcoming" in empty
     refresh_lists(settings, world, fake_steam, at(RELEASE_DAY))
-    fake_twitchtracker.responses = [403]
-    collect(settings, fake_twitchtracker, at(RELEASE_DAY))  # refused at once: nothing answered
-    waiting = text_of(watched_part(trending(settings, at(RELEASE_DAY, 13))))
-    # Missing figures are told apart: never asked, or asked with a failed check and no earlier figures.
-    assert ("None of the 4 tracked categories has TwitchTracker figures yet (3 not asked yet, 1 with a failed check "
-            "and no earlier figures). Run python -m game_librarian most-watched.") in waiting
-    assert "failed: Launch Day (1001): TwitchTracker refused the request (HTTP 403)" not in waiting  # the problem alone
-    assert "failed: TwitchTracker refused the request (HTTP 403); it is not retried or worked around." in waiting
     collect(settings, fake_twitchtracker, at(RELEASE_DAY, 14))
     write_csv(settings.curated_dir / "twitch_categories.csv", [
         REVIEWED, {**REVIEWED, "twitch_category_id": "1003", "title": "Arena Two", "note": "Not a game"}])
@@ -670,24 +664,24 @@ def shared_panel(html: str) -> str:
     return text_of(re.search(r'<template id="radar-game-igdb-501">(.*?)</template>', html, re.S).group(1))
 
 
-def test_the_upcoming_panel_gives_twitchtrackers_rank_on_this_computer_and_twitchs_place_elsewhere(games, settings):
+def test_the_upcoming_panel_gives_twitchs_place_then_twitchtrackers_rank(games, settings):
     save_captures(settings)  # Shared Saga (IGDB 501) is #9 in Twitch's list
+    before = dashboard_client(settings).get("/dashboard", params={"report": "upcoming"}).text
+    assert "#9 on Twitch’s most-watched list · Watch on Twitch" in shared_panel(before)  # no TwitchTracker figure yet
+    assert "TwitchTracker’s ranks retrieved" not in before and "4,321" not in before
     save_tracked(settings, "801", "Shared Saga", 501, Summary(37, 4_321, 210, 726_000), "2026-11-09T12:00:00+00:00")
-    local = dashboard_client(settings, client=LOCAL).get("/dashboard", params={"report": "upcoming"}).text
+    page = dashboard_client(settings).get("/dashboard", params={"report": "upcoming"}).text
     assert ("TwitchTracker category rank #37, 4,321 average viewers (period not confirmed) · Watch on Twitch"
-            in shared_panel(local))
-    assert "Twitch’s most-watched list" not in local  # one Most watched entry per game, never both side by side
-    assert "TwitchTracker’s ranks retrieved 9 Nov 2026, 12:00 UTC (on this computer only)." in text_of(
-        chart(local, "chart-radar"))
-    assert "TwitchTracker" not in text_of(chart(local, "chart-compare"))  # not part of the comparison's denominator
-    notes = text_of(methodology(local))
-    assert "TwitchTracker: not part of the comparison, and shown on this computer only" in notes
+            in shared_panel(page))
+    assert "Twitch’s most-watched list" not in page  # one Most watched entry per game, never both side by side
+    assert "TwitchTracker’s ranks retrieved 9 Nov 2026, 12:00 UTC." in text_of(chart(page, "chart-radar"))
+    assert "TwitchTracker" not in text_of(chart(page, "chart-compare"))  # not part of the comparison's denominator
+    notes = text_of(methodology(page))
+    assert "TwitchTracker: not part of the comparison. Where Most watched among tracked Twitch categories" in notes
     assert ("A series category, such as Counter-Strike, stands for no single game, so it is never matched to one."
             in notes)
     assert "so the period is not confirmed" in notes and "No history is kept, so no change is shown." in notes
-    public = dashboard_client(settings).get("/dashboard", params={"report": "upcoming"}).text
-    assert "#9 on Twitch’s most-watched list · Watch on Twitch" in shared_panel(public)
-    assert "TwitchTracker" not in public and "4,321" not in public
+    assert "this computer" not in page
 
 
 def test_a_series_category_is_never_matched_to_a_game_on_the_dashboard(games, settings):
@@ -696,13 +690,13 @@ def test_a_series_category_is_never_matched_to_a_game_on_the_dashboard(games, se
     save_tracked(settings, "801", "Shared Series", 501, Summary(37, 4_321, 210, 726_000), "2026-11-09T12:00:00+00:00")
     write_csv(settings.curated_dir / "twitch_categories.csv",
               [{**REVIEWED, "twitch_category_id": "801", "title": "Shared Series", "decision": "series"}])
-    local = dashboard_client(settings, client=LOCAL).get("/dashboard", params={"report": "upcoming"}).text
-    assert "TwitchTracker" not in shared_panel(local) and "4,321" not in shared_panel(local)
+    page = dashboard_client(settings).get("/dashboard", params={"report": "upcoming"}).text
+    assert "TwitchTracker" not in shared_panel(page) and "4,321" not in shared_panel(page)
     page = text_of(listed(trending(settings, NOW)))
     assert "Shared Series Series category" in page and "TwitchTracker category rank #37 · 4,321 average viewers" in page
 
 
-def test_the_sales_chart_on_this_computer_takes_most_watched_from_twitchtracker(games, settings):
+def test_the_sales_chart_takes_most_watched_from_twitchtracker(games, settings):
     trending_with_estimates(settings)  # Game 10 has an estimate but is on no Trending list
     assert "Game 10" not in text_of(sales_section(board(settings)))
     record = upcoming.record_from_igdb(igdb_game(610, "Game 10", entry("PC", day=date(2024, 1, 1)), steam=[110]))
@@ -734,8 +728,8 @@ def use_fakes(monkeypatch, settings, world, fake_steam):
     monkeypatch.setattr(cli, "TwitchClient", lambda client_id, client_secret: helix.client())
 
 
-def test_the_command_and_sync_ask_only_when_due_and_say_where_the_figures_show(world, settings, fake_steam,
-                                                                               fake_twitchtracker, monkeypatch, capsys):
+def test_the_command_and_sync_ask_only_when_due(world, settings, fake_steam, fake_twitchtracker, monkeypatch,
+                                                capsys):
     use_fakes(monkeypatch, settings, world, fake_steam)
     assert cli.main(["most-watched"]) == 0
     assert "nothing to ask about. The categories come from Twitch's top list" in capsys.readouterr().out
@@ -748,13 +742,13 @@ def test_the_command_and_sync_ask_only_when_due_and_say_where_the_figures_show(w
     assert "   1. Launch Day [igdb-201]: TwitchTracker category rank #1, 642,962 average viewers" in out
     assert "   3. Arena Two [igdb-208]: TwitchTracker category rank #6, 48,252 average viewers" in out
     assert "Not listed: 1 no_summary" in out
-    assert "Shown only to a browser on this computer: TwitchTracker publishes no terms" in out
+    assert "this computer" not in out
     assert cli.main(["most-watched"]) == 0
     assert "nothing is due; each category is asked again after 20 hours (--force asks now)" in capsys.readouterr().out
     assert len(fake_twitchtracker.requests) == 4  # the second run asked nothing
     assert cli.main(["status"]) == 0
     status = capsys.readouterr().out
-    assert "Most watched (TwitchTracker, shown on this computer only): 3 of 4 tracked categories with figures" in status
+    assert "Most watched (TwitchTracker): 3 of 4 tracked categories with figures" in status
     assert cli.main(["sync", "--skip-upcoming", "--skip-critics", "--skip-sales"]) == 0
     assert "Most watched (TwitchTracker): nothing is due" in capsys.readouterr().out
     assert cli.main(["sync", "--skip-most-watched", "--skip-critics", "--skip-sales"]) == 0

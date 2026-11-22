@@ -11,7 +11,7 @@
 
   {% if state and state.signed_in %}
   <section class="notice wishlist-about" aria-labelledby="wishlist-about-title">
-    <p id="wishlist-about-title" class="wishlist-summary">Saved in your account ({{ state.identity.provider_label }}: {{ state.identity.name }}), private to you and the same on every device. It is not your Steam wishlist.</p>
+    <p id="wishlist-about-title" class="wishlist-summary">Saved in your account ({{ state.identity.email }}), private to you and the same on every device. It is not your Steam wishlist.</p>
     <details class="about-list">
       <summary>How this wishlist is stored</summary>
       <ul>
@@ -33,7 +33,8 @@
   {% else %}
   <section class="notice wishlist-about" aria-labelledby="wishlist-about-title">
     <p id="wishlist-about-title" class="wishlist-summary">Saved only in this browser on this device, so clearing browser data can erase it. It is not your Steam wishlist.{% if state and state.enabled and not state.identity %} <a class="text-link" href="/account?next=/wishlist">Sign in</a> to keep it in your own account instead.{% endif %}</p>
-    {% if state and state.identity and not state.allowed %}<p class="wishlist-summary">You are signed in, but your account is not on this site’s list of allowed accounts, so the wishlist stays in this browser.</p>{% endif %}
+    {% if state and state.identity and not state.allowed %}<p class="wishlist-summary">You are signed in, but your email address is not on this site’s list of allowed accounts, so the wishlist stays in this browser.</p>{% endif %}
+    {% if state and state.unavailable %}<p class="wishlist-summary">Your account could not be reached just now, so this page shows the wishlist saved in this browser. Try again in a minute.</p>{% endif %}
     <details class="about-list">
       <summary>How this wishlist is stored</summary>
       <ul>

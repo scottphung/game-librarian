@@ -1,8 +1,8 @@
 """Storage for the prepared catalog (the storage boundary of the app): a local SQLite file, or PostgreSQL.
 
 The sync command writes here; the web app reads, and writes only its Twitch caches and the signed-in visitors'
-accounts and wishlists. Curated awards and classifications are deliberately NOT stored here: they stay in the
-editable CSV files, so a Steam sync can never overwrite them.
+accounts and wishlists (their sign-in itself is at Supabase: supabase_auth.py). Curated awards and classifications
+are deliberately NOT stored here: they stay in the editable CSV files, so a Steam sync can never overwrite them.
 
 All SQL lives in this module, written once in SQL that both SQLite and PostgreSQL accept; database.py opens the
 connections and hides the remaining differences (placeholders, rows, transactions). The local SQLite file is created
@@ -27,8 +27,8 @@ from .prepare import (GameDetails, PriceFacts, ReviewExcerpt, ReviewSummary, con
 # "Most watched among tracked Twitch categories" by TwitchTracker (twitchtracker.py): the game and series categories
 # chosen from Twitch's newest top list and from curated/twitch_categories.csv, each with TwitchTracker's newest
 # figures. A newer answer replaces the figures and a failed check keeps them with their own time; no history is kept,
-# so no change between two answers is ever shown. TwitchTracker publishes no terms that allow sharing its figures: the
-# site shows them only to a browser on the computer that runs it. One statement: _rebuild_tracker_table runs it alone.
+# so no change between two answers is ever shown. TwitchTracker publishes no terms (README.md, "Data sources and
+# terms"). One statement: _rebuild_tracker_table runs it alone.
 TRACKER_TABLE = """
 CREATE TABLE IF NOT EXISTS twitchtracker_summaries (
     category_id   TEXT PRIMARY KEY,              -- the Twitch category id TwitchTracker is asked about
@@ -310,8 +310,8 @@ CREATE TABLE IF NOT EXISTS critic_scores (
 );
 -- Estimated Steam copies sold (gamalytic.py): one row per game and collection, never updated, so an older estimate
 -- stays next to a newer one. Gamalytic revises its model, so the difference between two collections is not a number
--- of copies sold in between. Gamalytic's terms forbid sharing its data: the site shows these rows only to a browser
--- on the computer that runs it, and the Power BI export leaves them out.
+-- of copies sold in between. The website shows them (Dashboard, Sales & reception); the Power BI export leaves them
+-- out. Gamalytic's terms restrict sharing its data (README.md, "Data sources and terms").
 CREATE TABLE IF NOT EXISTS sales_estimates (
     appid            INTEGER NOT NULL REFERENCES games(appid) ON DELETE CASCADE,
     collected_at     TEXT NOT NULL,              -- when this site asked, UTC ISO 8601
@@ -321,12 +321,12 @@ CREATE TABLE IF NOT EXISTS sales_estimates (
     PRIMARY KEY (appid, collected_at)
 );
 -- Signed-in visitors of the hosted site (accounts.py): one row per sign-in provider and person, made at their first
--- visit. The provider's own id for the person identifies them; the app never sees a password or a provider token.
+-- visit. The provider's own id for the person identifies them; the site never stores a password.
 CREATE TABLE IF NOT EXISTS accounts (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider      TEXT NOT NULL,                 -- the sign-in provider, such as "github" (X-MS-CLIENT-PRINCIPAL-IDP)
-    subject       TEXT NOT NULL,                 -- the provider's id for the person (X-MS-CLIENT-PRINCIPAL-ID)
-    display_name  TEXT NOT NULL,                 -- what the provider calls them, as of their latest visit
+    provider      TEXT NOT NULL,                 -- "supabase" (email accounts, since 0.21); "github": from 0.20
+    subject       TEXT NOT NULL,                 -- the provider's id for the person (Supabase's user id, a UUID)
+    display_name  TEXT NOT NULL,                 -- their email address (a GitHub user name for 0.20's rows)
     created_at    TEXT NOT NULL,
     UNIQUE (provider, subject)
 );
@@ -1649,6 +1649,19 @@ def account_id(conn: Connection, provider: str, subject: str, display_name: str,
 def find_account(conn: Connection, provider: str, subject: str) -> Row | None:
     """The account of a person, if they have one, without making one."""
     return conn.execute("SELECT * FROM accounts WHERE provider = ? AND subject = ?", (provider, subject)).fetchone()
+
+
+def account_row(conn: Connection, account: int) -> Row | None:
+    """One account by its id (the `accounts` command), or None."""
+    return conn.execute("SELECT * FROM accounts WHERE id = ?", (account,)).fetchone()
+
+
+def account_rows(conn: Connection) -> list[Row]:
+    """Every account, oldest first, with the number of games it saved ("games"), for the `accounts` command."""
+    return conn.execute(
+        """SELECT a.id, a.provider, a.display_name, a.created_at, COUNT(w.id) AS games
+           FROM accounts a LEFT JOIN wishlist_items w ON w.account_id = a.id
+           GROUP BY a.id, a.provider, a.display_name, a.created_at ORDER BY a.id""").fetchall()
 
 
 def wishlist_items(conn: Connection, account: int) -> list[Row]:

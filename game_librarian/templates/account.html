@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Account | Game Librarian{% endblock %}
-{# Sign in and out (Azure Container Apps' built-in authentication, accounts.py) and what an account keeps. The
-   platform signs people in at /.auth/login/<provider> and out at /.auth/logout; this page only links there. #}
+{# /account (web.account_page): the sign-in form, or a signed-in person's account. Accounts are email addresses and
+   passwords kept by Supabase Auth, which only this site's server talks to (accounts.py, supabase_auth.py); every form
+   posts here with this browser's form token. The other account pages are account_flow.html. #}
+{% macro sign_out_form() -%}
+<form class="inline-form" method="post" action="/account/sign-out">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button class="button button-secondary" type="submit">Sign out</button>
+</form>
+{%- endmacro %}
 {% block body %}
 {% set state = request.state.account %}
 <main class="page account-page" id="main">
@@ -10,48 +17,68 @@
     <p class="hero-sub">An account keeps your Game Librarian wishlist private to you and the same on every device.</p>
   </section>
 
-  {% if unavailable %}
-  <p class="notice">Signing in is not available on this server right now: its sign-in service is not set up. Your wishlist stays in this browser. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
-  {% elif not state or not state.enabled %}
+  {% if notice %}<p class="account-message" role="status">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="account-error" role="alert">{{ error }}</p>{% endif %}
+
+  {% if not state or not state.enabled %}
   <p class="notice">This site has no accounts. Your wishlist is saved in this browser. <a class="text-link" href="/wishlist">Open your wishlist</a>.</p>
   {% elif state.identity and not state.allowed %}
   <section class="notice account-summary" aria-labelledby="account-status">
-    <p id="account-status">You are signed in with {{ state.identity.provider_label }} as <strong>{{ state.identity.name }}</strong>, but this account is not on this site’s list of allowed accounts, so nothing is kept for it. Your wishlist stays in this browser.</p>
-    <p class="account-actions"><a class="button button-secondary" href="{{ sign_out_url }}" data-sign-out>Sign out</a></p>
+    <p id="account-status">You are signed in as <strong>{{ state.identity.email }}</strong>, but this address is not on this site’s list of allowed accounts, so nothing is kept for it. Your wishlist stays in this browser.</p>
+    <div class="account-actions">{{ sign_out_form() }}</div>
   </section>
   {% elif state.signed_in %}
   <section class="notice account-summary" aria-labelledby="account-status">
-    <p id="account-status">Signed in with {{ state.identity.provider_label }} as <strong>{{ state.identity.name }}</strong>.</p>
-    <p>Your wishlist holds {{ count }} {{ "game" if count == 1 else "games" }}. <a class="text-link" href="/wishlist">Open your wishlist</a></p>
-    <p class="account-actions"><a class="button button-secondary" href="{{ sign_out_url }}" data-sign-out>Sign out</a></p>
+    <p id="account-status">Signed in as <strong>{{ state.identity.email }}</strong>.</p>
+    <p>Your wishlist holds {{ count }} {{ "game" if count == 1 else "games" }}. <a class="text-link" href="/wishlist">Open your wishlist</a>: it also offers to add the games saved in this browser.</p>
+    <div class="account-actions">{{ sign_out_form() }}<a class="button button-secondary" href="/account/password">Choose a new password</a></div>
   </section>
   <details class="about-list account-about">
     <summary>What this site keeps for your account</summary>
     <ul>
-      <li>From {{ state.identity.provider_label }}: its id for you and the name shown above. Game Librarian never sees your password.</li>
-      <li>The games you save, with their names and when you saved them. Only your own signed-in requests can read or change them.</li>
-      <li>Signing out ends your session on this site. Your saved games stay in your account for your next visit.</li>
+      <li>Supabase, the site’s sign-in service, keeps your email address and a protected form of your password, and sends the confirmation and password emails. Game Librarian never stores your password.</li>
+      <li>Game Librarian keeps Supabase’s id for you, your email address and the games you save, with their names and when you saved them. Only your own signed-in requests can read or change them.</li>
+      <li>You stay signed in on this browser for up to 30 days, through two cookies that page scripts cannot read. Signing out ends this session.</li>
     </ul>
   </details>
   <section class="account-delete" aria-labelledby="delete-title">
     <h2 id="delete-title" class="chart-title">Delete your account data</h2>
-    <p class="small muted">Removes your account and its wishlist from this site. Your {{ state.identity.provider_label }} account is not affected, and a wishlist saved in this browser stays there.</p>
+    <p class="small muted">Removes your account and its wishlist from this site, then signs you out. A wishlist saved in this browser stays there. Your sign-in at Supabase stays until the site’s owner removes it.</p>
     <p><button class="button button-secondary" type="button" data-account-delete>Delete my account data</button></p>
     <p class="small" data-account-delete-status role="status"></p>
   </section>
   {% else %}
-  <section class="notice account-summary" aria-labelledby="account-status">
-    <p id="account-status">Sign in to keep your wishlist in your own account. A wishlist already saved in this browser stays there, and you can add it to your account afterwards.</p>
-    <p class="account-actions">
-      {% for provider in state.providers %}<a class="button button-primary" href="{{ sign_in_url(provider, return_to) }}">Sign in with {{ provider_label(provider) }}</a>{% endfor %}
-    </p>
+  {% if state.unavailable %}<p class="account-error" role="alert">{{ sign_in_unavailable }}</p>{% endif %}
+  <section class="account-panel" aria-labelledby="sign-in-title">
+    <h2 id="sign-in-title" class="chart-title">Sign in</h2>
+    <form class="account-form" method="post" action="/account/sign-in">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ return_to }}">
+      <p class="field"><label class="field-label" for="sign-in-email">Email address</label>
+        <input id="sign-in-email" name="email" type="email" autocomplete="email" required maxlength="254" value="{{ email or '' }}"></p>
+      <p class="field"><label class="field-label" for="sign-in-password">Password</label>
+        <input id="sign-in-password" name="password" type="password" autocomplete="current-password" required></p>
+      <p class="account-actions"><button class="button button-primary" type="submit">Sign in</button></p>
+    </form>
+    <p class="small"><a class="text-link" href="/account/forgot-password">Forgot your password?</a> · No account yet? <a class="text-link" href="/account/sign-up">Create one</a>.</p>
   </section>
+  {% if unconfirmed %}
+  <section class="account-panel" aria-labelledby="resend-title">
+    <h2 id="resend-title" class="chart-title">Send the confirmation link again</h2>
+    <form class="account-form" method="post" action="/account/resend">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p class="field"><label class="field-label" for="resend-email">Email address</label>
+        <input id="resend-email" name="email" type="email" autocomplete="email" required maxlength="254" value="{{ email or '' }}"></p>
+      <p class="account-actions"><button class="button button-secondary" type="submit">Send a new link</button></p>
+    </form>
+  </section>
+  {% endif %}
   <details class="about-list account-about">
-    <summary>What signing in shares</summary>
+    <summary>What an account keeps</summary>
     <ul>
-      <li>The sign-in provider tells Game Librarian its id for you and a name, such as your user name or email address. Game Librarian never sees your password.</li>
-      <li>This site keeps them with the games you save in your account, and nothing else about you.</li>
-      <li>Signing in is optional: without it, the wishlist works in this browser only.</li>
+      <li>An account is an email address and a password. Supabase, the site’s sign-in service, keeps them and sends the emails that confirm the address and reset the password.</li>
+      <li>Game Librarian keeps Supabase’s id for you, your email address and the games you save, and nothing else about you.</li>
+      <li>Signing in is optional: without it, the wishlist works in this browser only. A wishlist already saved in this browser stays there, and you can add it to your account afterwards.</li>
     </ul>
   </details>
   {% endif %}

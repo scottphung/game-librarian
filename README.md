@@ -31,10 +31,10 @@ Twitch; **Momentum** shows which games account for the change in Steam review co
 snapshots beside it. Each chart keeps its own source and update time. Its other pages (Player reception, Awards, About
 the data) show the catalog's reception and awards; an optional Power BI project in `reporting/` shows those three
 pages in Power BI Desktop (Trending games is on the website only). Prices are supporting information: there is no
-price filter, and Steam is always the place to confirm the final price. On the computer that runs the site, Sales &
-reception first charts **Estimated Steam copies sold** from Gamalytic's free API: a local evaluation only, because
-Gamalytic's terms do not allow sharing its data (see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only)).
-On that computer only, Trending's Most watched list becomes **Most watched among tracked Twitch categories**: the
+price filter, and Steam is always the place to confirm the final price. Sales &
+reception first charts **Estimated Steam copies sold** from Gamalytic's free API (model estimates, not reported sales; see [Estimated Steam copies sold](#estimated-steam-copies-sold), and
+[Gamalytic](#gamalytic-checked-2026-11-20) for its terms).
+Once TwitchTracker has given figures, Trending's Most watched list becomes **Most watched among tracked Twitch categories**: the
 tracked game and series categories in **TwitchTracker's** rank order, with its average viewers, instead of Twitch's
 moment-in-time order, because TwitchTracker publishes no terms that allow sharing its figures (see
 [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker)).
@@ -47,8 +47,9 @@ moment-in-time order, because TwitchTracker publishes no terms that allow sharin
 - **Storage:** one SQLite file on your computer, written by separate commands (`sync`, `candidates`); or, for the
   hosted site, Azure Database for PostgreSQL, with the same tables (see
   [Hosted architecture (Azure)](#hosted-architecture-azure) and [DEPLOYMENT.md](DEPLOYMENT.md)).
-- **Accounts (hosted site):** optional sign-in through Azure Container Apps' built-in authentication; a signed-in
-  visitor's wishlist is kept privately in their account. Without sign-in, the wishlist stays in the browser.
+- **Accounts (hosted site):** optional email-and-password accounts through Supabase Auth, which only the site's
+  server talks to; a signed-in visitor's wishlist is kept privately in their account in PostgreSQL. Without an
+  account, the wishlist stays in the browser.
 - **Catalog:** hand-picked games (`curated/games.csv`) plus games promoted through a reviewed candidate workflow
   (`curated/promoted_games.csv`). Every catalog game is a verified Steam app.
 - **Not included (by design):** RAG, LLMs, prediction models, machine-learned recommendations, wiki links or lore,
@@ -120,9 +121,10 @@ serves pages. It shows the data saved by the last successful sync.
 | `IGDB_CLIENT_SECRET` | No | Client secret of the same Twitch application. Both IGDB variables must be set to use IGDB and Twitch; the Steam catalog, the Steam sync and every other page work without them. |
 | `GAME_LIBRARIAN_DATABASE_URL` | No | The hosted site's PostgreSQL database, such as `postgresql://gl_app@<server>.postgres.database.azure.com/game_librarian`, without the password. When set, every command and the website use it instead of the SQLite file; TLS with full certificate and host-name checks (`sslmode=verify-full`) is required for any server but this computer. See [DEPLOYMENT.md](DEPLOYMENT.md). |
 | `PGPASSWORD` | With the database URL | The password of the role in `GAME_LIBRARIAN_DATABASE_URL` (libpq's own variable). Set it only for the session or as a Container Apps secret, never in a file that is committed. |
-| `GAME_LIBRARIAN_HOSTED` | No | `1` in the container image: a hosted process. It requires the PostgreSQL database, never shows Gamalytic's or TwitchTracker's figures, and makes `sync` fail when a source it should refresh lacks its credentials. |
-| `GAME_LIBRARIAN_SIGN_IN_PROVIDERS` | No | The providers of Azure Container Apps' built-in authentication, such as `github`. Only then are the platform's identity headers trusted and accounts offered. |
-| `GAME_LIBRARIAN_ALLOWED_USERS` | No | Who may keep an account (provider user names or emails, or `provider:name`); empty: everyone who signs in. |
+| `GAME_LIBRARIAN_HOSTED` | No | `1` in the container image: a hosted process. It requires the PostgreSQL database, sets its cookies for HTTPS only (`Secure`, `__Host-`), and makes `sync` fail when a source it should refresh lacks its credentials. |
+| `GAME_LIBRARIAN_SUPABASE_URL` | No | The Supabase project URL (`https://<project-ref>.supabase.co`) whose Auth keeps the email accounts. With the publishable key below: accounts are offered; without: none. |
+| `GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY` | With the URL | The project's publishable key (`sb_publishable_...`), used only by the server. Never the secret or service-role key. |
+| `GAME_LIBRARIAN_ALLOWED_USERS` | No | The email addresses that may keep an account (comma-separated, without case); empty: everyone who confirms an address. 0.20's GitHub user names are refused. |
 | `GAME_LIBRARIAN_CONTACT` | No | An email address or website **you choose**, sent only in the User-Agent of requests to Wikipedia and Wikidata, whose policy asks automated clients for contact information. Without it, critic scores are not read. See [What the critics said](#what-the-critics-said). |
 
 Settings are loaded automatically from the project-root `.env` file if it exists. Environment variables already set
@@ -159,15 +161,16 @@ All commands run from the project folder with the virtual environment's Python.
 | `python -m game_librarian sync --appid 1086940` | Syncs one curated game. You can repeat `--appid`. |
 | `python -m game_librarian sync --skip-reviews` / `--skip-discovery` / `--skip-prices` / `--skip-players` / `--skip-upcoming` / `--skip-most-watched` / `--skip-critics` / `--skip-sales` | Leaves out one part of the sync. |
 | `python -m game_librarian upcoming [--force]` | Refreshes the cross-platform Trending lists (needs the IGDB variables): IGDB PopScore for Upcoming & Anticipated and Most wanted new releases, Twitch's top games for Most watched on Twitch (with IGDB's own record of each category), the IGDB records (platforms and release dates) of every listed and catalog game, and the catalog's IGDB links. Prints the four lists. Without `--force` it does nothing if the last refresh is less than 20 hours old. `sync` runs it too. |
-| `python -m game_librarian most-watched [--force]` | Asks TwitchTracker's free API (no key) for the rank and average viewers of the tracked categories: the game and series categories in Twitch's newest top list (from `upcoming`; without a list from the last 24 hours, those chosen from the last one) and every game or series category reviewed in `curated/twitch_categories.csv`, each category at most once in 20 hours, one request every 1.5 seconds. `--force` asks about every tracked category now. Prints the list as the Trending page shows it on this computer (places 1 to 10, each with TwitchTracker's category rank) and what it leaves out. `sync` runs it after `upcoming` when the IGDB variables are set. The figures are shown only on the computer that runs the site; see [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker). |
+| `python -m game_librarian most-watched [--force]` | Asks TwitchTracker's free API (no key) for the rank and average viewers of the tracked categories: the game and series categories in Twitch's newest top list (from `upcoming`; without a list from the last 24 hours, those chosen from the last one) and every game or series category reviewed in `curated/twitch_categories.csv`, each category at most once in 20 hours, one request every 1.5 seconds. `--force` asks about every tracked category now. Prints the list as the Trending page shows it (places 1 to 10, each with TwitchTracker's category rank) and what it leaves out. `sync` runs it after `upcoming` when the IGDB variables are set. The figures are shown only on the computer that runs the site; see [Most watched on Twitch](#most-watched-on-twitch-twitchs-order-and-twitchtracker). |
 | `python -m game_librarian critics [--appid N] [--limit N] [--force]` | Reads critic scores from English Wikipedia for the games that are due (each game once in 30 days; needs `GAME_LIBRARIAN_CONTACT`). `sync` runs it too. |
 | `python -m game_librarian critics --review` | Lists the article matches and scores that wait for a person, with the reason (no network). |
-| `python -m game_librarian sales-estimates [--force]` | Asks Gamalytic's free API (no key) for the estimated Steam copies sold of every catalog game that is due: each game once in 7 days, 100 games per request (3 requests for 238 games). `--force` asks about every game now. `sync` runs it too. The estimates are shown only on the computer that runs the site; see [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only). |
+| `python -m game_librarian sales-estimates [--force]` | Asks Gamalytic's free API (no key) for the estimated Steam copies sold of every catalog game that is due: each game once in 7 days, 100 games per request (3 requests for 238 games). `--force` asks about every game now. `sync` runs it too. The estimates are shown only on the computer that runs the site; see [Estimated Steam copies sold](#estimated-steam-copies-sold). |
 | `python -m game_librarian serve [--port 8000] [--reload]` | Runs the web app at <http://127.0.0.1:8000>. |
 | `python -m game_librarian status` | Shows catalog counts, the stored prices and snapshot history, the cross-platform Trending lists, critic scores, the sales estimates, the Twitch caches (live streams, most-watched list), TwitchTracker's figures and the most recent sync runs with their outcomes. |
 | `python -m game_librarian check-curated` | Validates the curated CSV files (including the reviewer decisions in `steam_matches.csv`, `critic_articles.csv` and `twitch_categories.csv`), the publisher aliases, the Data Story files and the Daily Trivia questions (`trivia.json`), and lists problems with their file and line. |
 | `python -m game_librarian init-postgres [--grant-to ROLE]` | Creates or upgrades the PostgreSQL tables (`GAME_LIBRARIAN_DATABASE_URL`, with a role that may create tables), keeping existing rows, and lets each `--grant-to` role read and write rows but never change tables. |
-| `python -m game_librarian migrate-to-postgres [--check] [--replace] [--from FILE]` | Copies the SQLite catalog into PostgreSQL after checking it, in one transaction, and compares every table's rows and checksum. The SQLite file is only read. Gamalytic's and TwitchTracker's tables are not copied; accounts are never touched. `--replace` empties the hosted catalog tables first. See [DEPLOYMENT.md](DEPLOYMENT.md). |
+| `python -m game_librarian migrate-to-postgres [--check] [--replace] [--only TABLE] [--from FILE]` | Copies the SQLite catalog into PostgreSQL after checking it, in one transaction, and compares every table's rows and checksum. The SQLite file is only read; accounts are never touched. `--replace` empties the hosted catalog tables first (destructive). `--only sales_estimates --only twitchtracker_summaries` adds just those tables' missing rows to a database 0.20 copied, keeping every row it has. See [DEPLOYMENT.md](DEPLOYMENT.md). |
+| `python -m game_librarian accounts {list,copy-wishlist,delete}` | The hosted site's accounts: list them (sign-in, name, saved games); `copy-wishlist --from ID --to ID` adds one account's games to another (for an old GitHub account whose owner you know; nothing is matched by email); `delete --id ID --yes`. |
 | `python -m game_librarian export-report [--out DIR]` | Writes the Power BI report's CSV tables (default `reporting/data/`) from the catalog and curated files, and points the report at that folder. Run it after `sync`. |
 | `python -m game_librarian candidates add --source discovery\|awards\|igdb [--limit N]` | Collects candidate games (see [Growing the catalog](#growing-the-catalog)). Never changes the catalog. |
 | `python -m game_librarian candidates screen [--limit N] [--min-reviews 50] [--min-positive 70] [--recheck-days D]` | Checks due candidates against Steam, 50 apps per request, and applies the inclusion rules. |
@@ -201,7 +204,7 @@ The other sources refresh on their own cadence, also only when a command runs:
 | Critic scores | `sync` or `critics` | Each game once in 30 days; a failed read is retried after a day | First run for 238 games: 3 Wikidata queries and 24 Wikipedia requests (about 1 minute); later runs read only the games that are due |
 | Live streams | Opening a game's details | At most once per 5 minutes per game; after a failure, not before 2 minutes or Twitch's reset time | 2 Twitch requests per check; answers are deleted after 24 hours |
 | Estimated Steam copies sold (Gamalytic) | `sync` or `sales-estimates` | Each game once in 7 days; `sales-estimates --force` asks now. Older collections are kept. At most 50 requests in any 24 hours (Gamalytic allows free users 250 a day); an HTTP 429 answer stops the run | 3 requests for 238 games (100 per request), at most one a second |
-| Most watched by TwitchTracker (shown on this computer only) | `sync` (after `upcoming`) or `most-watched` | Each tracked category once in 20 hours; `most-watched --force` asks now. Only the newest figures are kept. At most 200 requests in any 24 hours (TwitchTracker documents no limit); an HTTP 403 or 429 answer stops the run | One request per tracked category that is due: 79 on 2026-11-21 (about 2 minutes at one request every 1.5 seconds); after a new Twitch list, only the categories new to it (21 that day) |
+| Most watched by TwitchTracker | `sync` (after `upcoming`) or `most-watched` | Each tracked category once in 20 hours; `most-watched --force` asks now. Only the newest figures are kept. At most 200 requests in any 24 hours (TwitchTracker documents no limit); an HTTP 403 or 429 answer stops the run | One request per tracked category that is due: 79 on 2026-11-21 (about 2 minutes at one request every 1.5 seconds); after a new Twitch list, only the categories new to it (21 that day) |
 
 ## Growing the catalog
 
@@ -636,7 +639,7 @@ Rule, Order or Limits where they apply) is under **About this list**, and each p
 | [Upcoming & Anticipated](#upcoming--anticipated) | Most wanted on IGDB | IGDB PopScore "Want to Play" order, games not out on any platform | All platforms | IGDB, `upcoming` refresh (at most every 20 hours) |
 | | Most wishlisted on Steam | IGDB PopScore "Most Wishlisted Upcoming": positions in Steam's most-wishlisted list | Steam only | IGDB (source Steam), same refresh |
 | [Trending now & recently released](#trending-now--recently-released) | Most wanted new releases | The same "Want to Play" order, games first released in the last 90 days | All platforms | IGDB, same refresh |
-| | Most watched on Twitch | Twitch's own order of categories by current viewers; on the computer that runs the site, "Most watched among tracked Twitch categories": the tracked game and series categories in TwitchTracker's rank order, with its rank and average viewers | All platforms | Twitch, same refresh, deleted after 24 hours; TwitchTracker, `most-watched` (local evaluation only) |
+| | Most watched on Twitch | Twitch's own order of categories by current viewers until TwitchTracker has given figures; then "Most watched among tracked Twitch categories": the tracked game and series categories in TwitchTracker's rank order, with its rank and average viewers | All platforms | Twitch, same refresh, deleted after 24 hours; TwitchTracker, `most-watched` or `sync` |
 | [Steam activity](#steam-activity) | Popular on Steam right now; released this year or since 2021 with strong Steam reception; recent changes on Steam | Steam players in game, Steam review labels, changes between dated Steam snapshots | Steam only, catalog games | Steam, `sync` |
 
 The page never calls IGDB, Twitch, TwitchTracker or Steam while it is served: it shows what the last refresh and sync
@@ -732,7 +735,7 @@ its place as a series, and another broad category can still point to its series'
 keeping its data for at most 24 hours: the list is replaced at each refresh and deleted 24 hours after Twitch
 answered (by the next refresh, the Trending page and `status`), with no history.
 
-**TwitchTracker's view (this computer only).** `python -m game_librarian most-watched`, which `sync` runs after
+**TwitchTracker's view.** `python -m game_librarian most-watched`, which `sync` runs after
 `upcoming`, asks TwitchTracker's free category summary (`twitchtracker.com/api/games/summary/<category id>`, no key)
 about each **tracked category**. The list then shows:
 
@@ -767,7 +770,7 @@ about each **tracked category**. The list then shows:
   rounded averages. The answer carries no dates or period, and the rank does not follow the averages, so the site
   claims no period and stores none.
 
-The dashboard uses the same figures on this computer: Upcoming releases' selected-game panel gives a game's
+The dashboard uses the same figures: Upcoming releases' selected-game panel gives a game's
 TwitchTracker category rank and average viewers when the list names the same IGDB game (most upcoming games are not
 streamed enough), and Sales & reception counts this list as "Most watched among tracked Twitch categories". A series
 category stands for no single game, so neither one matches it to a game. No TwitchTracker figure is combined with
@@ -905,11 +908,11 @@ on the day the page is served, so a platform moves from "announced" to "availabl
 
 ## Game identity and the wishlist
 
-**Where the wishlist is kept.** By default in the browser (`static/wishlist.js`, local storage), as before. On the
-hosted site with sign-in turned on (`GAME_LIBRARIAN_SIGN_IN_PROVIDERS`), a signed-in visitor's wishlist is kept in
-their account in PostgreSQL (`accounts`, `wishlist_items`), private to them: every request reaches only the account
-of the person the platform signed in (the provider's id for them), and changes must be JSON requests from the
-site's own pages. The same key and alias rules apply. A browser list is never sent or deleted by itself: once
+**Where the wishlist is kept.** By default in the browser (`static/wishlist.js`, local storage), as before. With
+email accounts (`GAME_LIBRARIAN_SUPABASE_URL`; DEPLOYMENT.md, "Email accounts with Supabase"), a signed-in visitor's
+wishlist is kept in their account in PostgreSQL (`accounts`, `wishlist_items`), private to them: every request
+reaches only the account of the person whose Supabase session it carries (Supabase's id for them, from an access
+token checked with Supabase's published keys), and changes must be JSON requests from the site's own pages. The same key and alias rules apply. A browser list is never sent or deleted by itself: once
 signed in, the wishlist page offers to add the browser's missing games to the account and, only when the account
 has all of them, to remove the browser's copy. `/account` has Sign out and Delete my account data. An account keeps
 at most 500 games.
@@ -1300,7 +1303,7 @@ stand for players on other platforms.
 
 | Page and chart | Form | Real data | What a value means |
 | --- | --- | --- | --- |
-| Sales & reception: Estimated Steam copies sold (on the computer that runs the site only; first, full width) | A doughnut: the 5 largest estimates each a slice with the game's cover art cropped into it and a numbered badge, the rest one "Other tracked games" slice whose games fold open; the cohort's total and size in the middle; a numbered list beside it; a table | Gamalytic's free list endpoint, saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, as shares of the cohort's total. See [below](#estimated-steam-copies-sold-local-evaluation-only) |
+| Sales & reception: Estimated Steam copies sold (on the computer that runs the site only; first, full width) | A doughnut: the 5 largest estimates each a slice with the game's cover art cropped into it and a numbered badge, the rest one "Other tracked games" slice whose games fold open; the cohort's total and size in the middle; a numbered list beside it; a table | Gamalytic's free list endpoint, saved by `sales-estimates` | Gamalytic's **cumulative estimate** of copies bought directly on Steam, as shares of the cohort's total. See [below](#estimated-steam-copies-sold) |
 | Sales & reception: Strong Steam reception since the five-year window's start (full width; first on the public site) | One scatterplot, each game once: x = total Steam reviews (log scale when the counts span ten times or more), y = positive share to one decimal; this year's releases in the accent color, with a **this year only** view on the same axes; a selected game rings its peers, draws their median as a line and fills a detail strip; a table | Steam review summaries, genres and release dates of the catalog games | Does a game stand out among similar releases: its positive share against the median of its peers. See [Compared with similar releases](#compared-with-similar-releases) |
 | Upcoming releases: Upcoming Release Radar (left, three fifths) | A circular radar (rings: time to release; sections: platform families), windows **Next month**, **Next 3 months**, **All tracked**, a panel with the selected game's cover, dates by platform, list ranks and Twitch place, and **Date TBA or approximate** folded under one counted control | The upcoming games of the newest saved Most wanted on IGDB and Most wishlisted on Steam lists (up to 25 each) | When a game is due **on each platform**, exact days only. See [below](#upcoming-release-radar) |
 | Upcoming releases: IGDB's Want to Play and Steam's most wishlisted, compared (beside the radar; below it on a phone) | One finding, each capture's date and depth, three blocks sized by their number of games (seen on both lists, only on IGDB, only on Steam) under brackets for each capture, the open group's games, a table | The same two captures | What a player would miss by browsing only Steam's list. See [below](#what-a-player-would-miss-on-steams-list-alone) |
@@ -1401,12 +1404,11 @@ capture (`game_librarian/list_comparison.py`; the radar reads the same distinct 
   games = 25 + 25 − 6; 19 seen only on IGDB, 6 on both, 19 only on Steam, 0 unresolved. Of the 19, 14 had a verified
   Steam listing and 9 of those 14 were already in early access, while none of the 25 games of Steam's capture was.
 
-#### Estimated Steam copies sold (local evaluation only)
+#### Estimated Steam copies sold
 
 Since 0.11 the dashboard has an **Estimated Steam copies sold** chart; since 0.15 it is the first chart of Sales &
-reception. It is built for **local evaluation**: Gamalytic's published terms do not allow showing its data to anyone
-else (see [Gamalytic](#gamalytic-checked-2026-11-20)), so the site sends it only to a browser on the computer that
-runs it.
+reception. Since 0.21 every visitor sees it, by the site owner's decision; Gamalytic's published terms restrict sharing
+its data (see [Gamalytic](#gamalytic-checked-2026-11-20)).
 
 - **Collect the estimates:** `python -m game_librarian sales-estimates` (also run by `sync`, unless
   `--skip-sales`). No account, key or setting is needed.
@@ -1659,15 +1661,14 @@ a day. The 250 free requests a day come from the API reference; the server's ans
   - "The services may not be used in connection with any commercial endeavors except those that are specifically
     endorsed or approved by us."
 - **[About](https://gamalytic.com/about):** how the estimates are made and how accurate they are (see
-  [Estimated Steam copies sold](#estimated-steam-copies-sold-local-evaluation-only)). It grants no rights.
+  [Estimated Steam copies sold](#estimated-steam-copies-sold)). It grants no rights.
 
 **Conclusion: the published terms do not allow public display.** Showing the estimates on a website that others can
 open would make Gamalytic's data accessible to third parties, which the terms prohibit without written approval.
-So Game Librarian keeps the estimates in the local database and shows them only to a browser on the computer that
-runs the site: a loopback address (127.0.0.1 or ::1) and no proxy headers (`Forwarded`, `X-Forwarded-For`,
-`X-Forwarded-Host`, `X-Real-IP`, `CF-Connecting-IP`). They are not in the Power BI export. **Unresolved:** whether
-Gamalytic would approve a public display, and on which conditions: its published pages do not say. Until such an
-approval exists, do not publish the chart or screenshots of it. Calling the API at all counts as using Gamalytic's
+Versions up to 0.20 therefore showed the estimates only to a browser on the computer that runs the site. **Since 0.21
+the site shows them to every visitor, by the site owner's decision of 2026-11-22**; the terms were read again that
+day and are unchanged, so this display has no published permission. They are not in the Power BI export.
+**Unresolved:** whether Gamalytic would give the written approval its terms require, and on which conditions. Calling the API at all counts as using Gamalytic's
 services, so its terms apply to your use of the command.
 
 ### TwitchTracker (checked 2026-11-21)
@@ -1693,14 +1694,15 @@ and the footer every page carries); no statistics page was fetched, and the inte
 than scrape its site. **Not established:** any permission to store its figures or to show them to other people, any
 attribution rule, any rate limit, the reporting period, how the rank is calculated, and whether the `robots.txt` line
 is meant for an API client like this one. **Conclusion:** public display is not established, so the figures are a
-local evaluation, as for Gamalytic: the site shows them only to a loopback browser without proxy headers
-(`web.is_local_request`), the Power BI export leaves them out, and every view names TwitchTracker and links its API
-page. Do not publish the list or screenshots of it unless TwitchTracker permits it. If you read the `robots.txt` line
-as covering this use, turn the step off: `sync --skip-most-watched`, and do not run `most-watched`.
+local evaluation in versions up to 0.20. **Since 0.21 the site shows them to every visitor and the hosted daily job
+asks for them, by the site owner's decision of 2026-11-22** (robots.txt, re-read that day, still disallows `/api/*`);
+the Power BI export leaves them out, and every view names TwitchTracker and links its API page. If you read the
+`robots.txt` line as covering this use, turn the step off: `sync --skip-most-watched`.
 
 ### The hosted site (checked 2026-11-21)
 
-This summary is not legal advice. What changes when the site is served to other people (0.20, DEPLOYMENT.md):
+This summary is not legal advice. What changes when the site is served to other people (0.20 and 0.21,
+DEPLOYMENT.md):
 
 - **Steam:** the Steam Web API Terms allow distributing Steam Data "to end users for their personal use". Whether a
   site for a small circle of people may show store descriptions, images and review excerpts publicly is **not
@@ -1709,12 +1711,13 @@ This summary is not legal advice. What changes when the site is served to other 
 - **IGDB and Twitch:** IGDB asks for visible attribution and allows storing and serving its data; Twitch allows
   caching for 24 hours and asks for a path to the source. Both are kept as before on the hosted site.
 - **Wikipedia and Wikidata:** scores with the article, the revision link and CC BY-SA 4.0, as before.
-- **Gamalytic and TwitchTracker:** their terms (Gamalytic) or the lack of them (TwitchTracker) allow no sharing.
-  A hosted process (`GAME_LIBRARIAN_HOSTED`, or any PostgreSQL database) never asks them and never shows their
-  figures, even to a request from 127.0.0.1 (the authentication sidecar forwards from there); `migrate-to-postgres`
-  leaves their tables in the SQLite file. On your own computer, with SQLite, they stay as before.
-- **Accounts:** the sign-in provider shares its id for a person and a name; the site keeps them with the saved
-  games and nothing else (`/account` says so and offers deletion).
+- **Gamalytic and TwitchTracker:** since 0.21 shown to every visitor and refreshed by the hosted job, by the site
+  owner's decision. Gamalytic's terms prohibit making its data accessible to third parties without written approval;
+  TwitchTracker publishes no terms and its robots.txt disallows `/api/*`. Neither restriction is resolved (see the two
+  sections above). Each figure is labeled as an estimate or as TwitchTracker's, with its source, period and time.
+- **Accounts:** Supabase (the sign-in service) keeps the email address and a password hash and sends the emails; the
+  site keeps Supabase's id for a person, the address and the saved games, and nothing else (`/account` says so and
+  offers deletion of the site's data). The email provider you configure in Supabase handles the messages.
 
 ### Curated sources
 
@@ -1968,10 +1971,10 @@ uses only what it needs:
   of SQL for SQLite and PostgreSQL; `database.py` opens the connections (TLS `verify-full`, a small pool for the
   website, an advisory lock so two refreshes never overlap). The website and the job use a role that cannot
   change tables; `init-postgres` and `migrate-to-postgres` run once with the administrator.
-- **Built-in authentication** signs visitors in (GitHub, Google, Microsoft or another provider); the app stores no
-  password and sets no cookie of its own.
-- Gamalytic's and TwitchTracker's figures stay a local evaluation: a hosted process never collects or shows them,
-  and `migrate-to-postgres` does not copy them.
+- **Supabase Auth** keeps the email-and-password accounts (since 0.21; 0.20 used Container Apps' built-in
+  authentication with GitHub). Only the website's server calls it, with the publishable key; the session stays in
+  HttpOnly cookies, and the app stores no password.
+- Gamalytic's and TwitchTracker's figures are collected by the daily job and shown like the other data (since 0.21).
 
 Key Vault, Blob Storage, Data Factory, Data Lake, Snowflake and a VM are not needed for this. The earlier proposal
 is kept below for reference.
@@ -2093,7 +2096,7 @@ personal tool and those public-use rights have not been confirmed.
   deleted 24 hours after Twitch answered, so with a daily refresh it can be missing for a few hours. Twitch's terms
   need a separate agreement for research on trends over time, so the dashboard shows no Twitch rank changes or
   repeat top places, and it never will under the current access.
-- **TwitchTracker's view** (this computer only) covers only the tracked categories: Twitch's game and series
+- **TwitchTracker's view** covers only the tracked categories: Twitch's game and series
   categories at the last `upcoming` refresh, which is one moment, and the reviewed ones. A game that ranks high over
   TwitchTracker's longer period but was outside Twitch's top 100 at that moment, and is not reviewed, is missing,
   and the site cannot tell: no documented endpoint gives TwitchTracker's complete ranking. Places 1 to 10 are places
@@ -2151,6 +2154,29 @@ personal tool and those public-use rights have not been confirmed.
   `httpx2`. The tests pass with `httpx` 0.28, so no extra dependency was added.
 
 ## Verification status
+
+**Version 0.21 (email accounts with Supabase Auth; Gamalytic and TwitchTracker on the hosted site), checked on
+2026-11-22.**
+
+- **What changed:** GitHub sign-in through Container Apps' built-in authentication is replaced by email-and-password
+  accounts through Supabase Auth (`supabase_auth.py`, a rewritten `accounts.py`, `/account`, `/account/sign-up`,
+  `/account/forgot-password`, `/auth/confirm`, `/account/password`, sign-out). The server alone calls Supabase, with
+  the publishable key; sessions live in HttpOnly cookies (`Secure` and `__Host-` when hosted) and every request
+  checks the access token with Supabase's published signing keys (ES256 or RS256 only), renewing it with the refresh
+  token; forms carry a CSRF token and must come from this site; attempts are counted per visitor and per address.
+  The wishlist API, its isolation and the browser-list import are unchanged; 0.20's GitHub account rows are kept and
+  can be copied by `accounts copy-wishlist` only. Gamalytic's estimates and TwitchTracker's figures are shown to every
+  visitor and refreshed by the hosted `sync` (the local-only gates and wording are gone; Trending keeps Twitch's
+  order until TwitchTracker has figures, and the dashboard shows no copies-sold chart before a first collection);
+  `migrate-to-postgres` copies both tables, and `--only` adds them to a database 0.20 copied. New dependencies:
+  PyJWT 2.15.1 and cryptography 50.0.2.
+- **Automated tests:** on SQLite, 624 pass and 12 PostgreSQL-only tests are skipped; on a temporary PostgreSQL 18.6
+  (TLS only, `verify-full`), all 636 pass. The Supabase tests use an in-memory Supabase whose tokens are real JWTs
+  signed with keys made for the run: sign-up, confirmation by button, sign-in, refresh, sign-out, reset, forged and
+  expired tokens, key rotation, outages, CSRF, attempt limits and isolation between two accounts.
+- **Not verified:** anything against the real Supabase project (email delivery, templates, signing keys), the
+  container build and the workflow, the new revision and job in Azure, and live calls to Gamalytic and TwitchTracker
+  from Azure's addresses.
 
 **Version 0.20 (prepared for Azure: PostgreSQL, container, daily job, accounts), checked on 2026-11-21.**
 

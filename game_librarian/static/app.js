@@ -207,7 +207,8 @@
     } catch (_) { if (status) { status.textContent = "The wishlist could not be saved in this browser."; } }
   });
 
-  // The account page's "Delete my account data": after a confirmation, delete it, then sign out.
+  // The account page's "Delete my account data": after a confirmation, delete it. The server signs the person out at
+  // the same time, and the account page then says so.
   var deleteAccount = document.querySelector("[data-account-delete]");
   if (deleteAccount) {
     deleteAccount.addEventListener("click", function () {
@@ -215,9 +216,8 @@
       var status = document.querySelector("[data-account-delete-status]");
       deleteAccount.disabled = true;
       accountRequest("/api/account/delete", {}).then(function () {
-        status.textContent = "Your account data was deleted. Signing you out…";
-        var signOut = document.querySelector("[data-sign-out]");
-        window.location.assign(signOut ? signOut.href : "/");
+        status.textContent = "Your account data was deleted.";
+        window.location.assign("/account?notice=deleted");
       }, function (error) {
         deleteAccount.disabled = false;
         status.textContent = error.message;
@@ -659,7 +659,7 @@
     receptionCharts.push({ has: function (key) { return Boolean(dotOf(key)); }, select: select });
   });
 
-  // Trending games → Sales & reception, on this computer only: selecting a game in the doughnut or in its list dims
+  // Trending games → Sales & reception: selecting a game in the doughnut or in its list dims
   // the other slices and selects the game's dot on the reception chart, when it has one. A game of "Other tracked
   // games" lights up that slice.
   document.querySelectorAll("[data-sales-ring]").forEach(function (card) {

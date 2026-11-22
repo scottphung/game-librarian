@@ -1,6 +1,6 @@
 """Command line: python -m game_librarian
 {sync,upcoming,most-watched,critics,sales-estimates,serve,status,check-curated,export-report,candidates,
-init-postgres,migrate-to-postgres}."""
+init-postgres,migrate-to-postgres,accounts}."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Callable
 
 from datetime import datetime, timezone
 
-from . import candidates, critics, gamalytic, migrate, store, twitchtracker, upcoming
+from . import accounts, candidates, critics, gamalytic, migrate, store, twitchtracker, upcoming
 from .config import DEFAULT_REPORT_DATA_DIR, REPORT_PARAMETERS_FILE, Settings, load_settings
 from .curated import PROMOTED, CuratedData, load_curated
 from .database import DatabaseConfigError, PostgresDatabase, is_postgres_error, refresh_lock
@@ -34,9 +34,6 @@ IGDB_HELP = ("IGDB is optional and not configured. To use it, set IGDB_CLIENT_ID
 CONTACT_HELP = ("Critic scores come from Wikipedia, whose policy asks automated clients for contact information. "
                 "Set GAME_LIBRARIAN_CONTACT in .env to an email address or website you choose; see README.md, "
                 "\"What the critics said\".")
-LOCAL_ONLY = ("a local evaluation: its terms allow no sharing, so its figures are kept only in the local SQLite "
-              "database and shown only on the computer that runs the site, never with the PostgreSQL database or in "
-              "a hosted process (see README.md, \"Data sources and terms\")")
 
 
 def _worst(*codes: int) -> int:
@@ -61,9 +58,12 @@ def _missing_for_hosted_sync(args: argparse.Namespace, settings: Settings) -> li
     missing = []
     if not args.skip_discovery and not settings.steam_api_key:
         missing.append("STEAM_API_KEY (Steam catalog discovery; or pass --skip-discovery)")
-    if not args.skip_upcoming and not settings.igdb_configured:
-        missing.append("IGDB_CLIENT_ID and IGDB_CLIENT_SECRET (the cross-platform Trending lists; or pass "
-                       "--skip-upcoming)")
+    if not settings.igdb_configured:  # Most watched chooses its categories from Twitch's list, read with them too
+        needed = [what for what, skipped in (("the cross-platform Trending lists", args.skip_upcoming),
+                                             ("Most watched", args.skip_most_watched)) if not skipped]
+        if needed:
+            missing.append(f"IGDB_CLIENT_ID and IGDB_CLIENT_SECRET ({' and '.join(needed)}; or pass "
+                           "--skip-upcoming and --skip-most-watched)")
     if not args.skip_critics and not settings.contact:
         missing.append("GAME_LIBRARIAN_CONTACT (critic scores from Wikipedia; or pass --skip-critics)")
     return missing
@@ -90,7 +90,7 @@ def _sync(args: argparse.Namespace, settings: Settings) -> int:
 
 def _sync_steps(args: argparse.Namespace, settings: Settings, curated: CuratedData) -> int:
     """sync's steps, under the refresh lock: Steam, then the Trending lists, Most watched, critic scores and sales
-    estimates when each is configured, allowed for this database and due."""
+    estimates when each is configured and due."""
     options = SyncOptions(
         force=args.force,
         appids=args.appids,
@@ -128,8 +128,6 @@ def _sync_steps(args: argparse.Namespace, settings: Settings, curated: CuratedDa
         codes.append(_run_upcoming(settings, curated, force=False))
     if args.skip_most_watched:
         print("\nMost watched (TwitchTracker): skipped (--skip-most-watched).")
-    elif not settings.local_evaluation:
-        print(f"\nMost watched (TwitchTracker): skipped, {LOCAL_ONLY}.")
     elif not settings.igdb_configured:
         print("\nMost watched (TwitchTracker): skipped, IGDB is not configured (its categories come from Twitch's top "
               "list, read with the same credentials).")
@@ -144,8 +142,6 @@ def _sync_steps(args: argparse.Namespace, settings: Settings, curated: CuratedDa
         codes.append(_run_critics(settings, curated, appids=args.appids, limit=args.limit, force=False))
     if args.skip_sales:
         print("\nSales estimates (Gamalytic): skipped (--skip-sales).")
-    elif not settings.local_evaluation:
-        print(f"\nSales estimates (Gamalytic): skipped, {LOCAL_ONLY}.")
     else:
         codes.append(_run_sales(settings, force=False))
     return _worst(*codes)
@@ -225,7 +221,7 @@ def _upcoming(args: argparse.Namespace, settings: Settings) -> int:
 
 def _run_most_watched(settings: Settings, curated: CuratedData, *, force: bool) -> int:
     """Ask TwitchTracker for the rank and average viewers of the tracked categories that are due (all with `force`),
-    then print the list as the Trending page shows it on this computer (twitchtracker.ranking). The categories are the
+    then print the list as the Trending page shows it (twitchtracker.ranking). The categories are the
     game and series categories of Twitch's newest top list (`upcoming` saves it) and the reviewed ones of
     curated/twitch_categories.csv; without a Twitch list from the last 24 hours, those chosen from the last one are
     asked about again."""
@@ -271,14 +267,10 @@ def _run_most_watched(settings: Settings, curated: CuratedData, *, force: bool) 
               f"{entry.row['avg_viewers']:,} average viewers (retrieved {entry.row['retrieved_at']})")
     if left_out:
         print("Not listed: " + ", ".join(f"{count} {reason}" for reason, count in sorted(left_out.items())))
-    print("Shown only to a browser on this computer: TwitchTracker publishes no terms that allow sharing its figures.")
     return EXIT_CODES[report.status()]
 
 
 def _most_watched(args: argparse.Namespace, settings: Settings) -> int:
-    if not settings.local_evaluation:
-        print(f"error: TwitchTracker's figures are {LOCAL_ONLY}.", file=sys.stderr)
-        return 1
     curated = load_curated(settings.curated_dir)
     for problem in curated.problems:
         print(f"warning: curated data: {problem}", file=sys.stderr)
@@ -382,15 +374,10 @@ def _run_sales(settings: Settings, *, force: bool) -> int:
         conn.close()
     print(f"Sales estimates (Gamalytic): {report.status()}")
     print(json.dumps(report.summary(), indent=2, ensure_ascii=False))
-    print("Shown only to a browser on this computer (Dashboard > Trending games): Gamalytic's terms do not allow "
-          "sharing its data.")
     return EXIT_CODES[report.status()]
 
 
 def _sales_estimates(args: argparse.Namespace, settings: Settings) -> int:
-    if not settings.local_evaluation:
-        print(f"error: Gamalytic's estimates are {LOCAL_ONLY}.", file=sys.stderr)
-        return 1
     return _locked(settings, lambda: _run_sales(settings, force=args.force))
 
 
@@ -450,7 +437,7 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
     else:
         print("Critic scores (Wikipedia): " + ("none read yet (python -m game_librarian critics)" if settings.contact
                                                else "GAME_LIBRARIAN_CONTACT not set"))
-    print("Sales estimates (Gamalytic, shown on this computer only): " + (
+    print("Sales estimates (Gamalytic): " + (
         f"{sales['games']} games with an estimate; {sales['collections']} collection(s) from {sales['first']} to "
         f"{sales['last']}" if sales["collections"]
         else "none collected yet (python -m game_librarian sales-estimates)"))
@@ -459,7 +446,7 @@ def _status(args: argparse.Namespace, settings: Settings) -> int:
                                           "(deleted after 24 hours)" if top_games else "none from the last 24 hours"))
     answered = sorted(row["retrieved_at"] for row in tracker if row["rank"] is not None)
     last = tracker_runs[0] if tracker_runs else None
-    print("Most watched (TwitchTracker, shown on this computer only): " + (
+    print("Most watched (TwitchTracker): " + (
         f"{len(answered)} of {len(tracker)} tracked categories with figures"
         + (f", retrieved {answered[0]} to {answered[-1]}" if answered else "")
         + (f"; last run {last['started_at']} {last['status']}" if last else "")
@@ -509,10 +496,12 @@ def _migrate_to_postgres(args: argparse.Namespace, settings: Settings) -> int:
         print(NEEDS_POSTGRES, file=sys.stderr)
         return 1
     source = args.source or settings.db_path
-    print(f"{'Checking' if args.check else 'Copying'} the SQLite catalog {source} "
+    only = tuple(dict.fromkeys(args.only or ()))
+    what = f"the {' and '.join(only)} rows of the SQLite catalog" if only else "the SQLite catalog"
+    print(f"{'Checking' if args.check else 'Copying'} {what} {source} "
           f"{'against' if args.check else 'into'} {settings.database.describe()}...", flush=True)
     try:
-        report = migrate.migrate(source, settings.database, replace=args.replace, check_only=args.check,
+        report = migrate.migrate(source, settings.database, replace=args.replace, check_only=args.check, only=only,
                                  log=lambda message: print(message, flush=True))
     except migrate.MigrationError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -520,7 +509,14 @@ def _migrate_to_postgres(args: argparse.Namespace, settings: Settings) -> int:
     for warning in report.warnings:
         print(f"warning: {warning}", file=sys.stderr)
     rows = sum(item.source_rows for item in report.copied)
-    if report.checked_only:
+    if only:
+        for item in report.added:
+            print(f"{item.table}: {item.added} row(s) {'would be added' if report.checked_only else 'added'}; "
+                  f"{item.present} already in PostgreSQL (kept as they are); {item.skipped} left out (their game is "
+                  "not in the PostgreSQL catalog).")
+        print("Check passed. Nothing was written." if report.checked_only else
+              "Every added row matches the SQLite file (row count and checksum).")
+    elif report.checked_only:
         occupied = {table: count for table, count in report.target_rows.items() if count}
         print(f"Check passed: {len(report.copied)} tables, {rows} rows would be copied. The PostgreSQL database "
               + (f"already holds catalog rows ({', '.join(f'{t}: {n}' for t, n in occupied.items())}), so the copy "
@@ -531,9 +527,84 @@ def _migrate_to_postgres(args: argparse.Namespace, settings: Settings) -> int:
                                 "kept." if report.replaced else ""))
         if report.purged_twitch_rows:
             print(f"Deleted {report.purged_twitch_rows} Twitch row(s) older than 24 hours (Twitch's caching limit).")
-    for table, count in report.skipped.items():
-        print(f"Not copied: {table} ({count} rows), {LOCAL_ONLY}.")
     print("The SQLite file was only read; it is unchanged.")
+    return 0
+
+
+# ---------------------------------------------------------------------- accounts (the hosted site's visitors)
+
+
+def _accounts_list(args: argparse.Namespace, settings: Settings) -> int:
+    """Every account with its sign-in, name and wishlist size, for deciding what to do with old GitHub accounts."""
+    conn = store.initialize(settings.database)
+    try:
+        rows = store.account_rows(conn)
+    finally:
+        conn.close()
+    if not rows:
+        print("No accounts.")
+        return 0
+    print(f"{'id':>5}  {'sign-in':<9} {'name':<40} {'created':<26} games")
+    for row in rows:
+        print(f"{row['id']:>5}  {row['provider']:<9} {row['display_name'][:40]:<40} {row['created_at']:<26} "
+              f"{row['games']}")
+    old = sum(1 for row in rows if row["provider"] != accounts.PROVIDER)
+    if old:
+        print(f"{old} account(s) from a sign-in this site no longer offers (such as github, from 0.20): nobody can "
+              "reach them now. `accounts copy-wishlist` copies one's games into an email account you have matched "
+              "to the same person yourself; nothing is matched by email address (DEPLOYMENT.md).")
+    return 0
+
+
+def _account_row(conn, account: int, role: str):
+    """The account with this id, or None after printing why the command stops."""
+    row = store.account_row(conn, account)
+    if row is None:
+        print(f"error: no account has the id {account} ({role}); see `python -m game_librarian accounts list`.",
+              file=sys.stderr)
+    return row
+
+
+def _accounts_copy_wishlist(args: argparse.Namespace, settings: Settings) -> int:
+    """Copy one account's saved games into another, adding only the games the target lacks (both stay)."""
+    if args.source == args.target:
+        print("error: --from and --to name the same account.", file=sys.stderr)
+        return 1
+    conn = store.initialize(settings.database)
+    try:
+        source, target = _account_row(conn, args.source, "--from"), _account_row(conn, args.target, "--to")
+        if source is None or target is None:
+            return 1
+        items = [(row["game_key"], row["name"]) for row in store.wishlist_items(conn, source["id"])]
+        counts = store.import_wishlist_items(conn, target["id"], items,
+                                             now=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                             limit=accounts.WISHLIST_LIMIT)
+    finally:
+        conn.close()
+    print(f"Copied the wishlist of account {source['id']} ({source['provider']}: {source['display_name']}) into "
+          f"account {target['id']} ({target['provider']}: {target['display_name']}): {counts['added']} game(s) "
+          f"added, {counts['already_saved']} already saved there, {counts['not_added_full']} not added (the "
+          f"wishlist is full at {accounts.WISHLIST_LIMIT}). Account {source['id']} is unchanged; `accounts delete` "
+          "removes it once you no longer need it.")
+    return 0
+
+
+def _accounts_delete(args: argparse.Namespace, settings: Settings) -> int:
+    """Delete one account and its wishlist, only with --yes."""
+    conn = store.initialize(settings.database)
+    try:
+        row = _account_row(conn, args.account, "--id")
+        if row is None:
+            return 1
+        games = len(store.wishlist_items(conn, row["id"]))
+        if not args.yes:
+            print(f"Account {row['id']} ({row['provider']}: {row['display_name']}) has {games} saved game(s). Nothing "
+                  "was deleted: run again with --yes to delete the account and its wishlist.")
+            return 1
+        store.delete_account(conn, row["id"])
+    finally:
+        conn.close()
+    print(f"Deleted account {row['id']} ({row['provider']}: {row['display_name']}) and its {games} saved game(s).")
     return 0
 
 
@@ -860,7 +931,7 @@ def build_parser() -> argparse.ArgumentParser:
     watched_parser = commands.add_parser("most-watched",
                                          help="Ask TwitchTracker's free API for the rank and average viewers of the "
                                               "game and series categories in Twitch's newest top list and the "
-                                              "reviewed ones (shown on this computer only).")
+                                              "reviewed ones.")
     watched_parser.add_argument("--force", action="store_true",
                                 help="Ask about every tracked category now, even those answered in the last 20 hours.")
     watched_parser.set_defaults(handler=_most_watched)
@@ -876,7 +947,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sales_parser = commands.add_parser("sales-estimates",
                                        help="Ask Gamalytic's free API for estimated Steam copies sold of the catalog "
-                                            "games (shown on this computer only).")
+                                            "games.")
     sales_parser.add_argument("--force", action="store_true",
                               help="Ask about every catalog game now, even those asked in the last 7 days.")
     sales_parser.set_defaults(handler=_sales_estimates)
@@ -918,7 +989,27 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_parser.add_argument("--replace", action="store_true",
                                 help="Empty the PostgreSQL catalog tables first, when they hold rows (accounts and "
                                      "wishlists are kept). Without it, a database with catalog rows is refused.")
+    migrate_parser.add_argument("--only", action="append", choices=tuple(migrate.ADDABLE_TABLES), metavar="TABLE",
+                                help="Only add this table's rows that PostgreSQL lacks, keeping every row it has: "
+                                     "for the tables version 0.20 did not copy, sales_estimates and "
+                                     "twitchtracker_summaries (repeatable).")
     migrate_parser.set_defaults(handler=_migrate_to_postgres)
+
+    accounts_parser = commands.add_parser("accounts", help="List the hosted site's accounts, copy one's wishlist into "
+                                                           "another, or delete one (GAME_LIBRARIAN_DATABASE_URL).")
+    account_actions = accounts_parser.add_subparsers(dest="accounts_command", required=True)
+    account_actions.add_parser("list", help="Every account: sign-in, name, created, saved games.").set_defaults(
+        handler=_accounts_list)
+    copy_parser = account_actions.add_parser("copy-wishlist",
+                                             help="Add the saved games of one account to another (both stay), for "
+                                                  "an old GitHub account whose owner you know.")
+    copy_parser.add_argument("--from", dest="source", type=int, required=True, help="The account to copy from.")
+    copy_parser.add_argument("--to", dest="target", type=int, required=True, help="The account to add the games to.")
+    copy_parser.set_defaults(handler=_accounts_copy_wishlist)
+    delete_parser = account_actions.add_parser("delete", help="Delete one account and its wishlist.")
+    delete_parser.add_argument("--id", dest="account", type=int, required=True, help="The account to delete.")
+    delete_parser.add_argument("--yes", action="store_true", help="Delete it (without: only show what would go).")
+    delete_parser.set_defaults(handler=_accounts_delete)
 
     _add_candidates_parser(commands)
     return parser

@@ -1,6 +1,3 @@
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-markers = [
-    "local_evaluation: uses Gamalytic's or TwitchTracker's figures, which only the local SQLite database keeps, so it runs on SQLite even when the suite runs on PostgreSQL",
-]

@@ -23,10 +23,8 @@ from tests.test_web import games, text_of  # noqa: F401
 from tests.test_web_discovery import iso, save_players, with_conn
 from tests.test_web_upcoming import NOW, TODAY, NoTwitch, configured
 
-pytestmark = pytest.mark.local_evaluation  # Gamalytic's estimates live in the local SQLite database only
 
 UTC = timezone.utc
-LOCAL = ("127.0.0.1", 50000)
 
 
 def catalog_db(settings, appids):
@@ -249,7 +247,7 @@ def test_the_chart_ranks_released_paid_games_and_names_every_game_it_leaves_out(
 # ---------------------------------------------------------------------- the dashboard
 
 
-def board(settings, client=LOCAL, headers=None) -> str:
+def board(settings, client=("testclient", 50000), headers=None) -> str:
     app = create_app(configured(settings), today=lambda: TODAY, now=lambda: NOW, twitch_client=NoTwitch())
     return TestClient(app, client=client).get("/dashboard", headers=headers or {}).text
 
@@ -276,7 +274,7 @@ def trending_with_estimates(settings):
     with_conn(settings, action)
 
 
-def test_the_chart_compares_trending_games_on_this_computer_only(games, settings):
+def test_the_chart_compares_the_trending_games(games, settings):
     trending_with_estimates(settings)
     html = board(settings)
     section = sales_section(html)
@@ -289,8 +287,8 @@ def test_the_chart_compares_trending_games_on_this_computer_only(games, settings
     assert "1 Game 14 2,500,000 98.4%" in table and "2 Game 12 40,000 1.6%" in table
     assert "Total (2 games, the middle of the doughnut) 2,540,000 100.0%" in table  # the slices reconcile
     words = text_of(section)
-    assert "Estimated Steam copies sold Steam only Local evaluation only Steam · cumulative estimates" in words
-    assert "not sales reported by publishers" in words and "Gamalytic’s terms do not allow sharing them" in words
+    assert "Estimated Steam copies sold Steam only Steam · cumulative estimates" in words
+    assert "Gamalytic’s model estimates, not sales reported by publishers." in words
     assert ("Gamalytic API (free), copiesSold · collected 9 Nov 2026, 12:30 UTC; Gamalytic’s data dated "
             "9 Nov 2026, 06:00 UTC. Left out: 1 free to play, 1 without a Gamalytic estimate.") in words
     assert "Game 10" not in words  # an estimate alone does not put a game in the chart: the Trending page does
@@ -303,37 +301,32 @@ def test_the_chart_compares_trending_games_on_this_computer_only(games, settings
     assert "the 5 largest estimates each have a slice" in notes and "the slices add up to it" in notes
     assert "This is not a list of Steam’s best sellers." in notes and "No change is shown" in notes
     assert "copies times today’s price would be wrong" in notes  # no revenue is calculated
-    assert "Do not publish it or screenshots of it." in notes
+    assert "Source: the free API of Gamalytic (opens in a new tab)." in notes
+    assert 'href="https://gamalytic.com/"' in html
+    for local_only in ("this computer", "Local evaluation", "Do not publish"):  # wording of 0.20's local view
+        assert local_only not in html
 
 
 @pytest.mark.parametrize("client, headers", [
     (("testclient", 50000), None),  # the test client's default: not an address
     (("192.168.1.20", 50000), None),  # another computer on the network
-    (("127.0.0.1", 50000), {"X-Forwarded-For": "203.0.113.9"}),  # a proxy on this computer passing a visitor on
-    (("127.0.0.1", 50000), {"Forwarded": "for=203.0.113.9"}),
+    (("127.0.0.1", 50000), {"X-Forwarded-For": "203.0.113.9"}),  # a visitor passed on by a proxy
+    (("::1", 50000), None),
 ])
-def test_no_other_browser_gets_the_estimates(games, settings, client, headers):
+def test_every_visitor_gets_the_same_estimates(games, settings, client, headers):
+    """Since 0.21 the chart is not kept to the computer that runs the site: every request gets the same page."""
     trending_with_estimates(settings)
     html = board(settings, client, headers)
-    assert 'id="sales"' not in html and "#sales" not in html
-    assert "data-sales-ring" not in html and "ring-slice" not in html and "estimated copies" not in text_of(html)  # no payload
-    assert "Gamalytic" not in html and "2,500,000" not in html and "2.5M" not in html
-    assert "No sales figures: Valve publishes no unit sales or revenue per game, so this page compares Steam " \
-           "reception." in text_of(html)  # the reception charts lead instead
-
-
-@pytest.mark.parametrize("address", ["::1", "::ffff:127.0.0.1", "127.0.0.2"])
-def test_every_loopback_address_is_this_computer(games, settings, address):
-    trending_with_estimates(settings)
-    assert 'id="sales"' in board(settings, (address, 50000))
+    assert 'id="sales"' in html and "data-sales-ring" in html and "2,500,000" in html
+    assert "No sales figures" not in text_of(html)
 
 
 def test_the_chart_explains_an_empty_an_old_or_a_failed_collection(games, settings):
     save_players(settings, {114: 4_000}, moment=NOW - timedelta(minutes=50))
-    words = text_of(sales_section(board(settings)))
-    assert ("No estimates collected yet. Run python -m game_librarian sales-estimates: Gamalytic’s free API, no key, "
-            "about 1 request for the 14 catalog games.") in words
-    assert "Left out" not in words and "not collected yet." in words
+    html = board(settings)  # before the first collection there is no chart: the reception charts lead, and say why
+    assert 'id="sales"' not in html and "Gamalytic" not in html.split('<footer class="site-footer">')[0]
+    assert ("No sales figures: Valve publishes no unit sales or revenue per game, so this page compares Steam "
+            "reception.") in text_of(html)
 
     def old_collection_then_a_failure(conn):
         store.save_sales_estimates(conn, {114: 2_500_000}, source="Gamalytic",
@@ -364,7 +357,7 @@ def test_the_chart_explains_an_empty_an_old_or_a_failed_collection(games, settin
 # ---------------------------------------------------------------------- the commands
 
 
-def test_the_command_and_sync_ask_only_when_due_and_say_where_the_estimates_show(games, settings, fake_steam,
+def test_the_command_and_sync_ask_only_when_due(games, settings, fake_steam,
                                                                                  fake_gamalytic, monkeypatch, capsys):
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
     monkeypatch.setattr(cli, "SteamClient", lambda api_key=None: fake_steam.client(api_key))
@@ -373,7 +366,7 @@ def test_the_command_and_sync_ask_only_when_due_and_say_where_the_estimates_show
     out = capsys.readouterr().out
     assert "asking about 14 of 14 catalog games, 100 per request (free API, no key)" in out
     assert '"estimates": 13' in out and '"no_estimate": 1' in out and '"requests": 1' in out
-    assert "Shown only to a browser on this computer" in out and "Gamalytic's terms do not allow sharing" in out
+    assert "this computer" not in out
     assert cli.main(["sales-estimates"]) == 0
     assert "nothing is due; each game is asked again after 7 days (--force asks now)" in capsys.readouterr().out
     assert len(fake_gamalytic.requests) == 1  # the second run asked nothing
@@ -382,8 +375,7 @@ def test_the_command_and_sync_ask_only_when_due_and_say_where_the_estimates_show
     assert cli.main(["sync", "--skip-sales"]) == 0
     assert "Sales estimates (Gamalytic): skipped (--skip-sales)." in capsys.readouterr().out
     assert cli.main(["status"]) == 0
-    assert ("Sales estimates (Gamalytic, shown on this computer only): 13 games with an estimate; 1 collection(s)"
-            in capsys.readouterr().out)
+    assert "Sales estimates (Gamalytic): 13 games with an estimate; 1 collection(s)" in capsys.readouterr().out
 
     fake_gamalytic.responses = [429]
     assert cli.main(["sales-estimates", "--force"]) == 1  # nothing was asked: the run failed, and says why

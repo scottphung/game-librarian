@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
-from .database import PostgresDatabase
+from .database import LOCAL_HOSTS, PostgresDatabase
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = PACKAGE_DIR.parent
@@ -36,10 +38,14 @@ TRAILER_BASE_URL = "https://video.akamai.steamstatic.com/store_trailers/"
 
 USER_AGENT = "GameLibrarian/0.1 (personal game discovery app)"
 
-# A sign-in provider as Container Apps' built-in authentication names it in /.auth/login/<name>: "github", "google",
-# "aad" (Microsoft), "facebook", "x", or the name given to a custom OpenID Connect provider.
-PROVIDER_NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+# An email address as accounts and the allow list take it: one @, no spaces, and a dot in the domain, such as
+# "ada@example.com". Supabase checks the address itself; this only turns away what cannot be one.
+EMAIL_ADDRESS = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 TRUE_WORDS = {"1", "true", "yes", "on"}
+# The setting of Container Apps' built-in authentication (GitHub sign-in) before 0.21; it is no longer read.
+RETIRED_SIGN_IN_SETTING = "GAME_LIBRARIAN_SIGN_IN_PROVIDERS"
+
+LOG = logging.getLogger("game_librarian.config")
 
 
 @dataclass(frozen=True)
@@ -64,14 +70,16 @@ class Settings:
     # Hidden from repr(), because a URL may hold a password (the documented way keeps it in PGPASSWORD instead).
     database_url: str | None = field(default=None, repr=False)
     # GAME_LIBRARIAN_HOSTED: this process serves other people from a container, whose files do not last. It needs
-    # the PostgreSQL database, never treats a request as coming from this computer, and its sync fails when a source
-    # it should refresh has no credentials, instead of skipping it quietly.
+    # the PostgreSQL database, sets its cookies for HTTPS only, and its sync fails when a source it should refresh has
+    # no credentials, instead of skipping it quietly.
     hosted: bool = False
-    # GAME_LIBRARIAN_SIGN_IN_PROVIDERS: the providers of Container Apps' built-in authentication. Only when it is set
-    # are the identity headers that the platform adds trusted (accounts.py); empty: nobody can sign in.
-    sign_in_providers: tuple[str, ...] = ()
-    # GAME_LIBRARIAN_ALLOWED_USERS: who may keep an account (names as the provider gives them, compared without case);
-    # empty: everyone who signs in.
+    # GAME_LIBRARIAN_SUPABASE_URL and GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY: the Supabase project whose Auth keeps
+    # the email-and-password accounts (supabase_auth.py). Both set: accounts are offered; neither: the wishlist stays
+    # in the browser. The publishable key is meant to be public, but it is only ever used by the server.
+    supabase_url: str | None = None
+    supabase_publishable_key: str | None = field(default=None, repr=False)
+    # GAME_LIBRARIAN_ALLOWED_USERS: the email addresses that may keep an account (compared without case); empty:
+    # everyone who confirms an address.
     allowed_users: frozenset[str] = frozenset()
 
     @property
@@ -85,11 +93,9 @@ class Settings:
         return PostgresDatabase(self.database_url) if self.database_url else self.db_path
 
     @property
-    def local_evaluation(self) -> bool:
-        """Whether Gamalytic's and TwitchTracker's figures may be collected and shown: their terms allow no sharing,
-        so they are kept only in the local SQLite database and shown only to a browser on the computer that runs the
-        site. Never with the PostgreSQL database, and never in a hosted process."""
-        return not self.database_url and not self.hosted
+    def accounts_enabled(self) -> bool:
+        """Email-and-password accounts are offered: the Supabase project is configured."""
+        return bool(self.supabase_url and self.supabase_publishable_key)
 
 
 def steam_country_code(value: str | None) -> str:
@@ -107,14 +113,39 @@ def _words(value: str | None) -> list[str]:
     return [item.strip() for item in (value or "").split(",") if item.strip()]
 
 
-def sign_in_providers(value: str | None) -> tuple[str, ...]:
-    """The configured sign-in providers, lowercase and without repeats; SettingsError for a malformed name."""
-    providers = tuple(dict.fromkeys(item.lower() for item in _words(value)))
-    for provider in providers:
-        if not PROVIDER_NAME.fullmatch(provider):
-            raise SettingsError(f"GAME_LIBRARIAN_SIGN_IN_PROVIDERS: {provider!r} is not a provider name such as "
-                                "github, google or aad.")
-    return providers
+def supabase_project_url(value: str | None) -> str | None:
+    """The Supabase project URL without a trailing slash, such as "https://abcdefghijklmnop.supabase.co"; None when
+    empty. SettingsError for anything else: it must be https (plain http only for a Supabase on this computer) and name
+    the project only, without a path such as /auth/v1."""
+    text = (value or "").strip().rstrip("/")
+    if not text:
+        return None
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname
+        parts.port  # noqa: B018 (raises ValueError for a port that is not a number)
+    except ValueError:
+        parts, host = None, None
+    local = host in LOCAL_HOSTS
+    if (parts is None or not host or parts.scheme not in ("https", "http") or (parts.scheme == "http" and not local)
+            or parts.path or parts.query or parts.fragment or parts.username or parts.password):
+        raise SettingsError("GAME_LIBRARIAN_SUPABASE_URL must be the project URL that Supabase shows, such as "
+                            "https://abcdefghijklmnop.supabase.co: https, and no path (no /auth/v1).")
+    return text
+
+
+def allowed_emails(value: str | None) -> frozenset[str]:
+    """The allow list's email addresses, compared without case. SettingsError for an entry that is not an email
+    address, such as a GitHub user name from before 0.21: accounts are now found by their confirmed address, so such an
+    entry would let nobody in, silently."""
+    emails = set()
+    for item in _words(value):
+        if not EMAIL_ADDRESS.fullmatch(item):
+            raise SettingsError(f"GAME_LIBRARIAN_ALLOWED_USERS: {item!r} is not an email address. Since version "
+                                "0.21 the allow list holds the email addresses of the accounts that may keep a "
+                                "wishlist (sign-in is by email and password); remove other entries.")
+        emails.add(item.casefold())
+    return frozenset(emails)
 
 
 def load_settings() -> Settings:
@@ -135,13 +166,20 @@ def load_settings() -> Settings:
         contact=(values.get("GAME_LIBRARIAN_CONTACT") or "").strip() or None,
         database_url=(values.get("GAME_LIBRARIAN_DATABASE_URL") or "").strip() or None,
         hosted=(values.get("GAME_LIBRARIAN_HOSTED") or "").strip().lower() in TRUE_WORDS,
-        sign_in_providers=sign_in_providers(values.get("GAME_LIBRARIAN_SIGN_IN_PROVIDERS")),
-        allowed_users=frozenset(name.casefold() for name in _words(values.get("GAME_LIBRARIAN_ALLOWED_USERS"))),
+        supabase_url=supabase_project_url(values.get("GAME_LIBRARIAN_SUPABASE_URL")),
+        supabase_publishable_key=(values.get("GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY") or "").strip() or None,
+        allowed_users=allowed_emails(values.get("GAME_LIBRARIAN_ALLOWED_USERS")),
     )
     if settings.hosted and not settings.database_url:
         raise SettingsError("GAME_LIBRARIAN_HOSTED is set, so the catalog must be the PostgreSQL database: set "
                             "GAME_LIBRARIAN_DATABASE_URL (and PGPASSWORD). A SQLite file inside a container is lost "
                             "when the container restarts.")
+    if bool(settings.supabase_url) != bool(settings.supabase_publishable_key):
+        raise SettingsError("Email accounts need both GAME_LIBRARIAN_SUPABASE_URL and "
+                            "GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY (or neither, for no accounts).")
     if settings.database_url:
         settings.database.parameters()  # a malformed URL or a weak sslmode stops here, with a DatabaseConfigError
+    if (values.get(RETIRED_SIGN_IN_SETTING) or "").strip():
+        LOG.warning("%s is set but no longer used: sign-in is by email and password through Supabase since 0.21 "
+                    "(GAME_LIBRARIAN_SUPABASE_URL). Remove it.", RETIRED_SIGN_IN_SETTING)
     return settings

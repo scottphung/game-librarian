@@ -6,6 +6,7 @@ database (see conftest.py); the whole suite then also runs on PostgreSQL.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import pytest
@@ -97,13 +98,14 @@ def test_no_password_is_ever_shown_or_repeated_in_an_error():
     assert secret not in repr(settings) and isinstance(settings.database, PostgresDatabase)
 
 
-def test_settings_read_the_hosting_variables_and_refuse_what_cannot_work(monkeypatch, tmp_path):
+def test_settings_read_the_hosting_variables_and_refuse_what_cannot_work(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr("game_librarian.config.PROJECT_DIR", tmp_path)  # no .env file
     for name in ("GAME_LIBRARIAN_DATABASE_URL", "GAME_LIBRARIAN_HOSTED", "GAME_LIBRARIAN_SIGN_IN_PROVIDERS",
-                 "GAME_LIBRARIAN_ALLOWED_USERS", "PGSSLMODE"):
+                 "GAME_LIBRARIAN_ALLOWED_USERS", "GAME_LIBRARIAN_SUPABASE_URL",
+                 "GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY", "PGSSLMODE"):
         monkeypatch.delenv(name, raising=False)
     local = load_settings()
-    assert local.database == local.db_path and local.local_evaluation and not local.hosted
+    assert local.database == local.db_path and not local.hosted and not local.accounts_enabled
     monkeypatch.setenv("GAME_LIBRARIAN_HOSTED", "1")
     with pytest.raises(SettingsError, match="GAME_LIBRARIAN_DATABASE_URL"):
         load_settings()  # a SQLite file in a container would be lost at the next restart
@@ -111,14 +113,32 @@ def test_settings_read_the_hosting_variables_and_refuse_what_cannot_work(monkeyp
     with pytest.raises(DatabaseConfigError):
         load_settings()
     monkeypatch.setenv("GAME_LIBRARIAN_DATABASE_URL", REMOTE)
-    monkeypatch.setenv("GAME_LIBRARIAN_SIGN_IN_PROVIDERS", "GitHub, google,github")
-    monkeypatch.setenv("GAME_LIBRARIAN_ALLOWED_USERS", "Octocat, github:Someone@Example.com")
+    monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_URL", "https://abcdefghijklmnop.supabase.co/")
+    monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_made-up-for-tests")
+    monkeypatch.setenv("GAME_LIBRARIAN_ALLOWED_USERS", "Ada@Example.com, grace@example.org")
     hosted = load_settings()
-    assert hosted.hosted and not hosted.local_evaluation and isinstance(hosted.database, PostgresDatabase)
-    assert hosted.sign_in_providers == ("github", "google")
-    assert hosted.allowed_users == frozenset({"octocat", "github:someone@example.com"})
-    monkeypatch.setenv("GAME_LIBRARIAN_SIGN_IN_PROVIDERS", "github, not a name")
-    with pytest.raises(SettingsError, match="not a provider name"):
+    assert hosted.hosted and isinstance(hosted.database, PostgresDatabase) and hosted.accounts_enabled
+    assert hosted.supabase_url == "https://abcdefghijklmnop.supabase.co"  # the trailing slash is dropped
+    assert hosted.allowed_users == frozenset({"ada@example.com", "grace@example.org"})
+    assert "sb_publishable" not in repr(hosted)
+    monkeypatch.setenv("GAME_LIBRARIAN_SIGN_IN_PROVIDERS", "github")  # 0.20's setting: read no more, and said so
+    with caplog.at_level(logging.WARNING, logger="game_librarian.config"):
+        assert load_settings().accounts_enabled
+    assert "GAME_LIBRARIAN_SIGN_IN_PROVIDERS is set but no longer used" in caplog.text
+    for bad_url in ("http://abcdefghijklmnop.supabase.co", "https://abcdefghijklmnop.supabase.co/auth/v1",
+                    "abcdefghijklmnop.supabase.co", "https://user:pw@abcdefghijklmnop.supabase.co",
+                    "https://abcdefghijklmnop.supabase.co:port"):
+        monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_URL", bad_url)
+        with pytest.raises(SettingsError, match="GAME_LIBRARIAN_SUPABASE_URL"):
+            load_settings()
+    monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_URL", "http://127.0.0.1:54321")  # a Supabase on this computer
+    assert load_settings().supabase_url == "http://127.0.0.1:54321"
+    monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY", "")
+    with pytest.raises(SettingsError, match="both"):
+        load_settings()
+    monkeypatch.setenv("GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_made-up-for-tests")
+    monkeypatch.setenv("GAME_LIBRARIAN_ALLOWED_USERS", "octocat, github:someone")  # 0.20's user names
+    with pytest.raises(SettingsError, match="'octocat' is not an email address"):
         load_settings()
 
 

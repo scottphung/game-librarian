@@ -1,4 +1,4 @@
-"""Most watched on Twitch by TwitchTracker's average viewers and rank, from its free API, for local evaluation only.
+"""Most watched on Twitch by TwitchTracker's average viewers and rank, from its free API.
 
 TwitchTracker (https://twitchtracker.com/) is an independent site; its footer says it "is not affiliated with Twitch or
 Amazon". Its API page (https://twitchtracker.com/api, read 2026-11-21) lists two addresses and nothing else, one of them
@@ -24,9 +24,10 @@ Terms (read 2026-11-21; not legal advice): TwitchTracker publishes no terms of s
 address shows the page of a Twitch channel named "terms"). Its footer says "Scraping is prohibited. Use this basic
 API." Its robots.txt disallows /api/* for every user agent. Nothing it publishes allows or forbids storing or showing
 its figures. So this module uses the API only, never the website's pages; sends at most REQUESTS_PER_DAY requests in
-any 24 hours, MIN_INTERVAL_SECONDS apart; asks about a category again only after REFRESH_AFTER; stops at the first
-HTTP 403 or 429 and never works around one; and the site shows the figures only to a browser on the computer that runs
-it (web.is_local_request), naming and linking TwitchTracker. The Power BI export leaves them out.
+any 24 hours, MIN_INTERVAL_SECONDS apart; asks about a category again only after REFRESH_AFTER; and stops at the first
+HTTP 403 or 429 and never works around one. Since 0.21 the website shows the figures to every visitor, naming and
+linking TwitchTracker, and the hosted daily sync asks for them, by the site owner's decision of 2026-11-22 (robots.txt,
+re-read that day, still disallows /api/*; README.md, "Data sources and terms"). The Power BI export leaves them out.
 
 Which categories (update_selection): the game and series categories of Twitch's newest Get Top Games list (its first
 100 categories, upcoming.twitch_games), plus every game and series category reviewed in curated/twitch_categories.csv,

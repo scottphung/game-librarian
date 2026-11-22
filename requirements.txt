@@ -8,4 +8,6 @@ python-dotenv==1.2.2  # load project .env settings
 psycopg[binary]==3.3.8  # PostgreSQL driver for the hosted site's database (bundles libpq; 2026-11-04)
 psycopg-pool==3.3.3     # the website's pool of PostgreSQL connections
 certifi==2026.10.23     # Mozilla's root certificates: check Azure PostgreSQL's TLS certificate (also used by httpx)
+PyJWT==2.15.1           # check Supabase's signed access tokens (email accounts; 2026-11-22, Python 3.11.9)
+cryptography==50.0.2    # the ES256 and RS256 signature checks behind PyJWT (also installs cffi)
 pytest==9.2.0      # tests

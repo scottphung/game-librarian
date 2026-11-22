@@ -54,7 +54,8 @@ def test_the_footer_keeps_every_credit_in_short_blocks_on_every_page(settings, g
         html = site.get(path).text
         footer = re.search(r'<footer class="site-footer">.*?</footer>', html, re.S).group(0)
         blocks = re.findall(r"<p>\s*<strong class=\"footer-label\">([^<]+)</strong>(.*?)</p>", footer, re.S)
-        assert [label for label, _ in blocks] == ["Steam", "As provided", "IGDB and Twitch", "Curated", "Trademarks"]
+        assert [label for label, _ in blocks] == ["Steam", "As provided", "IGDB and Twitch", "Estimates", "Curated",
+                                                  "Trademarks"]
         text = text_of(footer)
         for phrase in ("Store details, descriptions, images, trailer clips and tags come from the Steam store",
                        "Prices differ by region and change often: Steam shows the final price.",
@@ -62,6 +63,10 @@ def test_the_footer_keeps_every_credit_in_short_blocks_on_every_page(settings, g
                        "Descriptions, images and trailers belong to their publishers.",
                        "Review excerpts were written by Steam users and may be shortened here.",
                        "come from IGDB.com", "come from Twitch and are kept for 24 hours at most.",
+                       "Estimated Steam copies sold are model estimates by Gamalytic, not figures from publishers or "
+                       "Valve.",
+                       "come from TwitchTracker, which is not affiliated with Twitch.",
+                       "Each is shown with the time it was collected.",
                        "Award results and AAA / AA / Indie labels are curated by hand, and each links to its source.",
                        "Critic scores and Data Story facts come from Wikipedia (CC BY-SA 4.0)",
                        "Game Librarian is a personal project. It is not affiliated with, endorsed by or sponsored by "
@@ -69,6 +74,7 @@ def test_the_footer_keeps_every_credit_in_short_blocks_on_every_page(settings, g
                        "Corporation in the U.S. and/or other countries."):
             assert phrase in text, (path, phrase)
         assert 'href="https://www.igdb.com/"' in footer and 'href="https://www.twitch.tv/"' in footer
+        assert 'href="https://gamalytic.com/"' in footer and 'href="https://twitchtracker.com/"' in footer
 
 
 def test_the_footer_spans_the_page_in_small_readable_type():

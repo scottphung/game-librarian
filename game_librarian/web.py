@@ -18,36 +18,34 @@ Pages, in the order of the site navigation:
 - Trending (/trending): three parts, each list ranked by one named signal. Upcoming & Anticipated and
   Trending now & recently released cover every platform (IGDB PopScore and Twitch's top games, saved by
   the upcoming refresh; upcoming.py, twitch.py). Steam activity covers the Steam catalog only (stored Steam
-  snapshots, trending.py). Every game shows where it is out and where it is only announced (IGDB). For a
-  browser on the computer that runs the site (is_local_request), Most watched on Twitch becomes "Most watched
-  among tracked Twitch categories": the tracked game and series categories in TwitchTracker's rank order, with
-  its rank and average viewers (_most_watched, twitchtracker.py), instead of Twitch's order: TwitchTracker
-  publishes no terms that allow sharing its figures.
+  snapshots, trending.py). Every game shows where it is out and where it is only announced (IGDB). Once
+  TwitchTracker has given figures, Most watched on Twitch becomes "Most watched among tracked Twitch categories":
+  the tracked game and series categories in TwitchTracker's rank order, with its rank and average viewers
+  (_tracked_list, twitchtracker.py); until then it keeps Twitch's own order.
 - Data Stories (/stories): hand-checked series timelines (stories.py).
 - Dashboard (/dashboard...): Trending games first (/dashboard): three report pages about the Trending page's
   games, from the stored lists and snapshots (?report=: Sales & reception, Upcoming releases and Momentum; see
   _sales_report, _upcoming_report and _momentum_report); then the Power BI report's measures as HTML
   (dashboard.py): Player reception (/dashboard/reception), Awards and About the data. Old addresses redirect (see
-  dashboard_home). Sales & reception's Estimated Steam copies sold chart (Gamalytic) is sent only to a browser on
-  the computer that runs the site (is_local_request): Gamalytic's terms forbid sharing its data.
+  dashboard_home). Sales & reception leads with Gamalytic's estimated Steam copies sold once they are collected.
 - Wishlist (/wishlist), behind the header's star icon: in the browser (static/wishlist.js), or, for a visitor signed
-  in with Container Apps' built-in authentication (accounts.py; /account), in their account on the server, read and
+  in with an email account (accounts.py, supabase_auth.py; /account), in their account on the server, read and
   changed only through /api/wishlist for that account. A list saved in the browser is imported only when its owner
   asks, and the browser's copy stays until they remove it.
+- Accounts (/account, /account/..., /auth/confirm), behind the header's person icon when Supabase is configured:
+  sign in, create an account, confirm the email address, forgotten password, new password and sign out. The forms
+  post to this server, which alone talks to Supabase Auth.
 - Daily Trivia: the header's lightbulb opens a popup on any page. Its content comes from /trivia/panel: today's
   quiz from curated/trivia.json, the same for everyone that quiz day (UTC; trivia.py), and the facts open for
   browsing. The visitor's answers and scores stay in the browser (static/trivia.js); the server never sees them.
 
-Gamalytic's and TwitchTracker's figures need both a request from this computer (is_local_request) and a site that
-may hold them at all (Settings.local_evaluation: the local SQLite database, not a hosted process). /healthz and
-/readyz answer Container Apps' probes. Every response carries security headers (_security_headers).
+/healthz and /readyz answer Container Apps' probes. Every response carries security headers (_security_headers).
 
 Run with `python -m game_librarian serve` (uses the `create_app` factory).
 """
 
 from __future__ import annotations
 
-import ipaddress
 import json
 import logging
 import math
@@ -57,7 +55,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -66,7 +64,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from . import __version__, accounts, catalog, critics, dashboard, gamalytic, list_comparison, pricing, ranking, \
-    related, stories, store, trending, trivia, twitch, twitchtracker, upcoming
+    related, stories, store, supabase_auth, trending, trivia, twitch, twitchtracker, upcoming
 from .database import close_pools
 from .catalog import ALL_VIEW, COLLECTION_KEYS, DEFAULT_VIEW, LABEL_ORDER, LEGACY_NO_LABEL, NO_VERIFIED_LABEL, \
     SORT_ALIASES, SORT_OPTIONS, SORTS, STEAM_REVIEW_LABELS, TOP_VIEW, VIEWS, CatalogGame
@@ -177,28 +175,7 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# Headers that a proxy or tunnel adds when it passes on another computer's request.
-FORWARDING_HEADERS = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "cf-connecting-ip")
-
-
-def is_local_request(request: Request) -> bool:
-    """True when the browser runs on the computer that runs the site: a loopback client address, and no proxy headers.
-
-    Only such a request gets Gamalytic's sales estimates, because Gamalytic's terms forbid making its data accessible
-    to anyone else (gamalytic.py), and TwitchTracker's figures, because TwitchTracker publishes no terms that allow
-    sharing them (twitchtracker.py). A request passed on by a proxy is never local, even when the proxy itself runs
-    here.
-    """
-    try:
-        address = ipaddress.ip_address(request.client.host if request.client else "")
-    except ValueError:  # no address, or a name instead of one (the test client's "testclient")
-        return False
-    if getattr(address, "ipv4_mapped", None):  # ::ffff:127.0.0.1 on a dual-stack socket
-        address = address.ipv4_mapped
-    return address.is_loopback and not any(name in request.headers for name in FORWARDING_HEADERS)
-
-
-# ---------------------------------------------------------------------- security headers, the JSON API
+# ---------------------------------------------------------------------- security headers, the JSON API, forms
 
 LOG = logging.getLogger("game_librarian.web")
 # What a page may load: its own scripts only (none inline), its own styles plus style attributes, images and video
@@ -214,6 +191,18 @@ SECURITY_HEADERS = {
 }
 HSTS = "max-age=31536000"  # the hosted site answers only over HTTPS; browsers then never try plain HTTP
 MAX_JSON_BODY = 256 * 1024  # a wishlist import of WISHLIST_LIMIT games is well under this
+MAX_FORM_BODY = 16 * 1024  # an account form (an email address, two passwords, a token) is well under this
+MAX_FORM_FIELDS = 12
+# What /account says after a redirect (?notice=): fixed sentences, so nothing that a link supplies is shown.
+ACCOUNT_NOTICES = {
+    "confirmed": "Your email address is confirmed, and you are signed in.",
+    "signed_up": "Your account is ready, and you are signed in.",
+    "password_changed": "Your new password is saved.",
+    "signed_out": "You are signed out.",
+    "deleted": "Your account and saved games on this site were deleted, and you are signed out. Your sign-in (email "
+               "address and password) is kept by Supabase, the site’s sign-in service; ask the site’s owner to remove "
+               "it too.",
+}
 
 
 def _security_headers(response: Response, *, hosted: bool, personal: bool) -> None:
@@ -246,17 +235,40 @@ def _same_site_json(request: Request) -> JSONResponse | None:
     return None
 
 
-async def _read_json(request: Request):
-    """The request's JSON body, or None when it is not JSON or is larger than MAX_JSON_BODY."""
+async def _read_body(request: Request, limit: int) -> bytes | None:
+    """The request body, or None when it is larger than `limit` bytes (reading stops there)."""
     body = bytearray()
     async for chunk in request.stream():
         body.extend(chunk)
-        if len(body) > MAX_JSON_BODY:
+        if len(body) > limit:
             return None
+    return bytes(body)
+
+
+async def _read_json(request: Request):
+    """The request's JSON body, or None when it is not JSON or is larger than MAX_JSON_BODY."""
+    body = await _read_body(request, MAX_JSON_BODY)
     try:
-        return json.loads(body)
+        return json.loads(body) if body is not None else None
     except ValueError:
         return None
+
+
+async def _read_form(request: Request) -> dict[str, str] | None:
+    """A posted HTML form (application/x-www-form-urlencoded) as {field: first value}, or None when the request is
+    another kind, larger than MAX_FORM_BODY, or has more than MAX_FORM_FIELDS fields. The account forms have no file
+    fields, so the standard library reads them."""
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/x-www-form-urlencoded":
+        return None
+    body = await _read_body(request, MAX_FORM_BODY)
+    if body is None:
+        return None
+    try:
+        fields = parse_qs(body.decode("utf-8"), keep_blank_values=True, strict_parsing=False,
+                          max_num_fields=MAX_FORM_FIELDS)
+    except (UnicodeDecodeError, ValueError):  # not UTF-8, or too many fields
+        return None
+    return {name: values[0] for name, values in fields.items()}
 
 
 # ---------------------------------------------------------------------- catalog query
@@ -925,8 +937,7 @@ def _most_watched(conn, decisions: dict, today: date, moment: datetime) -> dict:
     """Most watched among tracked Twitch categories, by TwitchTracker's figures (twitchtracker.py), from stored data
     only (no network).
 
-    Call it only for a local request (is_local_request): TwitchTracker publishes no terms that allow showing its
-    figures to anyone else. The entries are twitchtracker.ranking's (games and reviewed series categories, with the
+    The entries are twitchtracker.ranking's (games and reviewed series categories, with the
     reviewer `decisions` of curated/twitch_categories.csv applied at once), in TwitchTracker's rank order. The page
     numbers them 1, 2, 3... as places in this list; each keeps TwitchTracker's own category rank as returned
     ("tracker_rank"), which counts Just Chatting and every category not tracked too, so a place is never called a
@@ -971,6 +982,14 @@ def _most_watched(conn, decisions: dict, today: date, moment: datetime) -> dict:
         "refresh_hours": int(twitchtracker.REFRESH_AFTER.total_seconds() // 3600),
         "api_url": twitchtracker.API_DOCS_URL,
     }
+
+
+def _tracked_list(conn, decisions: dict, today: date, moment: datetime) -> dict | None:
+    """The Most watched list by TwitchTracker's figures (_most_watched), or None while it lists no category: before
+    the first TwitchTracker refresh, or when none of its answers had figures. The Trending page then shows Twitch's
+    own order instead of an empty list, and the dashboard uses Twitch's list too, so the two pages always agree."""
+    watched = _most_watched(conn, decisions, today, moment)
+    return watched if watched["games"] else None
 
 
 def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datetime) -> dict:
@@ -1043,9 +1062,9 @@ def _steam_activity(conn, curated: CuratedData, current_day: date, moment: datet
 def _trending_catalog_games(lists: dict, steam: dict) -> dict[int, list[str]]:
     """The catalog games shown on the Trending page, each once in page order, with the titles of its lists there.
 
-    `lists` and `steam` are the answers of _trending_lists and _steam_activity: the games each list shows. On this
-    computer, Most watched is TwitchTracker's ranking when `lists` holds it ("watched", _most_watched). A series
-    category stands for no single game, so it never names a catalog game here.
+    `lists` and `steam` are the answers of _trending_lists and _steam_activity: the games each list shows. Most
+    watched is TwitchTracker's ranking when `lists` holds it ("watched", _tracked_list). A series category stands
+    for no single game, so it never names a catalog game here.
     """
     sections = [(data["signal"].title, data["games"]) for data in lists["upcoming"]]
     if lists["recent"]:
@@ -1071,11 +1090,12 @@ def _trending_catalog_games(lists: dict, steam: dict) -> dict[int, list[str]]:
     return games
 
 
-def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict:
-    """The Estimated Steam copies sold chart of the Trending page's catalog games, from stored estimates (no network).
-
-    Call it only for a local request (is_local_request): Gamalytic's terms forbid showing its data to anyone else.
-    """
+def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict | None:
+    """The Estimated Steam copies sold chart of the Trending page's catalog games, from stored estimates (no network),
+    or None before Gamalytic was ever asked: the page then compares Steam reception only, and says why."""
+    summary = store.sales_estimate_summary(conn)
+    if not summary["collections"]:
+        return None
     listed = _trending_catalog_games(lists, steam)
     appids = list(listed)
     rows = store.game_rows(conn, appids)
@@ -1091,7 +1111,7 @@ def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict:
                                 moment),
         "trending_games": len(games),
         "named": dashboard.RING_NAMED,  # the largest estimates with a named slice each
-        "summary": store.sales_estimate_summary(conn),
+        "summary": summary,
         "last_run": runs[0] if runs else None,
         "last_problem": store.run_problem(runs[0]) if runs else None,
         "catalog_games": catalog_games,
@@ -1099,7 +1119,6 @@ def _sales_view(conn, lists: dict, steam: dict, moment: datetime) -> dict:
         "max_age_days": gamalytic.MAX_AGE.days,
         "stale_days": gamalytic.STALE_AFTER.days,
         "about_url": gamalytic.ABOUT_URL,
-        "terms_url": gamalytic.TERMS_URL,
     }
 
 
@@ -1164,18 +1183,16 @@ def _chart_status(game: CatalogGame, drawn: set[int], start: date) -> str:
     return "before_window" if game.released_on < start else "below_threshold"
 
 
-def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetime, view: str | None, *,
-                  local: bool) -> dict:
-    """Sales & reception: Gamalytic's estimated Steam copies sold only for a local request (is_local_request), then
-    the strong-reception scatterplot in `view`. Each doughnut game says whether it is on that chart."""
+def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetime, view: str | None) -> dict:
+    """Sales & reception: Gamalytic's estimated Steam copies sold (once collected), then the strong-reception
+    scatterplot in `view`. Each doughnut game says whether it is on that chart."""
     steam = _steam_activity(conn, curated, current_day, moment)
     reception = _reception_view(conn, steam, view)
-    sales = None
-    if local:  # the doughnut's games are those of this computer's Trending page, TwitchTracker's ranking included
-        decisions = curated.twitch_category_decisions
-        lists = {**_trending_lists(conn, current_day, moment, decisions),
-                 "watched": _most_watched(conn, decisions, current_day, moment)}
-        sales = _sales_view(conn, lists, steam, moment)
+    # The doughnut's games are those of the Trending page, its Most watched list included.
+    decisions = curated.twitch_category_decisions
+    lists = {**_trending_lists(conn, current_day, moment, decisions),
+             "watched": _tracked_list(conn, decisions, current_day, moment)}
+    sales = _sales_view(conn, lists, steam, moment)
     if sales:
         drawn = {point["appid"] for point in reception["chart"]["points"]} if reception["chart"] else set()
         named = [part for part in sales["ring"]["parts"] if part["kind"] == "game"] if sales["ring"] else []
@@ -1185,15 +1202,15 @@ def _sales_report(conn, curated: CuratedData, current_day: date, moment: datetim
 
 
 def _upcoming_report(conn, current_day: date, moment: datetime, window: str | None, group: str | None, *,
-                     configured: bool, decisions: dict, local: bool) -> dict:
+                     configured: bool, decisions: dict) -> dict:
     """Upcoming releases: the release radar narrowed to `window` (a dashboard.RADAR_WINDOWS key; any other value shows
     every tracked game), beside the comparison of IGDB's and Steam's captures (list_comparison) with `group` open (a
     list_comparison group key; by default the games seen only on IGDB). Both share one list of distinct games. For its
     panel, each game that the Most watched list names by the same IGDB id carries its entry there: TwitchTracker's rank
-    and average viewers for a `local` request ("watched", _most_watched), else its place in Twitch's newest list
-    ("twitch"). A series category has no IGDB id, so it is never any game's entry."""
+    and average viewers when TwitchTracker has given figures ("watched", _tracked_list), else its place in Twitch's
+    newest list ("twitch"). A series category has no IGDB id, so it is never any game's entry."""
     lists = _trending_lists(conn, current_day, moment, decisions)
-    tracker = _most_watched(conn, decisions, current_day, moment) if local else None
+    tracker = _tracked_list(conn, decisions, current_day, moment)
     runs = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
     windows = [key for key, _, _ in dashboard.RADAR_WINDOWS]
     radar = dashboard.release_radar(lists["upcoming"], current_day)
@@ -1271,11 +1288,15 @@ def _momentum_report(conn, curated: CuratedData, current_day: date, moment: date
 
 def create_app(settings: Settings | None = None, *, today: Callable[[], date] = date.today,
                now: Callable[[], datetime] = _utc_now,
-               twitch_client: Callable[[], twitch.TwitchClient] | None = None) -> FastAPI:
+               twitch_client: Callable[[], twitch.TwitchClient] | None = None,
+               supabase: supabase_auth.SupabaseAuth | None = None) -> FastAPI:
     """Build the web app. Tests pass their own Settings, a fixed `today` and a fixed `now`; `serve` uses the clock.
 
     `twitch_client` makes the Twitch client for "Watch it live" (tests pass a fake). By default it is
     built from the IGDB credentials when they are set; the client and its token live in this process only.
+    `supabase` is the Supabase Auth client of the email accounts (tests pass one backed by an in-memory Supabase); by
+    default it is built from GAME_LIBRARIAN_SUPABASE_URL and GAME_LIBRARIAN_SUPABASE_PUBLISHABLE_KEY when both are set,
+    and without them the site has no accounts.
 
     `today` gives the last day of the five-year ranking window (and of the "Recent releases"
     window): by default the calendar date of the computer that runs the site, read again on
@@ -1286,11 +1307,20 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     # An empty catalog is valid (the page explains how to sync); a PostgreSQL database must have its tables.
     store.initialize(settings.database).close()
     curated_cache = CuratedCache(settings.curated_dir)
+    auth = supabase or (supabase_auth.SupabaseAuth(settings.supabase_url, settings.supabase_publishable_key)
+                        if settings.accounts_enabled else None)
+    secure_cookies = settings.hosted  # the hosted site is HTTPS only: Secure cookies with the __Host- prefix
+    access_cookie = accounts.cookie_name(accounts.ACCESS_COOKIE, secure_cookies)
+    refresh_cookie = accounts.cookie_name(accounts.REFRESH_COOKIE, secure_cookies)
+    csrf_cookie = accounts.cookie_name(accounts.CSRF_COOKIE, secure_cookies)
+    attempts = accounts.AttemptLimiter()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
         close_pools()  # this process's PostgreSQL connections, at shutdown
+        if auth is not None:
+            auth.close()
 
     app = FastAPI(title="Game Librarian", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
@@ -1301,36 +1331,44 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         tenths=dashboard.format_tenths,
     )
     templates.env.globals["app_version"] = __version__  # cache-busts the stylesheet and script after an upgrade
-    templates.env.globals.update(sign_in_url=accounts.sign_in_url, sign_out_url=accounts.SIGN_OUT_URL,
-                                 provider_label=accounts.provider_label, wishlist_limit=accounts.WISHLIST_LIMIT)
-    # Set when a /.auth/ request reaches the app: built-in authentication is not in front of it, so the identity
-    # headers could come from anyone and are no longer trusted by this process.
-    sign_in_missing = threading.Event()
+    templates.env.globals.update(wishlist_limit=accounts.WISHLIST_LIMIT,
+                                 min_password_length=accounts.MIN_PASSWORD_LENGTH,
+                                 sign_in_unavailable=accounts.UNAVAILABLE)
 
     def open_db():
         """A connection to the catalog for one page request (a pooled one for PostgreSQL)."""
         return store.connect(settings.database, pooled=True)
 
-    def local_view(request: Request) -> bool:
-        """Whether this request may get Gamalytic's and TwitchTracker's figures: it comes from this computer, and
-        this site may hold them at all (the local SQLite database, not a hosted process)."""
-        return settings.local_evaluation and is_local_request(request)
-
-    def account_state(request: Request) -> accounts.AccountState:
-        """Who is signed in, read from the platform's headers only while built-in authentication is trusted."""
-        enabled = bool(settings.sign_in_providers) and not sign_in_missing.is_set()
-        identity = accounts.identity_from_headers(request.headers, settings.sign_in_providers) if enabled else None
-        allowed = identity is None or accounts.is_allowed(identity, settings.allowed_users)
-        return accounts.AccountState(enabled, identity, allowed, settings.sign_in_providers)
+    def session_check(request: Request) -> accounts.SessionCheck:
+        """What the request's session cookies say (accounts.check_session). It may ask Supabase (its signing keys, a
+        new session), so it runs in a worker thread."""
+        return accounts.check_session(auth, request.cookies.get(access_cookie), request.cookies.get(refresh_cookie))
 
     @app.middleware("http")
     async def accounts_and_security_headers(request: Request, call_next):
-        """Give each request its account state (request.state.account, which templates read) and each response the
-        security headers."""
-        state = request.state.account = account_state(request)
+        """Give each request its account state (request.state.account, which templates read; request.state.session,
+        whose renewed or ended session the response's cookies then follow) and each response the security headers.
+
+        A route that signs someone in or out writes the cookies itself and sets request.state.cookies_written."""
+        path = request.url.path
+        check = accounts.NO_SESSION
+        if auth is not None and not path.startswith("/static/") and path not in ("/healthz", "/readyz") and (
+                access_cookie in request.cookies or refresh_cookie in request.cookies):
+            check = await run_in_threadpool(session_check, request)
+        identity = check.identity
+        request.state.session = check
+        request.state.account = accounts.AccountState(
+            auth is not None, identity,
+            allowed=identity is None or accounts.is_allowed(identity, settings.allowed_users),
+            unavailable=check.unavailable)
         response = await call_next(request)
-        _security_headers(response, hosted=settings.hosted,
-                          personal=state.identity is not None and not request.url.path.startswith("/static/"))
+        if not getattr(request.state, "cookies_written", False):
+            if check.renewed:
+                accounts.set_session_cookies(response, check.renewed, secure=secure_cookies)
+            elif check.ended:
+                accounts.clear_session_cookies(response, secure=secure_cookies)
+        personal = identity is not None or path.startswith(("/account", "/auth/"))
+        _security_headers(response, hosted=settings.hosted, personal=personal and not path.startswith("/static/"))
         return response
     # Today's Daily Trivia day (UTC) in the header, so the lightbulb's "finished" badge follows the server's quiz day.
     templates.env.globals["trivia_day"] = lambda: trivia.quiz_day(now()).isoformat()
@@ -1502,9 +1540,6 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         if report not in dashboard.TRENDING_REPORTS:
             report = dashboard.DEFAULT_REPORT
         current_day, moment = today(), now()
-        # Gamalytic's estimates and TwitchTracker's figures go only to a browser on this computer; for anyone else
-        # they do not exist in the page.
-        local = local_view(request)
         curated = curated_cache.get()
         conn = open_db()
         try:
@@ -1513,11 +1548,11 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             if report == "upcoming":
                 view = _upcoming_report(conn, current_day, moment, params.get("window"), params.get("group"),
                                         configured=settings.igdb_configured,
-                                        decisions=curated.twitch_category_decisions, local=local)
+                                        decisions=curated.twitch_category_decisions)
             elif report == "momentum":
                 view = _momentum_report(conn, curated, current_day, moment, params.get("player"))
             else:
-                view = _sales_report(conn, curated, current_day, moment, params.get("view"), local=local)
+                view = _sales_report(conn, curated, current_day, moment, params.get("view"))
             last_sync = store.last_successful_sync(conn)
         finally:
             conn.close()
@@ -1534,8 +1569,8 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
     def trending_page(request: Request):
         """Separate, labeled signals from stored data, in three parts: upcoming games and games that are out or
         watched now (all platforms, from IGDB and Twitch), then Steam activity (Steam only). No network calls.
-        A browser on this computer gets Most watched among tracked Twitch categories, by TwitchTracker's figures
-        ("watched"); for anyone else they do not exist in the page, and Most watched on Twitch keeps Twitch's order."""
+        Most watched is TwitchTracker's ranking of the tracked Twitch categories ("watched", _tracked_list) once it has
+        figures, else Twitch's own order."""
         current_day, moment = today(), now()
         curated = curated_cache.get()
         conn = open_db()
@@ -1546,8 +1581,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             counts = store.catalog_counts(conn)
             sync_status = _sync_status(conn)
             lists = _trending_lists(conn, current_day, moment, curated.twitch_category_decisions)
-            watched = (_most_watched(conn, curated.twitch_category_decisions, current_day, moment)
-                       if local_view(request) else None)
+            watched = _tracked_list(conn, curated.twitch_category_decisions, current_day, moment)
             igdb_run = store.recent_source_runs(conn, upcoming.SOURCE, limit=1)
         finally:
             conn.close()
@@ -1581,7 +1615,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
             "recent_window": (current_day - upcoming.RECENT_WINDOW, current_day),
             "recent_days": upcoming.RECENT_WINDOW.days,
             "twitch_top": lists["twitch"],
-            "watched": watched,  # None unless the browser runs on this computer
+            "watched": watched,  # None until TwitchTracker has given figures: Twitch's own list is shown then
         }
         return templates.TemplateResponse(request, "trending.html", context)
 
@@ -1643,48 +1677,324 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         """The wishlist: app.js fills it from the browser, or from /api/wishlist for a signed-in visitor."""
         return templates.TemplateResponse(request, "wishlist.html", {"active": "wishlist"})
 
-    # ------------------------------------------------------------------ accounts (accounts.py) and their wishlists
+    # ------------------------------------------------------------------ email accounts (accounts.py, supabase_auth.py)
+    #
+    # Every form below posts to this server, which alone talks to Supabase. Each page carries this browser's form token
+    # (account_response); each post is checked for it (read_account_form), counted per visitor (attempts), and answered
+    # with words of this site, never Supabase's. A route that signs someone in or out writes the cookies itself.
+
+    def account_response(request: Request, template: str, context: dict, status_code: int = 200):
+        """An account page with this browser's form token in its forms (a new token, and its cookie, if it has none)."""
+        token = request.cookies.get(csrf_cookie)
+        fresh = not (token and accounts.CSRF_TOKEN.fullmatch(token))
+        if fresh:
+            token = accounts.new_csrf_token()
+        response = templates.TemplateResponse(request, template, {"active": "account", "csrf_token": token, **context},
+                                              status_code=status_code)
+        if fresh:
+            accounts.set_csrf_cookie(response, token, secure=secure_cookies)
+        return response
+
+    def no_accounts(request: Request):
+        """Every account address without a Supabase project: this site has no accounts (404)."""
+        return templates.TemplateResponse(request, "account.html", {"active": "account"}, status_code=404)
+
+    async def read_account_form(request: Request) -> tuple[dict[str, str], int, str | None]:
+        """The posted fields, or {} with the status and sentence that refuse them: a form that cannot be read, or one
+        without this browser's form token, such as a post from another site's page."""
+        form = await _read_form(request)
+        if form is None:
+            return {}, 400, "The form could not be read. Reload the page, then try again."
+        if not accounts.form_from_this_site(request.headers.get("sec-fetch-site"), request.cookies.get(csrf_cookie),
+                                            form.get("csrf_token")):
+            return {}, 403, "This form has expired, or it did not come from this site. Reload the page, then try again."
+        return form, 200, None
+
+    def visitor(request: Request) -> str:
+        return accounts.client_address(request, hosted=settings.hosted)
+
+    def current_access_token(request: Request) -> str | None:
+        """The verified access token of this request's session: the renewed one when the middleware just got it."""
+        check: accounts.SessionCheck = request.state.session
+        if check.identity is None:
+            return None
+        return check.renewed.access_token if check.renewed else request.cookies.get(access_cookie)
+
+    def write_session(request: Request, response: Response, session: supabase_auth.Session) -> None:
+        accounts.set_session_cookies(response, session, secure=secure_cookies)
+        request.state.cookies_written = True
+
+    def end_session(request: Request, response: Response) -> None:
+        accounts.clear_session_cookies(response, secure=secure_cookies)
+        request.state.cookies_written = True
+
+    async def signed_in(request: Request, session: supabase_auth.Session, target: str) -> Response | None:
+        """The redirect to `target` that keeps a new session in the cookies, once its access token passes the same
+        check as every later request; None (logged) when it does not, so no page claims a sign-in that fails next."""
+        try:
+            user = await run_in_threadpool(auth.verify_access_token, session.access_token)
+        except supabase_auth.AuthError as exc:
+            refused("checking a new session", exc)
+            return None
+        if user is None:
+            LOG.error("Supabase Auth: a new session's access token could not be verified with the project's published "
+                      "signing keys; the project must sign with an asymmetric key (ES256 or RS256; DEPLOYMENT.md).")
+            return None
+        response = RedirectResponse(target, status_code=303)
+        write_session(request, response, session)
+        return response
+
+    def refused(action: str, exc: supabase_auth.AuthError) -> tuple[int, str]:
+        """The status and sentence for a refused Supabase request, logging what the site's owner must know about
+        (Supabase not answering, email not set up) by its error code only, never with an email address."""
+        if exc.service_problem or exc.code in ("email_address_not_authorized", "signup_disabled",
+                                               "email_provider_disabled"):
+            LOG.warning("Supabase Auth: %s failed with %s (HTTP %s).", action, exc.code, exc.status)
+        return accounts.auth_problem(exc)
+
+    def typed_email(form: dict[str, str]) -> str:
+        """The address as typed, to fill the form in again after a problem (shortened; the page escapes it)."""
+        return (form.get("email") or "").strip()[:accounts.MAX_EMAIL_LENGTH]
 
     @app.get("/account", response_class=HTMLResponse)
     def account_page(request: Request):
-        """Sign in or out, and what an account keeps. Without GAME_LIBRARIAN_SIGN_IN_PROVIDERS there are no accounts
-        (404). ?next= is the page to come back to after signing in (a path on this site only)."""
+        """Sign in; or, signed in, the account: its wishlist's size, a new password, sign out, and deleting its data.
+        ?next= is where signing in goes back to (a path on this site; the wishlist by default) and ?notice= picks one
+        of ACCOUNT_NOTICES."""
+        if auth is None:
+            return no_accounts(request)
         state: accounts.AccountState = request.state.account
         count = None
         if state.signed_in:
             conn = open_db()
             try:
-                row = store.find_account(conn, state.identity.provider, state.identity.subject)
+                row = store.find_account(conn, accounts.PROVIDER, state.identity.user_id)
                 count = len(store.wishlist_items(conn, row["id"])) if row else 0
             finally:
                 conn.close()
-        context = {"active": "account", "count": count, "unavailable": False,
+        context = {"count": count, "notice": ACCOUNT_NOTICES.get(request.query_params.get("notice") or ""),
                    "return_to": accounts.safe_return_path(request.query_params.get("next") or "/wishlist")}
-        return templates.TemplateResponse(request, "account.html", context, status_code=200 if state.enabled else 404)
+        return account_response(request, "account.html", context)
 
-    @app.get("/.auth/{rest:path}", response_class=HTMLResponse)
-    def sign_in_unavailable(request: Request, rest: str):
-        """Reached only when built-in authentication is not in front of the app: with it, the platform answers every
-        /.auth/ address itself. From then on this process trusts no identity header, so a misconfigured site cannot
-        be used to sign in as someone else by sending their headers."""
-        if settings.sign_in_providers and not sign_in_missing.is_set():
-            sign_in_missing.set()
-            LOG.error("A /.auth/ request reached the app, so Container Apps' built-in authentication is not in front "
-                      "of it; identity headers are ignored until the app restarts. Turn on Authentication for the "
-                      "container app, or remove GAME_LIBRARIAN_SIGN_IN_PROVIDERS.")
-        request.state.account = account_state(request)
-        context = {"active": "account", "count": None, "unavailable": True, "return_to": "/"}
-        return templates.TemplateResponse(request, "account.html", context, status_code=503)
+    @app.post("/account/sign-in", response_class=HTMLResponse)
+    async def account_sign_in(request: Request):
+        """Sign in with an email address and a password, then go to the form's `next` (a path on this site)."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        email, password = accounts.clean_email(form.get("email")), form.get("password", "")
+        context = {"email": typed_email(form), "return_to": accounts.safe_return_path(form.get("next") or "/wishlist")}
+        if not problem and (email is None or not password):
+            status, problem = 400, "Enter your email address and your password."
+        if not problem and not attempts.allow("sign_in", visitor(request), email):
+            status, problem = 429, accounts.TOO_MANY
+        if problem:
+            return account_response(request, "account.html", {**context, "error": problem}, status)
+        try:
+            session = await run_in_threadpool(auth.sign_in, email, password)
+        except supabase_auth.AuthError as exc:
+            status, message = refused("sign-in", exc)
+            return account_response(request, "account.html", {
+                **context, "error": message, "unconfirmed": exc.code == "email_not_confirmed"}, status)
+        return (await signed_in(request, session, context["return_to"])
+                or account_response(request, "account.html", {**context, "error": accounts.UNAVAILABLE}, 503))
+
+    @app.get("/account/sign-up", response_class=HTMLResponse)
+    def account_sign_up_page(request: Request):
+        """The form that creates an account: an email address and a password, typed twice."""
+        if auth is None:
+            return no_accounts(request)
+        return account_response(request, "account_flow.html", {"page": "sign_up"})
+
+    @app.post("/account/sign-up", response_class=HTMLResponse)
+    async def account_sign_up(request: Request):
+        """Create an account; Supabase emails the link that confirms the address. The answer is the same whether or not
+        the address already has an account, so this page never tells anyone who has one."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        email, password = accounts.clean_email(form.get("email")), form.get("password", "")
+        context = {"page": "sign_up", "email": typed_email(form)}
+        if not problem and email is None:
+            status, problem = 400, "Enter a valid email address."
+        if not problem:
+            weak = accounts.password_problem(password, form.get("password_confirm", ""))
+            status, problem = (400, weak) if weak else (status, None)
+        if not problem and not attempts.allow("sign_up", visitor(request), email):
+            status, problem = 429, accounts.TOO_MANY
+        if problem:
+            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
+        session = None
+        try:
+            session = await run_in_threadpool(auth.sign_up, email, password)
+        except supabase_auth.AuthError as exc:
+            if exc.code not in ("user_already_exists", "email_exists"):  # an existing account: the same answer
+                status, message = refused("sign-up", exc)
+                return account_response(request, "account_flow.html", {**context, "error": message}, status)
+        if session is not None:  # the Supabase project does not ask for confirmation: signed in at once
+            return (await signed_in(request, session, "/account?notice=signed_up")
+                    or account_response(request, "account_flow.html", {**context, "error": accounts.UNAVAILABLE}, 503))
+        return account_response(request, "account_flow.html", {"page": "sent", "sent": "confirmation", "email": email})
+
+    @app.post("/account/resend", response_class=HTMLResponse)
+    async def account_resend(request: Request):
+        """Send a new confirmation link to an account that waits for its address to be confirmed (the same answer
+        whether or not one does)."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        email = accounts.clean_email(form.get("email"))
+        context = {"email": typed_email(form), "unconfirmed": True, "return_to": "/wishlist"}
+        if not problem and email is None:
+            status, problem = 400, "Enter the email address of your account."
+        if not problem and not attempts.allow("email_link", visitor(request), email):
+            status, problem = 429, accounts.TOO_MANY
+        if not problem:
+            try:
+                await run_in_threadpool(auth.resend_confirmation, email)
+            except supabase_auth.AuthError as exc:
+                status, problem = refused("resend", exc)
+        if problem:
+            return account_response(request, "account.html", {**context, "error": problem}, status)
+        return account_response(request, "account_flow.html", {"page": "sent", "sent": "resend", "email": email})
+
+    @app.get("/account/forgot-password", response_class=HTMLResponse)
+    def account_forgot_page(request: Request):
+        """The form that asks for a password-reset link."""
+        if auth is None:
+            return no_accounts(request)
+        return account_response(request, "account_flow.html", {"page": "forgot"})
+
+    @app.post("/account/forgot-password", response_class=HTMLResponse)
+    async def account_forgot(request: Request):
+        """Email a link to choose a new password (the same answer whether or not the address has an account)."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        email = accounts.clean_email(form.get("email"))
+        context = {"page": "forgot", "email": typed_email(form)}
+        if not problem and email is None:
+            status, problem = 400, "Enter the email address of your account."
+        if not problem and not attempts.allow("email_link", visitor(request), email):
+            status, problem = 429, accounts.TOO_MANY
+        if not problem:
+            try:
+                await run_in_threadpool(auth.send_password_reset, email)
+            except supabase_auth.AuthError as exc:
+                status, problem = refused("password reset", exc)
+        if problem:
+            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
+        return account_response(request, "account_flow.html", {"page": "sent", "sent": "reset", "email": email})
+
+    @app.get("/auth/confirm", response_class=HTMLResponse)
+    def auth_confirm_page(request: Request):
+        """Where the emails' links lead (?token_hash=...&type=email or recovery; DEPLOYMENT.md, "Email templates").
+
+        The page only shows a button: the link is used when its owner presses it (a POST), because some email
+        services open every link of a message in advance, and that would use up a one-time link before its owner
+        sees it (Supabase's guide, "Email prefetching"). A link that Supabase sends back with an error says so."""
+        if auth is None:
+            return no_accounts(request)
+        params = request.query_params
+        token_hash, link_type = params.get("token_hash") or "", params.get("type") or ""
+        if (params.get("error") or params.get("error_code") or not accounts.TOKEN_HASH.fullmatch(token_hash)
+                or link_type not in supabase_auth.EMAIL_LINK_TYPES):
+            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
+        return account_response(request, "account_flow.html",
+                                {"page": "confirm", "token_hash": token_hash, "link_type": link_type})
+
+    @app.post("/auth/confirm", response_class=HTMLResponse)
+    async def auth_confirm(request: Request):
+        """Use an email link (Supabase checks its token_hash) and sign its owner in: a confirmed address goes to the
+        account page, a password reset to the form that sets the new password."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        token_hash, link_type = form.get("token_hash") or "", form.get("type") or ""
+        context = {"page": "confirm", "token_hash": token_hash, "link_type": link_type}
+        if not problem and (not accounts.TOKEN_HASH.fullmatch(token_hash)
+                            or link_type not in supabase_auth.EMAIL_LINK_TYPES):
+            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
+        if not problem and not attempts.allow("confirm", visitor(request)):
+            status, problem = 429, accounts.TOO_MANY
+        if problem:
+            return account_response(request, "account_flow.html", {**context, "error": problem}, status)
+        try:
+            session = await run_in_threadpool(auth.verify_email_link, token_hash, link_type)
+        except supabase_auth.AuthError as exc:
+            status, message = refused("email link", exc)
+            if exc.service_problem or status == 429:  # Supabase did not decide: the link may still work, so it stays
+                return account_response(request, "account_flow.html", {**context, "error": message}, status)
+            return account_response(request, "account_flow.html", {"page": "link_problem"}, 400)
+        target = "/account/password?notice=recovery" if link_type == "recovery" else "/account?notice=confirmed"
+        return (await signed_in(request, session, target)
+                or account_response(request, "account_flow.html", {"page": "link_used", "link_type": link_type}, 503))
+
+    @app.get("/account/password", response_class=HTMLResponse)
+    def account_password_page(request: Request):
+        """The form that sets a new password, for a signed-in person (after a password-reset link, or by choice)."""
+        if auth is None:
+            return no_accounts(request)
+        if request.state.account.identity is None:
+            return RedirectResponse("/account?next=/account/password", status_code=303)
+        return account_response(request, "account_flow.html",
+                                {"page": "password", "recovery": request.query_params.get("notice") == "recovery"})
+
+    @app.post("/account/password", response_class=HTMLResponse)
+    async def account_password(request: Request):
+        """Save the signed-in person's new password at Supabase."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        token = current_access_token(request)
+        if not problem and token is None:
+            return RedirectResponse("/account?next=/account/password", status_code=303)
+        password = form.get("password", "")
+        if not problem:
+            weak = accounts.password_problem(password, form.get("password_confirm", ""))
+            status, problem = (400, weak) if weak else (status, None)
+        if not problem and not attempts.allow("password", visitor(request)):
+            status, problem = 429, accounts.TOO_MANY
+        if not problem:
+            try:
+                await run_in_threadpool(auth.set_password, token, password)
+            except supabase_auth.AuthError as exc:
+                status, problem = refused("new password", exc)
+        if problem:
+            return account_response(request, "account_flow.html", {"page": "password", "error": problem}, status)
+        return RedirectResponse("/account?notice=password_changed", status_code=303)
+
+    @app.post("/account/sign-out")
+    async def account_sign_out(request: Request):
+        """End the session at Supabase and delete this browser's session cookies."""
+        if auth is None:
+            return no_accounts(request)
+        form, status, problem = await read_account_form(request)
+        if problem:
+            return account_response(request, "account.html", {"error": problem, "return_to": "/wishlist"}, status)
+        token = current_access_token(request)
+        if token:
+            try:
+                await run_in_threadpool(auth.sign_out, token)
+            except supabase_auth.AuthError as exc:  # the cookies are deleted all the same
+                refused("sign-out", exc)
+        response = RedirectResponse("/account?notice=signed_out", status_code=303)
+        end_session(request, response)
+        return response
+
+    # ------------------------------------------------------------------ the signed-in person's wishlist (JSON API)
 
     def api_identity(request: Request) -> tuple[accounts.Identity | None, JSONResponse | None]:
         """The signed-in person who may keep an account, or the error that answers the API request."""
         state: accounts.AccountState = request.state.account
         if not state.enabled:
             return None, _json_error(404, "sign_in_off", "This site has no accounts; the wishlist stays in the browser.")
+        if state.identity is None and state.unavailable:
+            return None, _json_error(503, "sign_in_unavailable", accounts.UNAVAILABLE)
         if state.identity is None:
             return None, _json_error(401, "sign_in_required", "Sign in to keep your wishlist in your account.")
         if not state.allowed:
-            return None, _json_error(403, "not_allowed", "This account is not on this site's list of allowed "
+            return None, _json_error(403, "not_allowed", "This email address is not on this site's list of allowed "
                                                          "accounts. The wishlist stays in this browser.")
         return state.identity, None
 
@@ -1692,7 +2002,7 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         """`work(conn, account_id)` for the person's own account (made at first use); nothing else is reachable."""
         conn = open_db()
         try:
-            account = store.account_id(conn, identity.provider, identity.subject, identity.name,
+            account = store.account_id(conn, accounts.PROVIDER, identity.user_id, identity.email,
                                        now=now().isoformat(timespec="seconds"))
             return work(conn, account)
         finally:
@@ -1768,7 +2078,8 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
 
     @app.post("/api/account/delete")
     async def account_delete(request: Request):
-        """Delete the signed-in person's account and wishlist on this site (their sign-in provider is not affected)."""
+        """Delete the signed-in person's account and wishlist on this site, then sign them out. Their sign-in at
+        Supabase stays: removing it needs Supabase's secret key, which this site does not hold (DEPLOYMENT.md)."""
         identity, error = api_identity(request)
         error = error or _same_site_json(request)
         if error:
@@ -1777,14 +2088,22 @@ def create_app(settings: Settings | None = None, *, today: Callable[[], date] = 
         def work():
             conn = open_db()
             try:
-                row = store.find_account(conn, identity.provider, identity.subject)
+                row = store.find_account(conn, accounts.PROVIDER, identity.user_id)
                 if row is not None:
                     store.delete_account(conn, row["id"])
             finally:
                 conn.close()
 
         await run_in_threadpool(work)
-        return api_answer({"deleted": True})
+        token = current_access_token(request)
+        if token:
+            try:
+                await run_in_threadpool(auth.sign_out, token)
+            except supabase_auth.AuthError as exc:  # the cookies are deleted all the same
+                refused("sign-out after deleting an account", exc)
+        response = api_answer({"deleted": True})
+        end_session(request, response)
+        return response
 
     # ------------------------------------------------------------------ health probes (Container Apps)
 

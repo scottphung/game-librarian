@@ -1,7 +1,7 @@
-"""Shared test helpers: an in-memory fake Steam, Gamalytic and TwitchTracker, synthetic payloads and a controllable
-clock.
+"""Shared test helpers: an in-memory fake Steam, Gamalytic, TwitchTracker and Supabase Auth, synthetic payloads and a
+controllable clock.
 
-All names, texts and numbers here are made up for tests. They are never shown by the app.
+All names, texts, addresses, passwords and numbers here are made up for tests. They are never shown by the app.
 """
 
 from __future__ import annotations
@@ -9,16 +9,21 @@ from __future__ import annotations
 import csv
 import json
 import os
+import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+import jwt
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from game_librarian.config import Settings
 from game_librarian.gamalytic import GamalyticClient
 from game_librarian.steam import SteamClient
+from game_librarian.supabase_auth import SupabaseAuth
 from game_librarian.twitchtracker import TwitchTrackerClient
 
 TAG_NAMES = {19: "Action", 122: "RPG", 492: "Indie", 1695: "Open World", 3871: "2D", 1667: "Horror",
@@ -328,6 +333,241 @@ class FakeTwitchTracker:
                                    sleep=lambda seconds: None)
 
 
+_SIGNING_KEYS: dict[str, object] = {}  # one key per algorithm for the whole run: making an RSA key takes a moment
+
+
+def new_signing_key(algorithm: str):
+    """A new private key for ES256 (P-256) or RS256 (RSA 2048), as Supabase's asymmetric signing keys are."""
+    if algorithm == "ES256":
+        return ec.generate_private_key(ec.SECP256R1())
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def signing_key(algorithm: str):
+    if algorithm not in _SIGNING_KEYS:
+        _SIGNING_KEYS[algorithm] = new_signing_key(algorithm)
+    return _SIGNING_KEYS[algorithm]
+
+
+def public_jwk(private_key, algorithm: str, key_id: str) -> dict:
+    """The JWKS entry of a key, shaped like Supabase's (kid, alg, use, key_ops and the public numbers)."""
+    tool = jwt.algorithms.ECAlgorithm if algorithm == "ES256" else jwt.algorithms.RSAAlgorithm
+    return {**tool.to_jwk(private_key.public_key(), as_dict=True), "kid": key_id, "alg": algorithm, "use": "sig",
+            "key_ops": ["verify"]}
+
+
+class FakeSupabase:
+    """Supabase Auth's REST API in memory, for the email accounts (supabase_auth.py, accounts.py).
+
+    It answers like Supabase's openapi.yaml and error codes (read 2026-11-22): sign-up with email confirmation (an
+    address that already has a confirmed account gets the same answer as a new one, and no email), password sign-in
+    (refused until the address is confirmed), refresh tokens that work once, email links by token_hash that work once,
+    password resets, new passwords, sign-out and the published keys. Its access tokens are real JWTs signed with a key
+    made for the test run (RS256 unless `algorithm` says ES256), so the site checks them as it checks Supabase's.
+
+    `sent` lists the emails it would send ({"type": "email" or "recovery", "email", "token_hash"}). `down` makes every
+    request fail to connect; `responses` are consumed one per request before normal answers (an HTTP status, or
+    "timeout"); `publish_keys` False publishes no key, like a project still on a shared HS256 secret; `team_only`
+    refuses to email, like Supabase's built-in email service for an address outside the project's team. `clock` is the
+    site's clock for its cache of the keys. Every request is kept in `requests`.
+    """
+
+    URL = "https://test-project.supabase.co"
+    KEY = "sb_publishable_made-up-for-tests"
+    MIN_PASSWORD = 6  # Supabase's default minimum length
+
+    def __init__(self, algorithm: str = "RS256") -> None:
+        self.algorithm = algorithm
+        self.key_id = f"test-key-{algorithm.lower()}"
+        self.private_key = signing_key(algorithm)
+        self.users: dict[str, dict] = {}  # by email address, compared without case
+        self.sessions: dict[str, str] = {}  # session id -> user id, while signed in
+        self.refresh_tokens: dict[str, str] = {}  # refresh token -> session id; each works once
+        self.sent: list[dict] = []
+        self.used_links: set[str] = set()
+        self.signed_out: list[str] = []  # the session ids ended by /logout
+        self.requests: list[httpx.Request] = []
+        self.responses: list[int | str] = []
+        self.down = False
+        self.publish_keys = True
+        self.team_only = False
+        self.token_lifetime = 3600
+        self.clock = 0.0
+
+    def client(self) -> SupabaseAuth:
+        return SupabaseAuth(self.URL, self.KEY, http=httpx.Client(transport=httpx.MockTransport(self.handler)),
+                            clock=lambda: self.clock)
+
+    # ------------------------------------------------------------------ helpers for tests
+
+    def access_token(self, user_id: str, email: str, session_id: str, *, lifetime: int | None = None,
+                     private_key=None, algorithm: str | None = None, key_id: str | None = None, **claims) -> str:
+        """A signed access token like Supabase's; the keyword arguments forge other ones (another key, claims)."""
+        now = int(time.time())
+        payload = {"iss": f"{self.URL}/auth/v1", "aud": "authenticated", "sub": user_id, "email": email,
+                   "role": "authenticated", "iat": now - 5,
+                   "exp": now + (self.token_lifetime if lifetime is None else lifetime),
+                   "session_id": session_id, "is_anonymous": False, "aal": "aal1", "phone": "",
+                   "app_metadata": {"provider": "email", "providers": ["email"]}, "user_metadata": {}}
+        payload.update(claims)
+        return jwt.encode(payload, private_key or self.private_key, algorithm=algorithm or self.algorithm,
+                          headers={"kid": key_id or self.key_id})
+
+    def link(self, email: str, kind: str = "email") -> str:
+        """The token_hash of the newest email of `kind` sent to `email`."""
+        return [mail for mail in self.sent if mail["email"] == email and mail["type"] == kind][-1]["token_hash"]
+
+    def user(self, email: str) -> dict:
+        return self.users[email.casefold()]
+
+    def count(self, method: str, path: str) -> int:
+        return sum(1 for request in self.requests if request.method == method and request.url.path == path)
+
+    # ------------------------------------------------------------------ the API
+
+    @staticmethod
+    def _error(status: int, code: str, **extra) -> httpx.Response:
+        return httpx.Response(status, json={"code": status, "error_code": code, "msg": f"{code} (test)", **extra})
+
+    def _user_json(self, user: dict) -> dict:
+        return {"id": user["id"], "aud": "authenticated", "role": "authenticated", "email": user["email"],
+                "email_confirmed_at": "2026-11-22T10:00:00Z" if user["confirmed"] else None}
+
+    def _session(self, user: dict, session_id: str | None = None) -> dict:
+        session_id = session_id or str(uuid.uuid4())
+        self.sessions[session_id] = user["id"]
+        refresh = secrets.token_urlsafe(16)
+        self.refresh_tokens[refresh] = session_id
+        return {"access_token": self.access_token(user["id"], user["email"], session_id), "token_type": "bearer",
+                "expires_in": self.token_lifetime, "expires_at": int(time.time()) + self.token_lifetime,
+                "refresh_token": refresh, "user": self._user_json(user)}
+
+    def _send(self, kind: str, email: str) -> httpx.Response | None:
+        if self.team_only:
+            return self._error(400, "email_address_not_authorized")
+        self.sent.append({"type": kind, "email": email, "token_hash": secrets.token_hex(28)})
+        return None
+
+    def _bearer(self, request: httpx.Request) -> tuple[dict, str] | None:
+        """The user and session of the request's access token, when it is valid and its session still exists."""
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        try:
+            claims = jwt.decode(token, self.private_key.public_key(), algorithms=[self.algorithm],
+                                audience="authenticated")
+        except jwt.InvalidTokenError:
+            return None
+        user = next((user for user in self.users.values() if user["id"] == claims["sub"]), None)
+        if user is None or claims.get("session_id") not in self.sessions:
+            return None
+        return user, claims["session_id"]
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.down:
+            raise httpx.ConnectError("Supabase is unreachable (test)", request=request)
+        if self.responses:
+            planned = self.responses.pop(0)
+            if planned == "timeout":
+                raise httpx.ReadTimeout("Supabase did not answer (test)", request=request)
+            if planned != 200:
+                return httpx.Response(planned, json={"code": planned, "msg": f"planned answer {planned} (test)"})
+        if request.headers.get("apikey") != self.KEY:
+            return httpx.Response(401, json={"message": "Invalid API key"})
+        path, method = request.url.path.removeprefix("/auth/v1"), request.method
+        body = json.loads(request.content) if request.content else {}
+        if method == "GET" and path == "/.well-known/jwks.json":
+            keys = [public_jwk(self.private_key, self.algorithm, self.key_id)] if self.publish_keys else []
+            return httpx.Response(200, json={"keys": keys})
+        if method == "POST" and path == "/signup":
+            return self._signup(body)
+        if method == "POST" and path == "/token":
+            return self._token(request.url.params.get("grant_type"), body)
+        if method == "POST" and path == "/verify":
+            return self._verify(body)
+        if method == "POST" and path in ("/recover", "/resend"):
+            user = self.users.get(str(body.get("email", "")).casefold())
+            wanted = user is not None and (path == "/recover" or not user["confirmed"])
+            refused = self._send("recovery" if path == "/recover" else "email", user["email"]) if wanted else None
+            return refused or httpx.Response(200, json={})
+        if method == "PUT" and path == "/user":
+            return self._update_user(request, body)
+        if method == "POST" and path == "/logout":
+            found = self._bearer(request)
+            if found is None:
+                return self._error(401, "bad_jwt")
+            session_id = found[1]
+            self.sessions.pop(session_id, None)
+            self.refresh_tokens = {token: sid for token, sid in self.refresh_tokens.items() if sid != session_id}
+            self.signed_out.append(session_id)
+            return httpx.Response(204)
+        return self._error(404, "not_found")
+
+    def _password_problem(self, password: str) -> httpx.Response | None:
+        if len(password) < self.MIN_PASSWORD:
+            return self._error(422, "weak_password", weak_password={"reasons": ["length"]})
+        if not any(character.isdigit() for character in password):  # this fake project asks for a digit
+            return self._error(422, "weak_password", weak_password={"reasons": ["characters"]})
+        return None
+
+    def _signup(self, body: dict) -> httpx.Response:
+        email, password = str(body.get("email", "")).strip(), str(body.get("password", ""))
+        problem = self._password_problem(password)
+        if problem:
+            return problem
+        user = self.users.get(email.casefold())
+        if user is not None and user["confirmed"]:  # the same answer as for a new address, and no email
+            return httpx.Response(200, json={"id": str(uuid.uuid4()), "email": email, "identities": []})
+        if user is None:
+            user = self.users[email.casefold()] = {"id": str(uuid.uuid4()), "email": email, "password": password,
+                                                   "confirmed": False}
+        return self._send("email", user["email"]) or httpx.Response(200, json=self._user_json(user))
+
+    def _token(self, grant: str | None, body: dict) -> httpx.Response:
+        if grant == "password":
+            user = self.users.get(str(body.get("email", "")).casefold())
+            if user is None or user["password"] != body.get("password"):
+                return self._error(400, "invalid_credentials")
+            if not user["confirmed"]:
+                return self._error(400, "email_not_confirmed")
+            return httpx.Response(200, json=self._session(user))
+        if grant == "refresh_token":
+            session_id = self.refresh_tokens.pop(str(body.get("refresh_token")), None)
+            if session_id is None or session_id not in self.sessions:
+                return self._error(400, "refresh_token_not_found", error="invalid_grant")
+            user = next(user for user in self.users.values() if user["id"] == self.sessions[session_id])
+            return httpx.Response(200, json=self._session(user, session_id))
+        return self._error(400, "validation_failed")
+
+    def _verify(self, body: dict) -> httpx.Response:
+        kind = "recovery" if body.get("type") == "recovery" else "email"
+        mail = next((mail for mail in self.sent if mail["token_hash"] == body.get("token_hash")
+                     and mail["type"] == kind), None)
+        if mail is None or mail["token_hash"] in self.used_links:
+            return self._error(403, "otp_expired")
+        self.used_links.add(mail["token_hash"])
+        user = self.user(mail["email"])
+        user["confirmed"] = True  # a password-reset link proves the address too
+        return httpx.Response(200, json=self._session(user))
+
+    def _update_user(self, request: httpx.Request, body: dict) -> httpx.Response:
+        found = self._bearer(request)
+        if found is None:
+            return self._error(401, "bad_jwt")
+        user, password = found[0], str(body.get("password", ""))
+        problem = self._password_problem(password)
+        if problem:
+            return problem
+        if password == user["password"]:
+            return self._error(422, "same_password")
+        user["password"] = password
+        return httpx.Response(200, json=self._user_json(user))
+
+
+@pytest.fixture
+def fake_supabase() -> FakeSupabase:
+    return FakeSupabase()
+
+
 @pytest.fixture(autouse=True)
 def fake_twitchtracker(monkeypatch) -> FakeTwitchTracker:
     """Every test's TwitchTracker: `sync` asks it by default when IGDB is configured, so without this a command-line
@@ -376,13 +616,9 @@ TEST_DATABASE_URL = os.environ.get("GAME_LIBRARIAN_TEST_DATABASE_URL")
 
 
 @pytest.fixture
-def postgres_url(request):
-    """A connection string to a new, empty schema with the app's tables (None when the suite runs on SQLite).
-
-    A test marked local_evaluation always gets SQLite: Gamalytic's and TwitchTracker's figures are kept only in the
-    local SQLite database (Settings.local_evaluation), so their features do not exist with PostgreSQL.
-    """
-    if not TEST_DATABASE_URL or request.node.get_closest_marker("local_evaluation"):
+def postgres_url():
+    """A connection string to a new, empty schema with the app's tables (None when the suite runs on SQLite)."""
+    if not TEST_DATABASE_URL:
         yield None
         return
     from psycopg.conninfo import make_conninfo

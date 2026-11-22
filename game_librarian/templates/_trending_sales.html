@@ -1,8 +1,7 @@
 {% from "_platforms.html" import scope_badge %}
 {% from "_trending_macros.html" import thumb, game_link, time_span, reception_plot, reception_table %}
-{# Sales & reception (web._sales_report): does a game stand out among similar releases? Gamalytic's estimates exist only
-   for a browser on the computer that runs the site (web.is_local_request): any other request has no dash.sales, so the
-   doughnut and every word and figure about Gamalytic are not in the page at all, and the reception chart leads. The
+{# Sales & reception (web._sales_report): does a game stand out among similar releases? Gamalytic's estimated copies
+   sold lead once they are collected (dash.sales); before that, the reception chart leads and the page says why. The
    doughnut's games link to their dots on the reception chart (app.js); the chart's view switch changes only the
    chart. #}
 
@@ -58,8 +57,8 @@
        a pointer target only; the list is the keyboard path, and every number is in its table. #}
     <figure class="chart-card sales-chart" id="sales" aria-labelledby="chart-sales" data-sales-ring>
       <figcaption>
-        <div class="trend-head"><h3 class="chart-title" id="chart-sales">Estimated Steam copies sold</h3>{{ scope_badge("steam") }}<span class="scope-badge is-local">Local evaluation only</span></div>
-        <p class="chart-scope"><strong>Steam · cumulative estimates</strong>, all time up to their collection: the released paid games on the Trending page{% if ring %}, {{ ring.games }} {{ "game" if ring.games == 1 else "games" }}, as shares of their total{% endif %}. Gamalytic’s model estimates, not sales reported by publishers. Shown on this computer only: Gamalytic’s terms do not allow sharing them.</p>
+        <div class="trend-head"><h3 class="chart-title" id="chart-sales">Estimated Steam copies sold</h3>{{ scope_badge("steam") }}</div>
+        <p class="chart-scope"><strong>Steam · cumulative estimates</strong>, all time up to their collection: the released paid games on the Trending page{% if ring %}, {{ ring.games }} {{ "game" if ring.games == 1 else "games" }}, as shares of their total{% endif %}. Gamalytic’s model estimates, not sales reported by publishers.</p>
       </figcaption>
       {% if sales.last_run and sales.last_run.status in ("failed", "partial") and sales.last_problem %}
       <p class="data-note">The last collection ({{ sales.last_run.started_at|datetime }}) {{ "failed" if sales.last_run.status == "failed" else "was partial" }}: {{ sales.last_problem }}{% if sales.summary.last %} The estimates collected before are shown.{% endif %}</p>
@@ -172,7 +171,7 @@
     <summary>Sources and methodology</summary>
     <div class="method-body">
       {% if dash.sales %}{% set sales = dash.sales %}
-      <h3 class="chart-title">Estimated Steam copies sold (this computer only)</h3>
+      <h3 class="chart-title">Estimated Steam copies sold</h3>
       <ul class="method-notes">
         <li><strong>What a value is:</strong> Gamalytic’s estimate of copies bought directly on Steam, all time up to the collection. Not sales reported by publishers, other platforms or stores, key activations, or revenue.</li>
         <li><strong>How it is made:</strong> a model built on Steam’s top-seller rank, concurrent players, a regression on release year, review score and playtime, and publicly disclosed sales. Gamalytic reports 77% of single-game estimates within 30% of actual sales and 98% within 50%; smaller and free-to-play games are less accurate (<a class="text-link" href="{{ sales.about_url }}" target="_blank" rel="noopener">Gamalytic’s method<span class="visually-hidden"> (opens in a new tab)</span></a>).</li>
@@ -180,7 +179,7 @@
         <li><strong>The doughnut:</strong> the {{ sales.named }} largest estimates each have a slice, largest first and clockwise from the top, with the game’s Steam cover art cropped into it (a plain blue slice when there is none); every other game of the cohort is in “Other tracked games”. A slice’s angle is its share of the total, and every slice has the same ring thickness. The middle gives the total of every estimate of the cohort and its number of games; the slices add up to it, as the table shows. Shares are rounded so that they add up to 100.0%.</li>
         <li><strong>Times:</strong> “collected” is when this site asked; “Gamalytic’s data dated” is the cacheTimestamp in Gamalytic’s answer, which its documentation does not describe. Each game is asked again after {{ sales.max_age_days }} days and older collections are kept ({{ sales.summary.collections }} so far), so the total can add estimates collected on different days of that week. No change is shown: Gamalytic revises its model, so a difference between two collections is not a number of copies sold in between.</li>
         <li><strong>No revenue:</strong> Gamalytic’s free answers leave revenue out, and copies times today’s price would be wrong (discounts, regional prices, bundles).</li>
-        <li><strong>Terms:</strong> Gamalytic’s <a class="text-link" href="{{ sales.terms_url }}" target="_blank" rel="noopener">Terms of Service<span class="visually-hidden"> (opens in a new tab)</span></a> (23 Mar 2026) license its data for internal use and prohibit redistribution without written approval, so only a browser on this computer gets this chart. Do not publish it or screenshots of it.</li>
+        <li><strong>Source:</strong> the free API of <a class="text-link" href="https://gamalytic.com/" target="_blank" rel="noopener">Gamalytic<span class="visually-hidden"> (opens in a new tab)</span></a>.</li>
       </ul>
       {% endif %}
       <h3 class="chart-title">Strong Steam reception</h3>
@@ -210,7 +209,7 @@
         </div>
       </details>
       {% endif %}
-      <p class="chart-sub">Data from Steam (store release dates, genres and review summaries, saved by <code>python -m game_librarian sync</code>){% if dash.sales %} and Gamalytic’s free API (on this computer only){% endif %}. Hand-picked (curated) games: none; each chart is ordered by its own measure.</p>
+      <p class="chart-sub">Data from Steam (store release dates, genres and review summaries, saved by <code>python -m game_librarian sync</code>){% if dash.sales %} and Gamalytic’s free API{% endif %}. Hand-picked (curated) games: none; each chart is ordered by its own measure.</p>
     </div>
   </details>
 </section>

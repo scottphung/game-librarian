@@ -1,4 +1,4 @@
-"""Estimated Steam copies sold, from Gamalytic's free API, for local evaluation only.
+"""Estimated Steam copies sold, from Gamalytic's free API.
 
 Endpoint (https://api.gamalytic.com/reference/, read 2026-11-20): GET /steam-games/list returns "a list of up to
 1000 games with some basic information", filtered by `appids` (comma-separated Steam app ids) and trimmed by
@@ -23,12 +23,13 @@ single-game estimates within 30 % of actual sales and 98 % within 50 %; smaller 
 less accurate. A value is therefore an estimate of Steam purchases to date: not publisher-reported sales, not other
 platforms or stores, not key activations, and not revenue.
 
-Terms (https://gamalytic.com/tos, dated March 23, 2026, read 2026-11-20): the services are licensed "solely for your
-internal business purpose"; "You shall not ... distribute, disclose, or make accessible to any third party, or allow
-any third party to analyze or access the information provided"; "Resale or redistribution of data provided by
-Gamalytic.com is strictly prohibited without explicit prior written approval." Nothing Gamalytic publishes allows
-showing its data to the public. So the estimates stay in the local database, the website shows them only to a
-browser on the computer that runs it (web.is_local_request), and the Power BI export leaves them out.
+Terms (https://gamalytic.com/tos, dated March 23, 2026, read 2026-11-20 and again, unchanged, 2026-11-22): the services
+are licensed "solely for your internal business purpose"; "You shall not ... distribute, disclose, or make accessible to
+any third party, or allow any third party to analyze or access the information provided"; "Resale or redistribution of
+data provided by Gamalytic.com is strictly prohibited without explicit prior written approval." Nothing Gamalytic
+publishes allows showing its data to the public. Since 0.21 the website shows the estimates to every visitor, by the
+site owner's decision of 2026-11-22; the terms above still say what they say, and README.md ("Data sources and
+terms") records it. The Power BI export leaves the estimates out.
 
 Limits kept here: APPIDS_PER_REQUEST app ids per request (3 requests for 238 games), at most one request a second,
 at most REQUESTS_PER_DAY requests in any 24 hours (counted from this site's own runs in source_runs), each game asked

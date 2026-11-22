@@ -14,20 +14,18 @@ Uses the fourteen synced catalog games of test_web.py (app ids 101-114). All nam
 import re
 from datetime import date, timedelta
 
-import pytest
 from fastapi.testclient import TestClient
 
-from game_librarian import dashboard
+from game_librarian import dashboard, store
 from game_librarian.catalog import CatalogGame
 from game_librarian.config import PACKAGE_DIR
 from game_librarian.web import create_app
 from tests.test_trending_cross_platform import RELEASE_DAY, at, refresh, site, world  # noqa: F401
 from tests.test_web import games, text_of  # noqa: F401
-from tests.test_web_discovery import save_players, set_column
+from tests.test_web_discovery import save_players, set_column, with_conn
 from tests.test_web_upcoming import NOW, TODAY, NoTwitch, configured, save_upcoming
 
 APP_JS = (PACKAGE_DIR / "static" / "app.js").read_text(encoding="utf-8")
-LOCAL = ("127.0.0.1", 50000)  # a browser on the computer that runs the site: the only one Gamalytic's chart is for
 
 
 def item(key, name="Game", av=None, *, steam_verified=False, **facts) -> dict:
@@ -148,7 +146,7 @@ def test_old_dashboard_addresses_keep_working(games, settings):
 def test_the_long_feed_of_earlier_versions_is_gone_from_every_page(games, settings):
     save_upcoming(settings)
     save_players(settings, {114: 4_000, 113: 1_500}, moment=NOW - timedelta(minutes=50))
-    client = dashboard_client(settings, client=LOCAL)
+    client = dashboard_client(settings)
     for report in ("sales", "upcoming", "momentum"):
         page = client.get("/dashboard", params={"report": report}).text
         words = text_of(page)
@@ -300,20 +298,21 @@ def genre_world(settings) -> None:
     set_column(settings, "review_positive", {114: 0})
 
 
-@pytest.mark.local_evaluation
-def test_the_public_page_leads_with_reception_and_the_local_page_with_estimated_sales(games, settings):
+def test_reception_leads_until_estimates_are_collected_then_the_estimated_sales_do(games, settings):
     strong_reception(settings)
     save_players(settings, {114: 4_000, 113: 1_500}, moment=NOW - timedelta(minutes=50))
-    public = dashboard_client(settings).get("/dashboard").text
-    charts = canvas(public)
-    assert 'id="sales"' not in public and "Gamalytic" not in public  # never served to another computer
+    before = dashboard_client(settings).get("/dashboard").text
+    charts = canvas(before)
+    assert 'id="sales"' not in before  # Gamalytic was never asked: no empty chart
     assert re.findall(r'<figure class="[^"]*" id="([^"]+)"', charts) == ["reception"]  # one chart, each game once
     assert "No sales figures: Valve publishes no unit sales or revenue per game, so this page compares Steam " \
-           "reception." in text_of(public)
-    local = dashboard_client(settings, client=LOCAL).get("/dashboard").text
-    assert local.index('id="sales"') < local.index('id="reception"')  # Estimated Steam copies sold first
-    assert "Steam · cumulative estimates" in text_of(chart(local, "chart-sales"))
-    assert "No sales figures" not in text_of(local)
+           "reception." in text_of(before)
+    with_conn(settings, lambda conn: store.save_sales_estimates(
+        conn, {114: 2_500_000}, source="Gamalytic", collected_at="2026-11-09T11:00:00+00:00", source_cached_at=None))
+    after = dashboard_client(settings).get("/dashboard").text
+    assert after.index('id="sales"') < after.index('id="reception"')  # Estimated Steam copies sold first
+    assert "Steam · cumulative estimates" in text_of(chart(after, "chart-sales"))
+    assert "No sales figures" not in text_of(after)
 
 
 def test_every_game_is_one_dot_with_its_count_share_and_comparison_with_similar_releases(games, settings):

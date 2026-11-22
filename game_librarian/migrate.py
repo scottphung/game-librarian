@@ -4,11 +4,8 @@ What it copies: every catalog table of store.SCHEMA, row for row and column for 
 relationship (a game's tags, prices, reviews and snapshots; an IGDB game's date changes; an article's scores) stays as
 it was. Run history and the sync's bookmarks come along, so the hosted sync continues where the local one stopped.
 
-What it never copies:
-* the local-evaluation tables, sales_estimates (Gamalytic) and twitchtracker_summaries (TwitchTracker): their terms
-  allow no sharing, so their figures stay in the local SQLite file only (Settings.local_evaluation);
-* the account tables (store.ACCOUNT_TABLES): they belong to the hosted site, and nothing here reads, empties or
-  replaces them.
+What it never copies: the account tables (store.ACCOUNT_TABLES). They belong to the hosted site, and nothing here
+reads, empties or replaces them.
 
 How, in order:
 1. The SQLite file is opened read-only, in one read transaction: a consistent snapshot even while a sync is writing,
@@ -17,13 +14,20 @@ How, in order:
    table and column of this version exists, and that every value has its column's type. Any problem stops the run
    before anything is written.
 3. The PostgreSQL tables are created or upgraded, as init-postgres does.
-4. A target that already holds catalog rows is refused, unless `replace`: then the catalog tables (and the empty
-   local-evaluation tables) are emptied first. That discards the hosted catalog's own history since the last copy.
+4. A target that already holds catalog rows is refused, unless `replace`: then the catalog tables are emptied first.
+   That discards the hosted catalog's own history since the last copy.
 5. Each table is loaded with COPY; each id sequence then continues after the highest copied id.
 6. Every copied table is compared with its source: the same number of rows and the same checksum of all their values.
 7. Twitch rows older than 24 hours are then deleted (Twitch allows caching for 24 hours), as the site itself does.
 8. All of it is one transaction, committed only when every comparison matched; any failure leaves the target as it
    was before the run.
+
+Adding the tables that 0.20 left out (`only`, the command's --only): version 0.20 copied neither sales_estimates
+(Gamalytic) nor twitchtracker_summaries (TwitchTracker). For a database it copied, `only` adds the rows of these tables
+that PostgreSQL lacks, told apart by each table's key (ADDABLE_TABLES), after the same checks of the SQLite file. It
+never empties, replaces or changes a row PostgreSQL has: such rows are newer, from the hosted refresh. An estimate of a
+game that the PostgreSQL catalog does not have is left out. The added rows are read back and compared with their source
+(count and checksum), all in one transaction; a second run adds nothing. It needs only the rights to read and add rows.
 """
 
 from __future__ import annotations
@@ -38,8 +42,8 @@ from typing import Callable
 from . import store
 from .database import PostgresDatabase, connect_postgres
 
-# Kept only in the local SQLite file: Gamalytic's and TwitchTracker's terms allow no sharing of their figures.
-LOCAL_EVALUATION_TABLES = ("sales_estimates", "twitchtracker_summaries")
+# The tables that version 0.20 did not copy, each with the key that tells its rows apart (`only` adds their rows).
+ADDABLE_TABLES = {"sales_estimates": ("appid", "collected_at"), "twitchtracker_summaries": ("category_id",)}
 TWITCH_KEEP_FOR = timedelta(hours=24)  # twitch.KEEP_FOR: Twitch allows caching its data for 24 hours
 # The storage classes (SQLite's typeof) each declared column type may hold; NULL is allowed everywhere.
 ALLOWED_STORAGE = {"INTEGER": ("integer",), "REAL": ("real", "integer"), "TEXT": ("text",)}
@@ -60,6 +64,17 @@ class TableCopy:
 
 
 @dataclass
+class TableAddition:
+    """One table's result with `only`: the rows added (or, when checking, that would be), the rows PostgreSQL already
+    had (kept as they are), and the rows left out because PostgreSQL's catalog lacks their game."""
+
+    table: str
+    added: int = 0
+    present: int = 0
+    skipped: int = 0
+
+
+@dataclass
 class MigrationReport:
     """What a run found and did, for the command's output."""
 
@@ -68,7 +83,7 @@ class MigrationReport:
     checked_only: bool = False
     replaced: bool = False
     copied: list[TableCopy] = field(default_factory=list)
-    skipped: dict[str, int] = field(default_factory=dict)  # table -> source rows left out (local evaluation)
+    added: list[TableAddition] = field(default_factory=list)  # with `only`
     purged_twitch_rows: int = 0
     warnings: list[str] = field(default_factory=list)
     target_rows: dict[str, int] = field(default_factory=dict)  # the target's catalog rows before the run
@@ -80,8 +95,7 @@ class MigrationReport:
 
 def migrated_tables() -> list[str]:
     """The tables that are copied, parents before the tables that refer to them (SCHEMA's order)."""
-    excluded = set(LOCAL_EVALUATION_TABLES) | set(store.ACCOUNT_TABLES)
-    return [table for table in store.schema_columns() if table not in excluded]
+    return [table for table in store.schema_columns() if table not in store.ACCOUNT_TABLES]
 
 
 def _open_source(path: Path) -> sqlite3.Connection:
@@ -141,23 +155,31 @@ def _checksum(rows) -> str:
 
 
 def migrate(source_path: Path, target: PostgresDatabase, *, replace: bool = False, check_only: bool = False,
-            log: Callable[[str], None] = print,
+            only: tuple[str, ...] = (), log: Callable[[str], None] = print,
             now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> MigrationReport:
-    """Copy the SQLite catalog at `source_path` into `target`, as the module docstring describes.
+    """Copy the SQLite catalog at `source_path` into `target`, as the module docstring describes; with `only` (tables
+    of ADDABLE_TABLES), add just those tables' missing rows.
 
     `check_only` runs the checks (source and target) and writes nothing. Raises MigrationError when the copy cannot
     run, or when a comparison fails after loading, in which case the transaction is rolled back.
     """
+    unknown = [table for table in only if table not in ADDABLE_TABLES]
+    if unknown:
+        raise MigrationError(f"Only {' and '.join(ADDABLE_TABLES)} can be added on their own, not "
+                             f"{', '.join(unknown)}.")
+    if only and replace:
+        raise MigrationError("Adding tables (--only) never empties a table, so it cannot be combined with --replace.")
     report = MigrationReport(source=str(source_path), target=target.describe(), checked_only=check_only,
                              replaced=replace)
     source = _open_source(source_path)
     try:
         _check_source(source, report)
-        for table in LOCAL_EVALUATION_TABLES:
-            report.skipped[table] = source.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         conn = connect_postgres(target)
         try:
-            _run(source, conn, report, replace=replace, check_only=check_only, log=log, now=now)
+            if only:
+                _add(source, conn, report, tables=only, check_only=check_only, log=log)
+            else:
+                _run(source, conn, report, replace=replace, check_only=check_only, log=log, now=now)
         finally:
             conn.close()
     finally:
@@ -169,8 +191,8 @@ def _target_rows(conn) -> dict[str, int]:
     """The rows of each catalog table in the target; a table that does not exist yet counts as empty."""
     existing = {row["table_name"] for row in conn.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()")}
-    tables = [table for table in (*migrated_tables(), *LOCAL_EVALUATION_TABLES) if table in existing]
-    return {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tables}
+    return {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in migrated_tables() if table in existing}
 
 
 def _run(source: sqlite3.Connection, conn, report: MigrationReport, *, replace: bool, check_only: bool,
@@ -192,8 +214,7 @@ def _run(source: sqlite3.Connection, conn, report: MigrationReport, *, replace: 
     with conn:
         store.create_postgres_schema(conn)
         if replace:
-            # The local-evaluation tables are emptied too: they refer to games, and never belong in this database.
-            conn.execute(f"TRUNCATE TABLE {', '.join((*tables, *LOCAL_EVALUATION_TABLES))}")
+            conn.execute(f"TRUNCATE TABLE {', '.join(tables)}")
         for table in tables:
             columns = store.schema_columns()[table]
             rows = source.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall()
@@ -217,3 +238,44 @@ def _run(source: sqlite3.Connection, conn, report: MigrationReport, *, replace: 
         older_than = (now() - TWITCH_KEEP_FOR).isoformat(timespec="seconds")
         report.purged_twitch_rows = (store.purge_twitch_cache(conn, older_than)
                                      + store.purge_twitch_top_games(conn, older_than))
+
+
+def _add(source: sqlite3.Connection, conn, report: MigrationReport, *, tables: tuple[str, ...], check_only: bool,
+         log: Callable[[str], None]) -> None:
+    """`only`: add the rows of `tables` that PostgreSQL lacks, by each table's key, in one transaction (the module
+    docstring's last paragraph). Rows PostgreSQL has are never changed; the added ones are read back and compared."""
+    missing = store.missing_postgres_schema(conn)
+    if missing:
+        raise MigrationError(f"The PostgreSQL database lacks {', '.join(missing[:6])}. Run init-postgres first (with "
+                             "the database owner's role). Nothing was written.")
+    with conn:
+        games = {row[0] for row in conn.execute("SELECT appid FROM games")}
+        for table in tables:
+            columns = store.schema_columns()[table]
+            positions = [columns.index(name) for name in ADDABLE_TABLES[table]]
+
+            def key_of(row) -> tuple:
+                return tuple(row[position] for position in positions)
+
+            have = {tuple(row) for row in conn.execute(f"SELECT {', '.join(ADDABLE_TABLES[table])} FROM {table}")}
+            item, rows = TableAddition(table), []
+            for row in source.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall():
+                if key_of(row) in have:
+                    item.present += 1
+                elif "appid" in columns and row[columns.index("appid")] not in games:  # it refers to games(appid)
+                    item.skipped += 1
+                else:
+                    rows.append(row)
+            item.added = len(rows)
+            report.added.append(item)
+            log(f"  {table}: {item.added} rows {'to add' if check_only else 'added'}, {item.present} already there, "
+                f"{item.skipped} left out")
+            if check_only or not rows:
+                continue
+            conn.copy_rows(table, columns, rows)
+            wanted = {key_of(row) for row in rows}
+            copied = [row for row in conn.execute(f"SELECT {', '.join(columns)} FROM {table}").fetchall()
+                      if key_of(row) in wanted]
+            if len(copied) != len(rows) or _checksum(copied) != _checksum(rows):
+                raise MigrationError(f"{table}: the added rows differ from the SQLite rows. The transaction was rolled "
+                                     "back; nothing was written.")

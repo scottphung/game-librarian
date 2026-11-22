@@ -98,7 +98,7 @@ def test_every_catalog_row_and_relationship_is_copied_exactly_and_the_sqlite_fil
     report = migrate.migrate(source, settings.database, now=lambda: NOW, log=lambda message: None)
     assert digest(source) == before  # opened read-only
     assert report.ok and {item.table for item in report.copied} == set(migrate.migrated_tables())
-    assert report.skipped == {"sales_estimates": 1, "twitchtracker_summaries": 1}
+    assert {"sales_estimates", "twitchtracker_summaries"} <= set(migrate.migrated_tables())  # since 0.21
     assert report.purged_twitch_rows == 2  # the old live answer and the old top list
     local = sqlite3.connect(source)
     target = store.initialize(settings.database)
@@ -108,7 +108,7 @@ def test_every_catalog_row_and_relationship_is_copied_exactly_and_the_sqlite_fil
                 assert rows(target, table) == rows(local, table), table
         assert [row[0] for row in target.execute("SELECT game_key FROM twitch_live")] == ["570"]
         assert target.execute("SELECT COUNT(*) FROM twitch_top_games").fetchone()[0] == 0
-        for table in ("sales_estimates", "twitchtracker_summaries", "accounts", "wishlist_items"):
+        for table in ("accounts", "wishlist_items"):  # never copied: they belong to the hosted site
             assert target.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0, table
         assert target.execute("SELECT text FROM review_excerpts").fetchone()[0] == \
             "Line one\nLine\ttwo \\ back\\slash 100% ✓"
@@ -186,7 +186,7 @@ def test_the_command_copies_reports_and_refuses_without_a_postgresql_database(se
     assert cli.main(["migrate-to-postgres", "--from", str(source)]) == 0
     output = capsys.readouterr().out
     assert "every table's row count and checksum match the SQLite file" in output
-    assert "Not copied: sales_estimates (1 rows), a local evaluation" in output
+    assert "Not copied" not in output
     assert "The SQLite file was only read; it is unchanged." in output
     assert cli.main(["migrate-to-postgres", "--from", str(source)]) == 1
     assert "--replace" in capsys.readouterr().err
@@ -194,3 +194,66 @@ def test_the_command_copies_reports_and_refuses_without_a_postgresql_database(se
     monkeypatch.setattr(cli, "load_settings", lambda: sqlite_only)
     assert cli.main(["migrate-to-postgres", "--from", str(source)]) == 1
     assert "GAME_LIBRARIAN_DATABASE_URL" in capsys.readouterr().err
+
+
+def test_only_adds_the_tables_that_0_20_left_out_and_keeps_every_row_postgresql_has(settings, source, monkeypatch,
+                                                                                    capsys):
+    """A database that 0.20 copied has the catalog but neither table; since then the hosted refresh may have added rows
+    of its own. --only adds the SQLite rows that PostgreSQL lacks, by each table's key, and changes nothing else."""
+    tables = ("sales_estimates", "twitchtracker_summaries")
+    migrate.migrate(source, settings.database, now=lambda: NOW, log=lambda message: None)
+    conn = store.initialize(settings.database)
+    try:  # as 0.20 left it, then the hosted refresh's own, newer rows
+        conn.execute("DELETE FROM sales_estimates")
+        conn.execute("DELETE FROM twitchtracker_summaries")
+        store.save_sales_estimates(conn, {570: 2_000}, source="Gamalytic", collected_at=NOW.isoformat(),
+                                   source_cached_at=None)
+        conn.execute("INSERT INTO twitchtracker_summaries (category_id, category_name, igdb_id, match_source, rank, "
+                     "avg_viewers, status) VALUES ('29595', 'Dota 2', 2963, 'twitch+igdb', 8, 50000, 'ok')")
+        hosted_rows = {table: rows(conn, table) for table in tables}
+    finally:
+        conn.close()
+    local = sqlite3.connect(source)
+    with local:  # an older collection (history), and an estimate of a game the hosted catalog does not have
+        local.execute("INSERT INTO sales_estimates (appid, collected_at, source, copies_sold) "
+                      "VALUES (570, ?, 'Gamalytic', 900)", (OLD,))
+        local.execute("INSERT INTO games (appid, curated_title) VALUES (999, 'Only Here')")
+        local.execute("INSERT INTO sales_estimates (appid, collected_at, source, copies_sold) "
+                      "VALUES (999, ?, 'Gamalytic', 5)", (RECENT,))
+    local.close()
+    before = digest(source)
+
+    checked = migrate.migrate(source, settings.database, only=tables, check_only=True, log=lambda message: None)
+    assert [(item.table, item.added, item.present, item.skipped) for item in checked.added] == [
+        ("sales_estimates", 2, 0, 1), ("twitchtracker_summaries", 0, 1, 0)]
+    conn = store.initialize(settings.database)
+    try:
+        assert {table: rows(conn, table) for table in tables} == hosted_rows  # the check wrote nothing
+    finally:
+        conn.close()
+    added = migrate.migrate(source, settings.database, only=tables, log=lambda message: None)
+    assert [(item.added, item.present, item.skipped) for item in added.added] == [(2, 0, 1), (0, 1, 0)]
+    conn = store.initialize(settings.database)
+    local = sqlite3.connect(source)
+    try:
+        estimates = rows(conn, "sales_estimates")
+        assert [(row[0], row[1], row[3]) for row in estimates] == [(570, OLD, 900), (570, RECENT, 1000),
+                                                                    (570, NOW.isoformat(), 2_000)]
+        assert rows(conn, "twitchtracker_summaries") == hosted_rows["twitchtracker_summaries"]  # newer: kept
+        assert rows(conn, "games") != rows(local, "games")  # the catalog is not touched: game 999 is not added
+    finally:
+        local.close()
+        conn.close()
+    again = migrate.migrate(source, settings.database, only=tables, log=lambda message: None)
+    assert [(item.added, item.present, item.skipped) for item in again.added] == [(0, 2, 1), (0, 1, 0)]
+    assert digest(source) == before  # read only
+    with pytest.raises(migrate.MigrationError, match="can be added on their own"):
+        migrate.migrate(source, settings.database, only=("games",), log=lambda message: None)
+    with pytest.raises(migrate.MigrationError, match="cannot be combined with --replace"):
+        migrate.migrate(source, settings.database, only=tables, replace=True, log=lambda message: None)
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    assert cli.main(["migrate-to-postgres", "--from", str(source), "--only", "sales_estimates"]) == 0
+    output = capsys.readouterr().out
+    assert ("sales_estimates: 0 row(s) added; 2 already in PostgreSQL (kept as they are); 1 left out (their game is "
+            "not in the PostgreSQL catalog).") in output
+    assert "Every added row matches the SQLite file" in output and "The SQLite file was only read" in output
