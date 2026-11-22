@@ -1,6 +1,7 @@
 """Report export: one row per game, bridge tables for tags and awards, no secrets, a repointable model."""
 
 import csv
+import os
 import re
 from dataclasses import replace
 from datetime import date, datetime, timezone
@@ -217,7 +218,7 @@ def test_point_report_at_sets_the_data_folder_parameter_once(tmp_path):
     data_dir = tmp_path / "my data"
     assert point_report_at(data_dir, parameters) is True
     text = parameters.read_bytes().decode("utf-8")
-    assert f'expression DataFolder = "{data_dir.resolve()}\\" meta [IsParameterQuery=true' in text
+    assert f'expression DataFolder = "{data_dir.resolve()}{os.sep}" meta [IsParameterQuery=true' in text
     assert "\r\n\tlineageTag: 1\r\n" in text  # the rest of the file, line endings included, is untouched
     assert point_report_at(data_dir, parameters) is False
     parameters.write_text("expression Other = 1", encoding="utf-8")
